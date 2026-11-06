@@ -1,0 +1,23 @@
+# Demo config. Scans the bundled vulnerable example app (offline, read-only).
+project: demo vulnerable app
+projectDir: ./vulnerable-app/dist
+
+scope:
+  allowedHosts:
+    - staging.example.com
+  allowActiveTesting: false
+
+checks: []
+
+options:
+  authz-matrix:
+    resources:
+      - name: project
+        path: /api/projects/:id
+        methods: [GET]
+      - name: render
+        path: /api/renders/:id
+        methods: [GET]
+    accounts:
+      a: { token: "" }
+      b: { owns: { project: ["proj_b_1"], render: ["rnd_b_1"] } }

@@ -1,0 +1,24 @@
+// The check registry. Adding a check means importing it here. Keeping this list
+// explicit (rather than auto-discovering files) means a published build never
+// runs a check the maintainers did not review.
+
+import type { Check } from "./types.js";
+import { exposedSecrets } from "../checks/exposed-secrets.js";
+import { authzMatrix } from "../checks/authz-matrix.js";
+
+export const REGISTRY: Check[] = [exposedSecrets, authzMatrix];
+
+export function resolveChecks(names: string[]): Check[] {
+  if (names.length === 0) {
+    // Default: every read-only check. Active checks must be named explicitly.
+    return REGISTRY.filter((c) => c.readOnly);
+  }
+  const byName = new Map(REGISTRY.map((c) => [c.name, c]));
+  const out: Check[] = [];
+  for (const n of names) {
+    const c = byName.get(n);
+    if (!c) throw new Error(`Unknown check: "${n}". Run "bastion list" to see available checks.`);
+    out.push(c);
+  }
+  return out;
+}
