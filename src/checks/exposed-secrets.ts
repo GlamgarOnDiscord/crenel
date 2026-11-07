@@ -7,9 +7,10 @@
 // service-role JWT, private API key) pulled into client code and bundled into
 // dist/, where anyone can read it with view-source.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { walkFiles, extOf } from "../core/walk.js";
 
 interface SecretPattern {
   id: string;
@@ -48,27 +49,8 @@ const PATTERNS: SecretPattern[] = [
 // Only scan text-like files, and skip anything large or binary.
 const TEXT_EXT = new Set([".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx", ".json", ".html", ".css", ".map", ".txt", ".env"]);
 const MAX_BYTES = 8 * 1024 * 1024;
-const SKIP_DIRS = new Set(["node_modules", ".git"]);
 
-function* walk(dir: string): Generator<string> {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      yield* walk(full);
-    } else if (e.isFile()) {
-      const dot = e.name.lastIndexOf(".");
-      const ext = dot >= 0 ? e.name.slice(dot) : "";
-      if (TEXT_EXT.has(ext)) yield full;
-    }
-  }
-}
+const walk = (dir: string) => walkFiles(dir, { accept: (name) => TEXT_EXT.has(extOf(name)) });
 
 function redact(secret: string): string {
   if (secret.length <= 10) return secret.slice(0, 2) + "***";

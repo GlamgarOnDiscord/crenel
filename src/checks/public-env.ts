@@ -6,9 +6,10 @@
 // committed-env (which flags the file): here the prefix+name combination is the
 // signal. Deterministic and offline.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, basename } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { walkFiles, extOf } from "../core/walk.js";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const SCAN_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".env", ".sh", ".yml", ".yaml"]);
@@ -20,23 +21,8 @@ const SECRETISH = "(?:SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE[_-]?KEY|API[_-]?KEY|A
 // .env, source and shell files.
 const RE = new RegExp(`\\b((?:${PUBLIC_PREFIXES.join("|")})[A-Z0-9_]*${SECRETISH}[A-Z0-9_]*)\\b`, "g");
 
-function* walk(dir: string, depth = 0): Generator<string> {
-  if (depth > 10) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      yield* walk(full, depth + 1);
-    } else if (e.isFile()) {
-      const b = basename(e.name);
-      const dot = b.lastIndexOf(".");
-      const ext = dot >= 0 ? b.slice(dot) : "";
-      if (SCAN_EXT.has(ext) || b.startsWith(".env")) yield full;
-    }
-  }
-}
+const walk = (dir: string) =>
+  walkFiles(dir, { skipDirs: SKIP_DIRS, accept: (name) => SCAN_EXT.has(extOf(name)) || name.startsWith(".env") });
 
 export const publicEnv: Check = {
   name: "public-env",

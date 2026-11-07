@@ -5,27 +5,14 @@
 // sourceMappingURL comments that point at a shipped map. Leads, since some teams
 // ship maps on purpose for error tracking.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, basename } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { relative, basename } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { walkFiles } from "../core/walk.js";
 
-const SKIP_DIRS = new Set(["node_modules", ".git"]);
 const CODE_EXT = new Set([".js", ".mjs", ".cjs", ".css"]);
 
-function* walk(dir: string, depth = 0): Generator<string> {
-  if (depth > 10) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      yield* walk(full, depth + 1);
-    } else if (e.isFile()) {
-      yield full;
-    }
-  }
-}
+const walk = (dir: string) => walkFiles(dir); // default skip (node_modules, .git)
 
 export const sourcemaps: Check = {
   name: "sourcemaps",

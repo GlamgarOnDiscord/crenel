@@ -5,9 +5,10 @@
 // contents. Deterministic and offline. A lead: the fix is to gitignore it and
 // rotate anything it held.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { walkFiles } from "../core/walk.js";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 
@@ -21,20 +22,7 @@ function isEnvFile(name: string): boolean {
   return !SAFE_SUFFIXES.some((s) => lower.endsWith(s)) && !lower.includes("example") && !lower.includes("sample") && !lower.includes("template");
 }
 
-function* walk(dir: string, depth = 0): Generator<string> {
-  if (depth > 8) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      yield* walk(full, depth + 1);
-    } else if (e.isFile() && isEnvFile(e.name)) {
-      yield full;
-    }
-  }
-}
+const walk = (dir: string) => walkFiles(dir, { skipDirs: SKIP_DIRS, accept: (name) => isEnvFile(name) });
 
 // Count non-empty, non-comment KEY=VALUE lines that actually assign a value.
 function assignedVars(text: string): number {
