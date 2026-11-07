@@ -10,6 +10,20 @@ Bastion exists because new SaaS, and especially apps built fast with AI, keep sh
 
 > Status: early. The core, the scope guard and two checks are real and run today. More checks are planned (see the roadmap).
 
+## The console
+
+![Crenel console — overview](docs/assets/console-overview.png)
+
+Every finding opens to its proof and a one-click regression test. The console is
+read-only over the engine's output; it renders the same model the CLI produces.
+
+<table>
+<tr>
+<td><img src="docs/assets/console-finding.png" alt="Finding detail with replayable proof" /></td>
+<td><img src="docs/assets/console-mobile.png" alt="Responsive console on mobile" /></td>
+</tr>
+</table>
+
 ## What makes it different
 
 Three ideas from the research on AI security agents are baked into the design:
