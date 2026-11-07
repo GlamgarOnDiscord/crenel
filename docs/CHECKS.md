@@ -34,6 +34,8 @@ empty list runs every read-only check.
 | subdomain-takeover | Declared host with a CNAME to a hosting service where nothing is deployed | yes (CNAME + service's not-found page) | DNS + one GET per declared host |
 | email-dns | Missing or permissive SPF and DMARC on the mail domain | yes (DNS records) | DNS only |
 | transport | Plain HTTP served instead of redirected, certificate close to expiry | yes | one GET over http://, one TLS handshake |
+| git-history | Keys removed from the code but still in past commits | yes (detector match on an added line) | no (local git log) |
+| storage-buckets | S3, R2, GCS buckets the app points at, listable by anyone | yes (anonymous listing, declared host) | static; one GET per declared bucket |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -308,3 +310,18 @@ enforcing DMARC, a forged password-reset mail can carry your exact From address.
 On an https staging URL: GET over plain `http://` (redirect read, not followed)
 must not serve the page, and a TLS handshake reads the certificate's expiry
 (under 21 days is reported, under 7 is high).
+
+## git-history
+
+Reads the lines added in the repository's history (`git log --all -p`, last 500
+commits, `options.git-history.maxCommits`) with the `exposed-secrets`
+detectors, and reports keys that are no longer in the current tree: deleting a
+key from the code does not remove it from clones, so it must be rotated. The key
+itself never appears in the report.
+
+## storage-buckets
+
+Lists the S3, R2 and Google Cloud Storage bucket URLs found in the scanned code
+(leads). When a bucket's host is in `scope.allowedHosts`, one anonymous GET on
+its listing endpoint (first key only) proves whether anyone can enumerate its
+files.

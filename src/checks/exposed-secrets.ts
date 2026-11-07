@@ -13,7 +13,7 @@ import type { Check, CheckContext, Finding } from "../core/types.js";
 import { walkFiles, extOf, relative } from "../core/walk.js";
 import { checkLiveness, verifierHost, type Liveness } from "./key-liveness.js";
 
-interface SecretPattern {
+export interface SecretPattern {
   id: string;
   title: string;
   regex: RegExp;
@@ -52,7 +52,7 @@ export function inFirebaseConfig(content: string, index: number): boolean {
 // generic "looks like a token", to keep false positives near zero. Stripe test
 // keys (sk_test_/rk_test_) are published by design, so they are a low-severity
 // note, not a critical "assume compromised" finding.
-const PATTERNS: SecretPattern[] = [
+export const PATTERNS: SecretPattern[] = [
   { id: "stripe-secret", title: "Stripe secret key (live)", regex: /\bsk_live_[A-Za-z0-9]{16,}/g, severity: "critical", sensitive: true },
   { id: "stripe-secret-test", title: "Stripe test secret key", regex: /\bsk_test_[A-Za-z0-9]{16,}/g, severity: "low", sensitive: false },
   { id: "stripe-restricted", title: "Stripe restricted key (live)", regex: /\brk_live_[A-Za-z0-9]{16,}/g, severity: "high", sensitive: true },

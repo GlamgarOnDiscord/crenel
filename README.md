@@ -12,8 +12,8 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-25-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-201%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Checks](https://img.shields.io/badge/checks-27-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Tests](https://img.shields.io/badge/tests-204%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -52,9 +52,9 @@ pnpm crenel generate-tests     # one regression test per finding
 
 | | Checks |
 | --- | --- |
-| **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `live-bundle` the same on every JS chunk your live site serves · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
+| **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `live-bundle` the same on every JS chunk your live site serves · `git-history` keys deleted from the code but not from the history · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
 | **Authorization** | `authz-matrix` account A reaching account B's objects, anonymous access, proven live on staging |
-| **BaaS** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) |
+| **BaaS & storage** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) · `storage-buckets` S3, R2, GCS buckets anyone can list |
 | **Supply chain** | `dependency-risk` known-malware versions, install hooks · `ci-hardening` · `dockerfile` · `mcp-surface` |
 | **Server code** | `webhook-signature` unverified Stripe, GitHub or Clerk webhooks · `ssrf` fetching a URL from the request |
 | **Deployed site** | `exposed-files` .env, .git, dumps and debug pages your host serves by mistake · `graphql` introspection open to anyone · `open-redirect` login links that bounce anywhere · `next-middleware` CVE-2025-29927 auth bypass · `subdomain-takeover` · `transport` HTTPS and certificate expiry |
