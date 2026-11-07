@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isPrivateIp } from "./net.js";
+import { isPrivateIp, safeFetch } from "./net.js";
+import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
   for (const ip of ["127.0.0.1", "10.0.0.5", "192.168.1.10", "172.16.4.4", "172.31.255.1", "169.254.1.1", "100.64.0.1", "::1", "fe80::1", "fd00::1", "::ffff:127.0.0.1"]) {
@@ -37,4 +38,42 @@ test("public addresses are allowed", () => {
   for (const ip of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
     assert.equal(isPrivateIp(ip), false, `${ip} should be public`);
   }
+});
+
+test("safeFetch returns the body for an allowed host", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_q, s) => { s.writeHead(200); s.end("hello"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    const res = await safeFetch(`http://127.0.0.1:${port}/`, scope);
+    assert.equal(res.status, 200);
+    assert.equal(res.body, "hello");
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
+test("safeFetch refuses a redirect that leaves the allowlist", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_q, s) => { s.writeHead(302, { location: "http://evil.example.com/" }); s.end(); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    await assert.rejects(() => safeFetch(`http://127.0.0.1:${port}/`, scope), /not in allowedHosts|Refused/);
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
+test("safeFetch caps the body", async () => {
+  const http = await import("node:http");
+  const big = "x".repeat(3 * 1024 * 1024); // > 2 MB cap
+  const server = http.createServer((_q, s) => { s.writeHead(200); s.end(big); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    const res = await safeFetch(`http://127.0.0.1:${port}/`, scope);
+    assert.ok(res.truncated, "oversized body is truncated");
+    assert.ok(res.body.length <= 2 * 1024 * 1024);
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
 });
