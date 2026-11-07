@@ -25,7 +25,11 @@ const RULES: HeaderRule[] = [
 /** Pure: given a response's headers, return the security findings. */
 export function analyzeHeaders(headers: Headers, url: string): Finding[] {
   const out: Finding[] = [];
+  const csp = (headers.get("content-security-policy") ?? "").toLowerCase();
   for (const r of RULES) {
+    // frame-ancestors in the CSP is the modern replacement for X-Frame-Options;
+    // do not flag XFO as missing when the CSP already covers framing.
+    if (r.id === "xfo" && csp.includes("frame-ancestors")) continue;
     if (!headers.get(r.header)) {
       out.push({
         id: `headers:${r.id}:${url}`,

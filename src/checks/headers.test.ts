@@ -28,3 +28,14 @@ test("a cookie missing flags is reported", () => {
   assert.equal(found.length, 1);
   assert.match(found[0]!.title, /secure|httponly|samesite/i);
 });
+
+test("CSP frame-ancestors covers framing, so X-Frame-Options is not flagged", () => {
+  const h = new Headers({
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+  });
+  const ids = analyzeHeaders(h, "https://staging.example.com").map((f) => f.id.split(":")[1]);
+  assert.ok(!ids.includes("xfo"), "frame-ancestors should satisfy the framing control");
+});
