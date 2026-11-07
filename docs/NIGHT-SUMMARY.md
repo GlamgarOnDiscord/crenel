@@ -70,3 +70,12 @@ Correctifs marquants:
 Deux points de conception laissés en suivi assumé (notés en roadmap): fenêtre résiduelle de rebinding DNS, et gating baseline « seulement les nouveaux ».
 
 État: 44 tests moteur verts, typecheck et builds propres, demo inchangé, self-scan sans fuite réelle.
+
+## Trois nouveaux checks (07/11, après les revues)
+
+En réponse à l'invitation « aller plus loin », trois checks déterministes, hors ligne, en leads (faible faux positif), testés et dogfoodés (6 -> 9 checks, 44 -> 56 tests):
+- **mcp-surface**: configs d'agents/MCP commitées (surface d'attaque 2026; justifié par la recherche de la nuit). Item de roadmap livré.
+- **dockerfile**: durcissement conteneur (root, image non épinglée, secrets cuits dans une couche, ADD d'URL, curl|sh).
+- **committed-env**: fichiers .env commités (secrets qu'aucun scanner de format de clé ne voit), hors .env.example.
+
+Au-delà de ça, ajouter encore des checks relève de la direction produit (ton choix), tout comme l'oracle authz, l'âge des dépendances et les tests web.
