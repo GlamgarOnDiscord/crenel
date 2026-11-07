@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Check, CircleDashed, Copy, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
 import { Mark, type Mood } from "../brand/Logo.tsx";
-import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { Composer } from "../components/Composer.tsx";
 import { Button, SeverityChip, StateBadge } from "../components/ui.tsx";
-import { EffortGauge } from "../components/EffortControl.tsx";
 import { useToast } from "../components/toast.tsx";
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "../components/ai/conversation.tsx";
 import { Message, MessageAction, MessageActions, MessageContent } from "../components/ai/message.tsx";
@@ -25,13 +23,12 @@ import { ThinkingBar } from "../components/kit/thinking-bar.tsx";
 import { FeedbackBar } from "../components/kit/feedback-bar.tsx";
 import { BorderTrail } from "../components/kit/border-trail.tsx";
 import { TextMorph } from "../components/kit/text-morph.tsx";
-import { SlidingNumber } from "../components/kit/sliding-number.tsx";
 import { Loader } from "../components/kit/loader.tsx";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "../components/kit/steps.tsx";
 import { agentAfterAllow, agentAfterDeny, agentScript, tasks } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
 import type { AgentEvent } from "../lib/types.ts";
-import { CONTEXT_WINDOW, effortOf, modeLabel, modelOf, useWorkspace } from "../lib/workspace.tsx";
+import { CONTEXT_WINDOW, modeLabel, useWorkspace } from "../lib/workspace.tsx";
 
 type Phase = "running" | "waiting" | "idle" | "interrupted";
 type Decision = "once" | "always" | "deny";
@@ -187,8 +184,6 @@ export function Agent() {
   const justProved = lastTool?.kind === "tool" && !!lastTool.findings?.some((f) => f.state === "proven");
   const mood: Mood = phase === "running" || stream ? (justProved ? "found" : "working") : "idle";
   const tokens = 1800 + events.reduce((n, e) => n + (e.kind === "tool" ? 2300 : e.kind === "permission" ? 600 : 420 + ("text" in e ? e.text.length * 3 : 0)), 0);
-  const effort = effortOf(ws.effort);
-  const model = modelOf(ws.model);
   const phaseLabel = phase === "running" || stream ? "travaille" : phase === "waiting" ? "attend votre accord" : phase === "interrupted" ? "interrompu" : "prêt";
   const toast = useToast();
   const [feedback, setFeedback] = useState(true);
@@ -396,11 +391,6 @@ export function Agent() {
           <span className="sl-l">
             <span className={cn("sl-dot", busy && "on")} aria-hidden="true" />
             <TextMorph className="sl-phase">{phaseLabel}</TextMorph>
-            <span className="mono">{ws.target.name}</span>
-            <span className="hide-sm">{modeLabel(ws.mode)}</span>
-            <span className="sl-model hide-sm"><ModelLogo provider={model.provider} size={12} />{model.label}</span>
-            <span className="sl-eff hide-sm"><EffortGauge level={effort.level} size={13} tone="muted" />{effort.label}</span>
-            <span className="sl-tok mono hide-sm" title="Tokens utilisés"><SlidingNumber value={Math.round(tokens / 100) / 10} /> k</span>
             {allowed.length > 0 && <span className="mono hide-sm">{allowed.join(", ")} autorisé</span>}
           </span>
           <span className="sl-r hide-sm"><kbd>/</kbd> commandes <kbd>Échap</kbd> interrompre</span>

@@ -1,11 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CircleCheck, CircleDashed, ExternalLink, Link2, MoreHorizontal, ShieldAlert, ShieldCheck, TerminalSquare } from "lucide-react";
 import { Mascot } from "../brand/Logo.tsx";
 import { Topbar } from "../components/Shell.tsx";
-import { Button, Card, EmptyState, GuardBadge, KpiTile, PERIODS, Segmented, SevMeter, SeverityChip, StateBadge, type Period } from "../components/ui.tsx";
-import { BarChart } from "../components/arc/bar-chart/bar-chart.tsx";
-import { DonutChart } from "../components/arc/donut-chart/donut-chart.tsx";
+import { Button, EmptyState, GuardBadge, KpiTile, Segmented, SevMeter, SeverityChip, StateBadge } from "../components/ui.tsx";
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { SearchField } from "../components/arc/search-field/search-field.tsx";
 import { useToast } from "../components/toast.tsx";
@@ -18,10 +16,6 @@ const sorted = [...findings].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b
 
 type Filter = "all" | FindingState;
 const SEVS: Severity[] = ["crit", "high", "med", "low"];
-const DAY = 86400000;
-const LAST = Date.UTC(2026, 10, 7);
-const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
-const longFmt = new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 
 export function FindingRow({ f }: { f: Finding }) {
   const navigate = useNavigate();
@@ -56,19 +50,11 @@ export function Findings() {
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [sevs, setSevs] = useState<Severity[]>([]);
   const [q, setQ] = useState("");
-  const [period, setPeriod] = useState<Period>("30");
-  const days = Number(period);
+  const days = 30;
   const win = (a: number[]) => a.slice(-days);
   const sum = (a: number[]) => a.reduce((n, x) => n + x, 0);
   const dl = (a: number[]) => sum(win(a)) - sum(a.slice(-2 * days, -days));
   const clampD = (v: number, m: number) => Math.sign(v) * Math.min(m, Math.abs(v));
-
-  const bars = useMemo(() => win(daily.detected).map((v, i, arr) => {
-    const t = LAST - (arr.length - 1 - i) * DAY;
-    return { key: String(t), label: longFmt.format(t), axisLabel: dayFmt.format(t), value: v };
-  }), [days]); // eslint-disable-line
-  const bySev = SEVS.map((s) => ({ key: s, label: SEV_NAME[s][0]!.toUpperCase() + SEV_NAME[s].slice(1), value: findings.filter((f) => f.sev === s && f.state !== "fixed").length,
-    color: s === "crit" ? "var(--danger)" : s === "high" ? "var(--data-1)" : s === "med" ? "var(--data-2)" : "var(--data-3)" }));
 
   const count = (s: Filter) => (s === "all" ? sorted.length : sorted.filter((f) => f.state === s).length);
   const ql = q.trim().toLowerCase();
@@ -84,24 +70,15 @@ export function Findings() {
 
   return (
     <>
-      <Topbar scoped title="Findings" bar={<Segmented items={PERIODS} value={period} onChange={setPeriod} label="Période" />}
+      <Topbar scoped title="Findings"
         insight={<><b>{count("proven")} failles prouvées</b> à corriger, dont 3 critiques. Le reste n'est que des pistes.</>}
         actions={<Button variant="ghost" size="sm">Exporter SARIF</Button>} />
       <div className="content">
         <div className="kpis">
-          <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={count("proven")} delta={clampD(dl(daily.proven), 3)} bad="up" comparison={`vs ${days} j`} data={win(daily.proven)} tone="danger" />
-          <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={count("lead")} delta={clampD(dl(daily.leads), 4)} comparison={`vs ${days} j`} data={win(daily.leads)} />
-          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={1} comparison={`vs ${days} j`} data={win(daily.fixed)} />
-          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} comparison={`vs ${days} j`} data={win(daily.guarded)} tone="brand" to="/app/tests" />
-        </div>
-
-        <div className="cols charts">
-          <Card title="Détectés par jour" meta={`${days} derniers jours`} className="chart-card">
-            <div className="pad"><BarChart data={bars} label="Findings détectés par jour" period={`${days} derniers jours`} unit=" findings" valueLabel="Total" /></div>
-          </Card>
-          <Card title="Ouverts par sévérité" className="chart-card">
-            <div className="pad donut-wrap"><DonutChart data={bySev} label="Findings ouverts par sévérité" totalLabel="Ouverts" size={176} thickness={20} /></div>
-          </Card>
+          <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={count("proven")} delta={clampD(dl(daily.proven), 3)} bad="up" data={win(daily.proven)} tone="danger" />
+          <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={count("lead")} delta={clampD(dl(daily.leads), 4)} data={win(daily.leads)} />
+          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={1} data={win(daily.fixed)} />
+          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} data={win(daily.guarded)} tone="brand" to="/app/tests" />
         </div>
 
         <div className="filters">

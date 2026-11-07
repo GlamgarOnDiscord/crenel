@@ -4,7 +4,6 @@ import { ExternalLink, KeyRound, MoreHorizontal, RotateCcw, TerminalSquare, X } 
 import { Topbar } from "../components/Shell.tsx";
 import { Button, SeverityChip } from "../components/ui.tsx";
 import { Badge } from "../components/arc/badge/badge.tsx";
-import { MetricCard } from "../components/arc/metric-card/metric-card.tsx";
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { SlideConfirm } from "../components/bencho/SlideConfirm.tsx";
 import "../components/bencho/SlideConfirm.css";
@@ -23,11 +22,6 @@ export function Secrets() {
     <>
       <Topbar width="mid" scoped title="Secrets" insight={<><b>{active} secret{active > 1 ? "s" : ""} actif{active > 1 ? "s" : ""}</b> lisible{active > 1 ? "s" : ""} par n'importe qui. Révoquez d'abord, déplacez ensuite.</>} />
       <div className="content mid">
-        <div className="metrics">
-          <MetricCard label="Exposés" value={secrets.length - revoked.length} context="dans le bundle et le dépôt" change={revoked.length ? `−${revoked.length}` : undefined} />
-          <MetricCard label="Actifs" value={active} context="validés auprès du fournisseur" />
-          <MetricCard label="Révoqués" value={revoked.length} context="depuis ce scan" change={revoked.length ? `+${revoked.length}` : undefined} />
-        </div>
         <ul className="secrets">
           {secrets.map((s) => {
             const done = revoked.includes(s.finding);
