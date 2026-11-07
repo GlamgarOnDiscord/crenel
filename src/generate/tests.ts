@@ -41,6 +41,43 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "committed-env": {
+      // location is the committed .env path; it must no longer be tracked.
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  // The committed env file must be gone.`,
+        `  expect(existsSync(${JSON.stringify(f.location)})).toBe(false);`,
+        `});`,
+      ].join("\n");
+    }
+    case "sourcemaps": {
+      const file = f.location.split(":")[0];
+      // A shipped .map must not be in the bundle; a sourceMappingURL must be gone.
+      if (f.id.startsWith("sourcemaps:file:")) {
+        return [
+          `test(${JSON.stringify(title)}, () => {`,
+          `  expect(existsSync(${JSON.stringify(file)})).toBe(false);`,
+          `});`,
+        ].join("\n");
+      }
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  const src = readFileSync(${JSON.stringify(file)}, "utf8");`,
+        `  expect(src).not.toMatch(/sourceMappingURL=(?!data:)/);`,
+        `});`,
+      ].join("\n");
+    }
+    case "public-env": {
+      const file = f.location.split(":")[0];
+      const m = f.title.match(/:\s*([A-Z0-9_]+)\s*$/); // the var name
+      if (!m) return null;
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  const src = readFileSync(${JSON.stringify(file)}, "utf8");`,
+        `  expect(src).not.toContain(${JSON.stringify(m[1])});`,
+        `});`,
+      ].join("\n");
+    }
     case "authz-matrix": {
       return [
         `test(${JSON.stringify(title)}, async () => {`,
@@ -68,7 +105,7 @@ export function generateRegressionFile(findings: Finding[]): string {
     "// these tests from that directory, or prefix the paths, so readFileSync",
     "// resolves against the right root.",
     'import { test, expect } from "vitest";',
-    'import { readFileSync } from "node:fs";',
+    'import { readFileSync, existsSync } from "node:fs";',
   ];
   if (needsAuthz) {
     header.push(

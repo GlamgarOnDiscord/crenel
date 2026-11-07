@@ -28,3 +28,16 @@ test("skips findings it cannot assert", () => {
   const out = generateRegressionFile([f({ check: "headers", title: "CSP manquant" })]);
   assert.equal((out.match(/\btest\(/g) ?? []).length, 0);
 });
+
+test("generates tests for committed-env, sourcemaps and public-env", () => {
+  const out = generateRegressionFile([
+    f({ check: "committed-env", title: "Committed env file: .env.production", location: ".env.production" }),
+    f({ id: "sourcemaps:file:dist/app.js.map", check: "sourcemaps", title: "Source map in the bundle: dist/app.js.map", location: "dist/app.js.map" }),
+    f({ check: "public-env", title: "Secret-named var with a client-exposed prefix: NEXT_PUBLIC_API_SECRET", location: "src/config.ts:3" }),
+  ]);
+  assert.match(out, /import \{ readFileSync, existsSync \}/);
+  assert.match(out, /existsSync\(".env.production"\)/);
+  assert.match(out, /existsSync\("dist\/app.js.map"\)/);
+  assert.match(out, /not\.toContain\("NEXT_PUBLIC_API_SECRET"\)/);
+  assert.equal((out.match(/\btest\(/g) ?? []).length, 3);
+});
