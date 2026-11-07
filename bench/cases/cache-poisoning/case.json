@@ -1,0 +1,12 @@
+{
+  "title": "A CDN in front of an app that builds asset URLs from X-Forwarded-Host: one page keyed on the header, one not",
+  "type": "live",
+  "config": { "options": { "cache-poisoning": { "enabled": true, "paths": ["/", "/pricing"] } } },
+  "mustFind": [
+    { "id": "home-poisoned", "check": "cache-poisoning", "where": "/$", "text": "x-forwarded-host", "state": "proven", "minSeverity": "high", "why": "The next visitor loads a script from the host the attacker named." }
+  ],
+  "mustNotFlag": [
+    { "id": "pricing-keyed", "check": "cache-poisoning", "where": "/pricing", "forbid": "any", "why": "The cache varies on the header: each value gets its own entry." },
+    { "id": "proto-not-reflected", "check": "cache-poisoning", "text": "x-forwarded-proto", "forbid": "any", "why": "The app never uses X-Forwarded-Proto." }
+  ]
+}

@@ -45,6 +45,7 @@ empty list runs every read-only check.
 | next-image | Next.js image optimizer fetching any host (remotePatterns `**`) | yes (Next's own answer to a control URL) | GETs on the declared host; the target fetches one control URL |
 | api-docs | OpenAPI or Swagger definition served by the deployed API | yes (the body parses as a spec) | GETs on declared bases |
 | supabase-rpc | Postgres functions the client calls (`.rpc("x")`) returning data to the anon role | yes (GET with the public key, refused without it) | static; GETs on the Supabase host + active gate |
+| cache-poisoning | Unkeyed header (X-Forwarded-Host/Proto) reflected and stored by the cache | yes (sentinel served without the header) | GETs, needs allowActiveTesting and `options.cache-poisoning.enabled` |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -466,6 +467,26 @@ data came through the anon role. Critical when the fields look personal or
 secret, medium for other rows (it may be a public listing by design: confirm),
 low for a single value. A 404 or 400 (function missing or needing arguments)
 and an empty answer conclude nothing. The response is never kept.
+
+## cache-poisoning
+
+Off by default: it writes one entry into your shared cache, so it needs both
+`allowActiveTesting` and `options.cache-poisoning.enabled: true`. For each path
+(`options.cache-poisoning.paths`, default `/`) and header
+(`options.cache-poisoning.headers`, default `X-Forwarded-Host` and
+`X-Forwarded-Proto`):
+
+1. a GET with the header set to a sentinel (a host under `.invalid`, which never
+   resolves) must reflect it, in the body or a header;
+2. the same URL requested without the header returning the sentinel proves the
+   cache stored the poisoned response (**proven**, high);
+3. a URL with another cache key, never sent with the header, must show nothing
+   (negative control).
+
+Every request carries a unique `?crenel=<nonce>` that no visitor asks for. Before
+any poisoning request, a fresh nonce must not come back as a cache hit; when it
+does, the cache ignores the query string and a test entry could reach the real
+page, so the path is skipped. Redirects are read, never followed.
 
 ## What goes out
 
