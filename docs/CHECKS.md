@@ -275,7 +275,9 @@ Scans what the deployed site actually serves, without the repo. From
 scripts, `import()` and static imports, Next.js `static/chunks/` paths and
 `sourceMappingURL` comments, downloading each file with GET through the scoped
 client (declared hosts only: a chunk on an undeclared CDN is logged and
-skipped; up to 150 files, 40 MB, 2 MB per response). The `exposed-secrets`
+skipped; up to 150 files, 40 MB, 2 MB per response). The crawl stops when
+the target pushes back: 19 of the last 20 answers rate-limited (429), refused
+(403), failing (5xx) or erroring; a 404 on a guessed chunk does not count. The `exposed-secrets`
 detectors then run on those files, Supabase public keys become RLS leads, and a
 source map that answers 200 is reported.
 

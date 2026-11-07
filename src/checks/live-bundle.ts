@@ -20,6 +20,7 @@ import { extractBaas } from "./baas-exposure.js";
 import { osvAdvisories } from "./dependency-risk.js";
 
 const MAX_FILES = 150;
+const BLOCK_WINDOW = 20;
 const MAX_TOTAL_BYTES = 40 * 1024 * 1024;
 
 /** Asset URLs referenced by an HTML page or a JS/CSS file, resolved against `base`. */
@@ -119,11 +120,21 @@ export async function crawlLiveBundle(ctx: Pick<CheckContext, "scope" | "log">, 
   const skipped = new Set<string>();
   const files: ServedFile[] = [];
   let bytes = 0;
+  // Stop when the target pushes back (xnLinkFinder's rule): 19 of the last 20
+  // answers rate-limited, refused or failed. A 404 is not push-back (guessed
+  // chunk names miss), so it does not count.
+  const recent: boolean[] = [];
+  const pushBack = (blocked: boolean) => { recent.push(blocked); if (recent.length > BLOCK_WINDOW) recent.shift(); return recent.length === BLOCK_WINDOW && recent.filter(Boolean).length >= BLOCK_WINDOW - 1; };
   while (queue.length && files.length < MAX_FILES && bytes < MAX_TOTAL_BYTES) {
     const url = queue.shift()!;
     if (!ctx.scope.isHostAllowed(url)) { skipped.add(new URL(url).host); continue; }
     let res;
-    try { res = await safeFetch(url, ctx.scope); } catch (err) { ctx.log(`live-bundle: ${url}: ${(err as Error).message}`); continue; }
+    try { res = await safeFetch(url, ctx.scope); } catch (err) {
+      ctx.log(`live-bundle: ${url}: ${(err as Error).message}`);
+      if (pushBack(true)) { ctx.log("live-bundle: the target is refusing or failing almost every request, crawl stopped"); break; }
+      continue;
+    }
+    if (pushBack(res.status === 429 || res.status === 403 || res.status >= 500)) { ctx.log(`live-bundle: the target answered ${res.status} to almost every request (rate limit or block), crawl stopped`); break; }
     if (res.status !== 200) continue;
     const kind = kindOf(res.url, res.headers.get("content-type") ?? "");
     files.push({ url: res.url, kind, body: res.body, truncated: res.truncated });

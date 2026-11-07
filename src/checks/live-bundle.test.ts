@@ -68,3 +68,25 @@ test("chunks only the runtime knows (webpack id->hash table, Vite mapDeps) are e
   assert.deepEqual(runtimeChunkUrls('const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/AdminPanel-Dk3j.js","assets/x.css"])))=>i.map(i=>d[i]);', "https://app.acme.com/assets/index.js"),
     ["https://app.acme.com/assets/AdminPanel-Dk3j.js"]);
 });
+
+test("crawl stops when the target rate-limits almost every request; 404s on guessed chunks do not stop it", async () => {
+  const chunks = Array.from({ length: 80 }, (_, i) => `<script src="/assets/c${i}.js"></script>`).join("");
+  let hits = 0, mode: 429 | 404 = 429;
+  const srv = createServer((req, res) => {
+    hits++;
+    if (req.url === "/") { res.writeHead(200, { "content-type": "text/html" }); return res.end(`<html>${chunks}</html>`); }
+    res.writeHead(mode); res.end();
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/`;
+  const logs: string[] = [];
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    await crawlLiveBundle({ scope, log: (m) => logs.push(m) }, base);
+    assert.ok(hits <= 22, `stopped early (${hits} requests)`);
+    assert.ok(logs.some((l) => /crawl stopped/.test(l)));
+    hits = 0; mode = 404;
+    await crawlLiveBundle({ scope, log: () => {} }, base);
+    assert.equal(hits, 81, "every chunk is still tried when they are only missing");
+  } finally { srv.close(); }
+});
