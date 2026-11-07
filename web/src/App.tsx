@@ -1,0 +1,37 @@
+import { Navigate, type RouteObject } from "react-router-dom";
+import { Shell } from "./components/Shell.tsx";
+import { Landing } from "./pages/Landing.tsx";
+import { Overview } from "./pages/Overview.tsx";
+import { Findings } from "./pages/Findings.tsx";
+import { FindingDetail } from "./pages/FindingDetail.tsx";
+import { Scans } from "./pages/Scans.tsx";
+import { ScanRun } from "./pages/ScanRun.tsx";
+import { Targets } from "./pages/Targets.tsx";
+import { Secrets } from "./pages/Secrets.tsx";
+import { Authorization } from "./pages/Authorization.tsx";
+import { Tests } from "./pages/Tests.tsx";
+import { Integrations } from "./pages/Integrations.tsx";
+import { Settings } from "./pages/Settings.tsx";
+
+export const routes: RouteObject[] = [
+  { path: "/", element: <Landing /> },
+  {
+    path: "/app",
+    element: <Shell />,
+    children: [
+      { index: true, element: <Navigate to="/app/overview" replace /> },
+      { path: "overview", element: <Overview /> },
+      { path: "findings", element: <Findings /> },
+      { path: "findings/:id", element: <FindingDetail /> },
+      { path: "scans", element: <Scans /> },
+      { path: "scan/run", element: <ScanRun /> },
+      { path: "targets", element: <Targets /> },
+      { path: "secrets", element: <Secrets /> },
+      { path: "authz", element: <Authorization /> },
+      { path: "tests", element: <Tests /> },
+      { path: "integrations", element: <Integrations /> },
+      { path: "settings", element: <Settings /> },
+    ],
+  },
+  { path: "*", element: <Navigate to="/" replace /> },
+];

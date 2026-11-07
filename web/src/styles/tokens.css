@@ -1,0 +1,58 @@
+/*
+ * Crenel design tokens. Structure and finesse are ported from our admin console
+ * DA (three depth layers + a well, hairlines, four text steps, a type scale and
+ * radii), re-skinned to the Crenel identity: an amber-gold accent (the jackdaw's
+ * stolen key, a treasure hue, deliberately not the green/cyan of every security
+ * tool) on a blue-black ink. Single dark theme by design.
+ */
+:root {
+  /* Depth */
+  --bg: #0B0C10;
+  --panel: #12141B;
+  --panel-raised: #191C25;
+  --well: #0D0E13;
+  --hover: #1A1D27;
+  --active: #222632;
+
+  /* Hairlines */
+  --line: #1E2130;
+  --line-soft: #171A24;
+  --line-strong: #30364A;
+
+  /* Text, four steps on --panel */
+  --fg: #ECEDF2;
+  --fg-muted: #9EA3B2;
+  --fg-faint: #767C8E;
+  --fg-ghost: #474C5D;
+
+  /* Brand: amber-gold. Fill for what is selected or alive; ink for text. */
+  --brand: #F2B01E;
+  --brand-ink: #F7C84E;
+  --brand-deep: #B5810C;
+  --brand-soft: color-mix(in oklab, var(--brand) 15%, transparent);
+  --brand-ring: color-mix(in oklab, var(--brand) 55%, transparent);
+  --brand-wash: color-mix(in oklab, var(--brand) 9%, transparent);
+
+  /* Severity, distinct from the accent and always paired with a labeled chip. */
+  --crit: #F2555A; --crit-ink: #FF7E83;
+  --high: #FF8A3D; --high-ink: #FFA869;
+  --med:  #C9B23E; --med-ink:  #E4D16A;
+  --low:  #35B57F; --low-ink:  #57D29E;
+  --info: #4C8DF5; --info-ink: #86B2FF;
+
+  --shadow-pop: 0 0 0 1px var(--line-strong), 0 18px 50px rgba(0,0,0,.6);
+
+  /* Type: display Space Grotesk (stand-in for Mona Sans), UI Instrument Sans,
+     mono JetBrains Mono (stand-in for Commit Mono). */
+  --f-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --f-ui: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --t-meta: 12px; --t-label: 13px; --t-body: 14px; --t-title: 16px;
+  --t-h2: 20px; --t-h1: 30px; --t-kpi: 40px;
+
+  --r-card: 14px; --r-inner: 10px; --r-control: 8px; --r-pill: 9999px;
+  --sp: 4px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: dark;
+}
