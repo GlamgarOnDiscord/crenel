@@ -5,12 +5,13 @@ import { Button, GuardBadge } from "../components/ui.tsx";
 import { Badge } from "../components/arc/badge/badge.tsx";
 import { SortableDataTable, type DataColumn } from "../components/arc/sortable-data-table/sortable-data-table.tsx";
 import { useToast } from "../components/toast.tsx";
-import { guardedCount, tests } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 
 type Row = { name: string; check: string; status: string; when: string; finding: string; order: number };
 
 export function Tests() {
   const toast = useToast();
+  const { guardedCount, tests } = useData();
   const drafts = tests.length - guardedCount;
   const rows: Row[] = tests.map((t, i) => ({ ...t, order: i }));
   const columns: DataColumn<Row>[] = [

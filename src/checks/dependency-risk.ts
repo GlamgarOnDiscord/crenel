@@ -15,8 +15,9 @@
 // default run so the check stays deterministic and free; it belongs behind an
 // explicit flag.
 
+import { relative } from "../core/walk.js";
 import { readFileSync, existsSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 // Bundled at build time, so the denylist always ships with the check.
 import denylistData from "../data/known-bad-packages.json" with { type: "json" };

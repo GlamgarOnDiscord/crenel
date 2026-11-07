@@ -146,10 +146,13 @@ export function renderDiff(d: import("../core/baseline.js").Diff): string {
   return lines.join("\n");
 }
 
-/** Exit code policy: non-zero only when a proven finding is high or critical. */
-export function exitCode(result: RunResult): number {
-  const gating = result.findings.some(
-    (f) => f.state === "proven" && (f.severity === "high" || f.severity === "critical"),
-  );
+/**
+ * Exit code policy: non-zero only when a PROVEN finding is at or above
+ * `failOn` (default high). Leads never fail a build: no proof, no failure.
+ */
+export function exitCode(result: RunResult, failOn: Severity = "high"): number {
+  const gating = result.findings.some((f) => f.state === "proven" && SEV_RANK[f.severity] <= SEV_RANK[failOn]);
   return gating ? 1 : 0;
 }
+
+export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];

@@ -8,20 +8,20 @@ import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
 import { DOCS_URL } from "../lib/links.ts";
 import { WorkspaceProvider, useWorkspace } from "../lib/workspace.tsx";
-import { findings, guardedCount, targets, tasks } from "../data/mock.ts";
+import { useData, type Data } from "../data/api.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Picker } from "./ui.tsx";
 import { ToastProvider } from "./toast.tsx";
 import { AnimatedBackground } from "./kit/animated-background.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 
-const proven = findings.filter((f) => f.state === "proven").length;
-const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
-
 // Only what a founder opens every day stays visible: start a task, follow
 // tasks, read proven findings, check what CI keeps out. The rest sits under a
 // collapsed "Plus" group and stays one ⌘K away.
-const nav = [
+const navOf = ({ findings, guardedCount, tasks }: Data) => {
+const proven = findings.filter((f) => f.state === "proven").length;
+const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
+return [
   { group: null, items: [
     { to: "/app/scans", icon: ListTodo, label: "Tâches", count: waiting || undefined },
     { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: proven, danger: true },
@@ -34,9 +34,11 @@ const nav = [
     { to: "/app/integrations", icon: Plug, label: "Intégrations" },
   ]},
 ];
+};
 
 function TargetSwitcher() {
   const ws = useWorkspace();
+  const { targets } = useData();
   const Icon = ws.target.kind === "repo" ? FolderGit2 : Globe;
   return (
     <Picker
@@ -55,7 +57,7 @@ function TargetSwitcher() {
   );
 }
 
-function NavGroup({ g }: { g: (typeof nav)[number] }) {
+function NavGroup({ g }: { g: ReturnType<typeof navOf>[number] }) {
   const { pathname } = useLocation();
   const holds = g.items.some((it) => pathname.startsWith(it.to));
   const [open, setOpen] = useState(!("collapsed" in g && g.collapsed));
@@ -86,6 +88,7 @@ function NavGroup({ g }: { g: (typeof nav)[number] }) {
 }
 
 function SideContent({ onSearch }: { onSearch: () => void }) {
+  const nav = navOf(useData());
   return (
     <>
       <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>

@@ -4,19 +4,20 @@ import { Badge } from "../components/arc/badge/badge.tsx";
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { Sparkline } from "../components/arc/sparkline/sparkline.tsx";
 import { useToast } from "../components/toast.tsx";
-import { daily } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
+import type { Data } from "../data/api.ts";
 
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
-import { targets } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
 import { useWorkspace } from "../lib/workspace.tsx";
 
 // Weekly findings per target, cut from the shared daily series with an offset.
-const trend = (id: string) => { const off = id.length * 7; return Array.from({ length: 12 }, (_, w) => daily.detected.slice(off % 30 + w * 5, off % 30 + w * 5 + 7).reduce((a, b) => a + b, 0)); };
+const trend = (daily: Data["daily"], id: string) => { const off = id.length * 7; return Array.from({ length: 12 }, (_, w) => daily.detected.slice(off % 30 + w * 5, off % 30 + w * 5 + 7).reduce((a, b) => a + b, 0)); };
 
 export function Targets() {
   const ws = useWorkspace();
+  const { daily, targets } = useData();
   const navigate = useNavigate();
   const toast = useToast();
   return (
@@ -52,7 +53,7 @@ export function Targets() {
                   <span className="faint">{t.env}</span>
                 </div>
                 <div className="folder-spark">
-                  <Sparkline data={trend(t.id)} label="Findings par semaine" value={String(t.findings)} tone={t.proven ? "danger" : "accent"} width={280} height={44} interactive={false} />
+                  <Sparkline data={trend(daily, t.id)} label="Findings par semaine" value={String(t.findings)} tone={t.proven ? "danger" : "accent"} width={280} height={44} interactive={false} />
                 </div>
                 <div className="faint mono small">dernier scan · {t.lastScan}</div>
               </div>

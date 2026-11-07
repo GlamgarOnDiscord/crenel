@@ -8,9 +8,9 @@
 // dist/, where anyone can read it with view-source.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, relative } from "../core/walk.js";
 
 interface SecretPattern {
   id: string;
@@ -19,6 +19,32 @@ interface SecretPattern {
   severity: Finding["severity"];
   /** False for test-mode keys that are safe to expose; keeps messaging honest. */
   sensitive?: boolean;
+  /**
+   * Optional second look at a match, with the surrounding file. Returns false to
+   * drop it. Used where the key shape alone is ambiguous (a JWT is only a secret
+   * when its decoded role says so; a Google key inside a Firebase web config is
+   * public by design and is reported by baas-exposure instead).
+   */
+  accept?: (match: string, content: string, index: number) => boolean;
+}
+
+/** Decode the payload of a JWT-shaped string, or null. Never verifies the signature. */
+export function jwtPayload(token: string): Record<string, unknown> | null {
+  const part = token.split(".")[1];
+  if (!part) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+    return obj && typeof obj === "object" ? (obj as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when a Google API key sits inside a Firebase web config (public by design). */
+export function inFirebaseConfig(content: string, index: number): boolean {
+  const around = content.slice(Math.max(0, index - 600), index + 600);
+  return /\b(authDomain|projectId|storageBucket|messagingSenderId|databaseURL)\b/.test(around) &&
+    /firebaseapp\.com|firebaseio\.com|firebasedatabase\.app|appspot\.com|projectId/.test(around);
 }
 
 // Patterns are intentionally specific. We match distinctive prefixes rather than
@@ -31,7 +57,8 @@ const PATTERNS: SecretPattern[] = [
   { id: "stripe-restricted", title: "Stripe restricted key (live)", regex: /\brk_live_[A-Za-z0-9]{16,}/g, severity: "high", sensitive: true },
   { id: "stripe-restricted-test", title: "Stripe restricted test key", regex: /\brk_test_[A-Za-z0-9]{16,}/g, severity: "low", sensitive: false },
   { id: "aws-access-key", title: "AWS access key id", regex: /\bAKIA[0-9A-Z]{16}\b/g, severity: "high", sensitive: true },
-  { id: "google-api-key", title: "Google API key", regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g, severity: "high", sensitive: true },
+  { id: "google-api-key", title: "Google API key", regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g, severity: "high", sensitive: true,
+    accept: (_m, content, index) => !inFirebaseConfig(content, index) },
   { id: "openai-project-key", title: "OpenAI project API key", regex: /\bsk-proj-[A-Za-z0-9_-]{32,}/g, severity: "high", sensitive: true },
   { id: "openai-key", title: "OpenAI API key", regex: /\bsk-[A-Za-z0-9]{32,}\b/g, severity: "high", sensitive: true },
   { id: "anthropic-key", title: "Anthropic API key", regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}/g, severity: "high", sensitive: true },
@@ -43,7 +70,11 @@ const PATTERNS: SecretPattern[] = [
   { id: "google-oauth-secret", title: "Google OAuth client secret", regex: /\bGOCSPX-[A-Za-z0-9_-]{20,}/g, severity: "high", sensitive: true },
   { id: "sendgrid-key", title: "SendGrid API key", regex: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, severity: "high", sensitive: true },
   { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, severity: "critical", sensitive: true },
-  { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]*role[A-Za-z0-9_-]*service_role[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+/g, severity: "critical", sensitive: true },
+  // A JWT is base64url, so "service_role" never appears in clear: decode the
+  // payload and keep only tokens whose role is service_role (bypasses RLS).
+  { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, severity: "critical", sensitive: true,
+    accept: (m) => jwtPayload(m)?.role === "service_role" },
+  { id: "supabase-secret-key", title: "Supabase secret API key", regex: /\bsb_secret_[A-Za-z0-9_-]{20,}/g, severity: "critical", sensitive: true },
 ];
 
 // Only scan text-like files, and skip anything large or binary.
@@ -83,6 +114,7 @@ export const exposedSecrets: Check = {
         p.regex.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = p.regex.exec(content)) !== null) {
+          if (p.accept && !p.accept(m[0], content, m.index)) continue;
           const line = content.slice(0, m.index).split("\n").length;
           const sensitive = p.sensitive !== false;
           findings.push({

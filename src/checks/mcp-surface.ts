@@ -9,8 +9,9 @@
 // lead (a surface to review), never a proven vuln. Secret *values* are the job of
 // the exposed-secrets check; here we flag the surface and its shape.
 
+import { relative } from "../core/walk.js";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 
 // Walk up to the nearest repo-ish root so pointing at a built bundle still finds

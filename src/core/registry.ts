@@ -17,8 +17,9 @@ import { publicEnv } from "../checks/public-env.js";
 import { tlsVerification } from "../checks/tls-verification.js";
 import { jwtConfig } from "../checks/jwt-config.js";
 import { committedCredentials } from "../checks/committed-credentials.js";
+import { baasExposure } from "../checks/baas-exposure.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

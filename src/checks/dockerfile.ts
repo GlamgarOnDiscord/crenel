@@ -11,8 +11,9 @@
 //   - a remote script piped straight to a shell (curl ... | sh): arbitrary code
 //     at build time. Medium.
 
+import { relative } from "../core/walk.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
 
 function findRoot(start: string): string {
@@ -67,7 +68,7 @@ export const dockerfile: Check = {
       let text: string;
       try { text = readFileSync(file, "utf8"); } catch { continue; }
       const r = rel(file);
-      const lines = text.split("\n");
+      const lines = text.split(/\r?\n/);
 
       // USER: a Dockerfile with a FROM but no USER runs as root.
       const hasFrom = /^\s*FROM\s/im.test(text);

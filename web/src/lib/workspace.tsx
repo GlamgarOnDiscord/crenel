@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { useData } from "../data/api.ts";
 import { targets } from "../data/mock.ts";
 import type { Target } from "./types.ts";
 
@@ -26,9 +27,19 @@ export type EffortId = (typeof EFFORTS)[number]["id"];
 export const MODES = [
   { id: "ask", label: "Demander avant chaque sonde", short: "Demander", desc: "Analyse librement, demande avant toute requête vers un hôte." },
   { id: "readonly", label: "Lecture seule", short: "Lecture seule", desc: "N'envoie aucune requête: bundle, dépôt et dépendances seulement." },
-  { id: "probes", label: "Sondes autorisées", short: "Sondes autorisées", desc: "Envoie des requêtes aux hôtes déclarés sans redemander." },
+  { id: "bypass", label: "Bypass all permissions", short: "Bypass", desc: "N'interrompt jamais pour demander: envoie toutes les sondes que le périmètre autorise. Chaque sonde est inscrite à l'audit." },
 ] as const;
 export type ModeId = (typeof MODES)[number]["id"];
+
+// Goals, like /goal: the agent keeps going until the objective is met (checked
+// by code), a budget runs out, or you stop it. Free text: type /goal <texte>.
+export const GOALS = [
+  { id: "none", label: "Aucun objectif", short: "Définir un objectif", desc: "Une seule passe, puis l'agent s'arrête.", text: "" },
+  { id: "crit", label: "Aucun critique prouvé", short: "Aucun critique prouvé", desc: "Vérifié par le code sur les findings.", text: "aucun finding critique prouvé" },
+  { id: "authz", label: "Isolation entre comptes prouvée", short: "Isolation prouvée", desc: "Toutes les ressources déclarées, vérifié par le code.", text: "prouver l'isolation entre comptes sur toutes les ressources" },
+  { id: "tests", label: "Chaque faille prouvée a son test", short: "Failles testées", desc: "Un test de régression généré par faille prouvée.", text: "100 % des failles prouvées gardées en CI" },
+] as const;
+export type GoalId = (typeof GOALS)[number]["id"];
 
 export const CONTEXT_WINDOW: Record<ModelId, number> = {
   opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
@@ -43,6 +54,8 @@ interface Workspace {
   setEffort: (e: EffortId) => void;
   mode: ModeId;
   setMode: (m: ModeId) => void;
+  goal: GoalId;
+  setGoal: (g: GoalId) => void;
 }
 
 const noop = () => {};
@@ -51,6 +64,7 @@ const WorkspaceContext = createContext<Workspace>({
   model: "opus", setModel: noop,
   effort: "med", setEffort: noop,
   mode: "ask", setMode: noop,
+  goal: "none", setGoal: noop,
 });
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -58,10 +72,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [model, setModel] = useState<ModelId>("opus");
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
+  const [goal, setGoal] = useState<GoalId>("none");
+  const data = useData();
   const value = useMemo<Workspace>(() => ({
-    target: targets.find((t) => t.id === targetId) ?? targets[0]!,
-    setTargetId, model, setModel, effort, setEffort, mode, setMode,
-  }), [targetId, model, effort, mode]);
+    target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
+    setTargetId, model, setModel, effort, setEffort, mode, setMode, goal, setGoal,
+  }), [targetId, model, effort, mode, goal, data.targets]);
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
@@ -74,3 +90,4 @@ export const modelLabel = (id: ModelId) => modelOf(id).label;
 export const effortOf = (id: EffortId) => EFFORTS.find((e) => e.id === id)!;
 export const modeOf = (id: ModeId) => MODES.find((m) => m.id === id)!;
 export const modeLabel = (id: ModeId) => modeOf(id).short;
+export const goalOf = (id: GoalId) => GOALS.find((g) => g.id === id)!;

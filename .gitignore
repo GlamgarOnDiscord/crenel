@@ -6,3 +6,4 @@ bastion-report.json
 
 # local screenshot artifacts
 web/shots/
+.crenel/

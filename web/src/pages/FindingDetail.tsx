@@ -7,12 +7,13 @@ import { CodeBlock } from "../components/ai/code-block.tsx";
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { Tooltip } from "../components/arc/tooltip/tooltip.tsx";
 import { useToast } from "../components/toast.tsx";
-import { findings } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 
 export function FindingDetail() {
   const { id } = useParams();
   const toast = useToast();
+  const { findings } = useData();
   const f = findings.find((x) => x.id === id);
   if (!f) return (
     <>

@@ -9,8 +9,9 @@
 //   - install without --ignore-scripts: a dependency's install hook runs in CI.
 //     Medium.
 
+import { relative } from "../core/walk.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 
 function findWorkflowsDir(start: string): string | null {

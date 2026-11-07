@@ -4,12 +4,14 @@ import { Mascot } from "../brand/Logo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { ActivityList, Button, Card, EmptyState, Segmented, TaskList } from "../components/ui.tsx";
 import { SearchField } from "../components/arc/search-field/search-field.tsx";
-import { activity, tasks } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import type { TaskStatus } from "../lib/types.ts";
 
 type Filter = "all" | "live" | "done" | "archived";
 
 export function Scans() {
+  const { activity, tasks, live } = useData();
+  const waitingN = tasks.filter((t) => t.status === "waiting").length;
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const match = (s: TaskStatus, archived?: boolean): Record<Filter, boolean> => ({
@@ -25,7 +27,7 @@ export function Scans() {
   return (
     <>
       <Topbar crumb="Agent" title="Tâches"
-        insight={<>Une tâche <b>attend votre accord</b> pour envoyer des requêtes à staging.</>}
+        insight={!live || waitingN ? <>{waitingN > 1 ? `${waitingN} tâches` : "Une tâche"} <b>attend{waitingN > 1 ? "ent" : ""} votre accord</b> pour envoyer des requêtes à staging.</> : <>Aucune tâche n'attend votre accord.</>}
         actions={<Button to="/app/overview"><SquarePen size={14} /> Nouvelle tâche</Button>} />
       <div className="content">
         <div className="filters">

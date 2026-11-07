@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Check, CircleDashed, Copy, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
+import { Check, CircleDashed, Copy, Goal, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
 import { Mark, type Mood } from "../brand/Logo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { Composer } from "../components/Composer.tsx";
@@ -26,11 +26,17 @@ import { TextMorph } from "../components/kit/text-morph.tsx";
 import { Loader } from "../components/kit/loader.tsx";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "../components/kit/steps.tsx";
 import { agentAfterAllow, agentAfterDeny, agentScript, tasks } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
+import { useLiveAgent } from "../data/live-run.ts";
 import { cn } from "../lib/cn.ts";
 import type { AgentEvent } from "../lib/types.ts";
-import { CONTEXT_WINDOW, modeLabel, useWorkspace } from "../lib/workspace.tsx";
+import { CONTEXT_WINDOW, goalOf, modeLabel, useWorkspace } from "../lib/workspace.tsx";
 
 type Phase = "running" | "waiting" | "idle" | "interrupted";
+const GOAL_STATUS: Record<string, string> = {
+  active: "en cours", met: "atteint, vérifié", "met-unverified": "atteint selon le modèle, non vérifié", budget: "budget épuisé",
+  stalled: "bloqué: une correction est nécessaire", stopped: "interrompu", unverifiable: "invérifiable sans modèle",
+};
 type Decision = "once" | "always" | "deny";
 
 const defaultPrompt = (t: string) => `Scanne ${t}: secrets, dépendances et autorisation entre comptes.`;
@@ -74,15 +80,33 @@ export function Agent() {
   const [stream, setStream] = useState<{ idx: number; full: string; len: number } | null>(null);
   const [input, setInput] = useState("");
   const permRef = useRef<HTMLButtonElement>(null);
+  // With `crenel serve`, the conversation is a real run streamed from the API.
+  const live = useLiveAgent({ setEvents, setPhase, setDecisions, setAllowed });
+  const data = useData();
+  const startLive = (text: string) => {
+    const goal = ws.goal !== "none" ? goalOf(ws.goal).text : undefined;
+    if (goal) ws.setGoal("none");
+    void live.start(text, { mode: ws.mode, model: ws.model, goal });
+  };
 
   // Reset when navigating here again with a new prompt or task.
   useEffect(() => {
+    if (live.enabled) {
+      live.reset(); setEvents([]); setQueue([]); setDecisions({}); setStream(null);
+      const st = (location.state ?? {}) as { prompt?: string; taskId?: string };
+      const last = data.tasks[0];
+      if (st.taskId) { setPhase("running"); live.attach(st.taskId); }
+      else if (st.prompt) startLive(st.prompt);
+      else if (last) { setPhase("running"); live.attach(last.id); }
+      else startLive(defaultPrompt(ws.target.name));
+      return;
+    }
     setEvents(init.events); setQueue(init.queue); setPhase(init.phase); setDecisions(init.decisions); setStream(null);
-  }, [init]);
+  }, [init, live.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Script playback, one event per tick. A permission event pauses the run.
   useEffect(() => {
-    if (phase !== "running") return;
+    if (live.enabled || phase !== "running") return;
     if (queue.length === 0) { setPhase("idle"); return; }
     const t = setTimeout(() => {
       const [next, ...rest] = queue;
@@ -92,7 +116,7 @@ export function Agent() {
         setQueue([...agentAfterDeny.slice(1)]);
         return;
       }
-      if (next.kind === "permission" && (ws.mode === "probes" || allowed.includes(next.host))) {
+      if (next.kind === "permission" && (ws.mode === "bypass" || allowed.includes(next.host))) {
         setEvents((e) => [...e, { kind: "note", text: `${next.tool}: requêtes vers ${next.host} autorisées par le mode « ${modeLabel(ws.mode)} ».`, tone: "muted" }]);
         setQueue([...agentAfterAllow]);
         return;
@@ -124,12 +148,14 @@ export function Agent() {
     if (phase !== "waiting" || !ev || ev.kind !== "permission") return;
     setDecisions((m) => ({ ...m, [idx]: d }));
     if (d === "always") setAllowed((a) => [...a, ev.host]);
+    if (live.enabled) { live.decide(idx, d); setPhase("running"); return; }
     setQueue(d === "deny" ? [...agentAfterDeny] : [...agentAfterAllow]);
     setPhase("running");
   }, [events, phase]);
 
   const interrupt = useCallback(() => {
     if (phase !== "running" && phase !== "waiting" && !stream) return;
+    if (live.enabled) { live.stop(); return; }
     if (phase === "waiting") setDecisions((m) => ({ ...m, [events.length - 1]: "deny" }));
     setQueue([]); setStream(null);
     setEvents((e) => [...e, { kind: "note", text: "Interrompu. Que dois-je faire à la place ?", tone: "warn" }]);
@@ -155,7 +181,8 @@ export function Agent() {
   function send(text: string) {
     setInput("");
     const cmd = text.trim().toLowerCase();
-    if (cmd === "/clear") { setEvents([]); setQueue([]); setStream(null); setPhase("idle"); return; }
+    if (cmd === "/clear") { live.reset(); setEvents([]); setQueue([]); setStream(null); setPhase("idle"); return; }
+    if (live.enabled) { if (phase === "running" || phase === "waiting") live.stop(); startLive(text); return; }
     if (phase === "waiting") setDecisions((m) => ({ ...m, [events.length - 1]: "deny" }));
     setStream(null);
     if (cmd.startsWith("/scan")) {
@@ -377,6 +404,15 @@ export function Agent() {
       </Conversation>
 
       <div className="dock">
+        {live.goal && (
+          <div className="goalline" aria-live="polite" aria-label="Progression de l'objectif">
+            <span className="gl-t"><Goal size={13} aria-hidden="true" />{live.goal.label}</span>
+            <span className={cn(live.goal.status === "met" && "gl-ok")}>{GOAL_STATUS[live.goal.status]}</span>
+            {live.goal.detail && <span className="hide-sm">{live.goal.detail}</span>}
+            <span>itération {live.goal.iteration}/{live.goal.budget.maxIterations}</span>
+            {live.goal.remaining && <span className="mono">{Math.max(0, live.goal.remaining.probes)} sondes, {Math.max(0, Math.round(live.goal.remaining.ms / 60000))} min restantes</span>}
+          </div>
+        )}
         <Composer
           variant="dock" value={input} onChange={setInput} onSubmit={send} busy={busy} onStop={interrupt}
           placeholder={phase === "waiting" ? "Répondez à la demande, ou écrivez pour la refuser" : "Demandez une suite, ou tapez /"}

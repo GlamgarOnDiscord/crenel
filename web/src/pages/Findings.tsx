@@ -7,12 +7,11 @@ import { Button, EmptyState, GuardBadge, KpiTile, Segmented, SevMeter, SeverityC
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { SearchField } from "../components/arc/search-field/search-field.tsx";
 import { useToast } from "../components/toast.tsx";
-import { daily, findings, guardedCount } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 import { SEV_LABEL, SEV_NAME, SEV_RANK, type Finding, type FindingState, type Severity } from "../lib/types.ts";
 
 const STATE_ORDER: Record<FindingState, number> = { proven: 0, lead: 1, fixed: 2 };
-const sorted = [...findings].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || SEV_RANK[a.sev] - SEV_RANK[b.sev]);
 
 type Filter = "all" | FindingState;
 const SEVS: Severity[] = ["crit", "high", "med", "low"];
@@ -45,6 +44,8 @@ export function FindingRow({ f }: { f: Finding }) {
 }
 
 export function Findings() {
+  const { daily, findings, guardedCount, live } = useData();
+  const sorted = [...findings].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || SEV_RANK[a.sev] - SEV_RANK[b.sev]);
   const loc = useLocation();
   const initialFilter = ((loc.state as { filter?: Filter } | null)?.filter) ?? "all";
   const [filter, setFilter] = useState<Filter>(initialFilter);
@@ -71,14 +72,14 @@ export function Findings() {
   return (
     <>
       <Topbar scoped title="Findings"
-        insight={<><b>{count("proven")} failles prouvées</b> à corriger, dont 3 critiques. Le reste n'est que des pistes.</>}
+        insight={<><b>{count("proven")} failles prouvées</b> à corriger, dont {sorted.filter((f) => f.state === "proven" && f.sev === "crit").length} critiques. Le reste n'est que des pistes.</>}
         actions={<Button variant="ghost" size="sm">Exporter SARIF</Button>} />
       <div className="content">
         <div className="kpis">
           <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={count("proven")} delta={clampD(dl(daily.proven), 3)} bad="up" data={win(daily.proven)} tone="danger" />
           <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={count("lead")} delta={clampD(dl(daily.leads), 4)} data={win(daily.leads)} />
-          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={1} data={win(daily.fixed)} />
-          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} data={win(daily.guarded)} tone="brand" to="/app/tests" />
+          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={live ? undefined : 1} data={win(daily.fixed)} />
+          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={live ? undefined : 2} data={win(daily.guarded)} tone="brand" to="/app/tests" />
         </div>
 
         <div className="filters">

@@ -900,3 +900,11 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .me-actions { margin-left: auto; display: flex; gap: 2px; }
 .me-btn { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--fg-faint); transition: color .15s, background .15s; }
 .me-btn:hover, .me-btn.active { color: var(--fg); background: var(--bg-hover, rgba(255,255,255,.05)); }
+/* Live console (crenel serve). Bypass mode: a discreet amber pill on the
+   permissions control, visible even icon-only on phones. A goal chip turns
+   from muted to normal ink once set. The goal line sits above the composer. */
+.tbtn.warn { background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.tbtn.on { color: var(--fg); }
+.goalline { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 16px; padding: 0 10px 8px; font-size: var(--t-meta); color: var(--fg-faint); }
+.goalline .gl-t { color: var(--fg-muted); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.goalline .gl-ok { color: var(--brand-ink); font-weight: 500; }

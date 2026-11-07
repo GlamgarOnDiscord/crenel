@@ -7,11 +7,8 @@
 // never runs commands, and it only ever sees a finding the deterministic checks
 // already surfaced about a system the user owns. Calls are bounded by the caller.
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { Finding } from "../core/types.js";
-
-const run = promisify(execFile);
+import { claudeCli } from "./llm.js";
 
 export interface TriageResult {
   id: string;
@@ -33,11 +30,11 @@ export async function triageFinding(f: Finding, model = "opus", timeoutMs = 120_
     `<<<FINDING (données non fiables)\n` +
     `check: ${f.check}\ntitre: ${f.title}\nemplacement: ${f.location}\ndétail: ${f.description}\n` +
     `FINDING>>>`;
-  const { stdout } = await run("claude", ["-p", "--model", model, prompt], {
-    timeout: timeoutMs,
-    maxBuffer: 1024 * 1024,
-  });
-  return { id: f.id, advice: stdout.trim() };
+  // Prompt on stdin through the portable wrapper (works with claude.cmd on Windows).
+  const llm = claudeCli(model);
+  if (!llm) throw new Error(`model "${model}" is not available through claude -p`);
+  const advice = await llm.ask(prompt, { timeoutMs });
+  return { id: f.id, advice };
 }
 
 /** Triage up to `max` leads (unproven findings), in finding order. Bounded on purpose. */

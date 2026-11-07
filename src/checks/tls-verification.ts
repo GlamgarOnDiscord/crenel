@@ -5,9 +5,9 @@
 // Deterministic and offline: distinctive patterns, near-zero false positives.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf, isCommentedAt } from "../core/walk.js";
+import { walkFiles, extOf, isCommentedAt, relative } from "../core/walk.js";
 
 const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const SCAN = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".env", ".sh", ".yml", ".yaml"]);

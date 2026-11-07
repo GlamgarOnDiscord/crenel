@@ -8,7 +8,9 @@
 //      explicitly opts into private ranges for an internal staging box;
 //   3. every redirect hop is re-validated against the same rules (a 302 cannot
 //      smuggle the agent off scope);
-//   4. the response body is capped, so a hostile target cannot flood context.
+//   4. the response body is capped, so a hostile target cannot flood context;
+//   5. every request has a timeout and obeys the scope's kill switch, and the
+//      scope's observer sees each request sent or refused (journal, budgets).
 //
 // It is deliberately small and dependency-free.
 
@@ -17,6 +19,7 @@ import { Scope, ScopeError } from "./scope.js";
 
 const MAX_REDIRECTS = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** True for IPv4/IPv6 addresses that must never be reached from a scan. */
 export function isPrivateIp(ip: string): boolean {
@@ -98,15 +101,27 @@ export async function safeFetch(
   init: { method?: string; headers?: Record<string, string> } = {},
 ): Promise<SafeResponse> {
   let current = url;
+  const method = init.method ?? "GET";
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    scope.assertUrlAllowed(current);
-    await assertResolvesPublic(new URL(current).hostname, scope.allowPrivate);
+    try {
+      scope.signal?.throwIfAborted();
+      scope.assertUrlAllowed(current);
+      await assertResolvesPublic(new URL(current).hostname, scope.allowPrivate);
+    } catch (err) {
+      scope.onRequest?.({ method, url: current, refused: (err as Error).message });
+      throw err;
+    }
 
-    const res = await fetch(current, {
-      method: init.method ?? "GET",
-      headers: init.headers,
-      redirect: "manual",
-    });
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = scope.signal ? AbortSignal.any([scope.signal, timeout]) : timeout;
+    let res: Response;
+    try {
+      res = await fetch(current, { method, headers: init.headers, redirect: "manual", signal });
+    } catch (err) {
+      scope.onRequest?.({ method, url: current, error: (err as Error).message });
+      throw err;
+    }
+    scope.onRequest?.({ method, url: current, status: res.status });
 
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       const next = new URL(res.headers.get("location")!, current).toString();
