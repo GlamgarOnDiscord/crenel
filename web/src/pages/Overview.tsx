@@ -1,11 +1,16 @@
 import { Link } from "react-router-dom";
-import { ShieldAlert, Clock, CheckCheck, Timer, Plus, AlertTriangle, Plus as PlusIc, Check, CircleDot } from "lucide-react";
+import { ShieldAlert, Clock, CheckCheck, Timer, Plus, AlertTriangle, Check, CircleDot } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button, Sparkline, Bars, SeverityChip, StateBadge } from "../components/ui.tsx";
 import { activity, chartLeads, chartProven, findings } from "../data/mock.ts";
+import { SEV_RANK } from "../lib/types.ts";
+
+const sorted = [...findings].sort((a, b) =>
+  (a.state === "proven" ? 0 : 1) - (b.state === "proven" ? 0 : 1) || SEV_RANK[a.sev] - SEV_RANK[b.sev],
+);
 
 export function Overview() {
-  const actIcon = { bad: AlertTriangle, good: Check, brand: PlusIc, info: CircleDot };
+  const actIcon = { bad: AlertTriangle, good: Check, brand: Plus, info: CircleDot };
   return (
     <>
       <Topbar crumb="acme-app · staging" title="Vue d'ensemble" actions={
@@ -60,7 +65,7 @@ export function Overview() {
                 return (
                   <div className="ev" key={i}>
                     <span className={`ic ${a.kind === "bad" ? "bad" : a.kind === "good" ? "good" : a.kind === "brand" ? "brand" : ""}`}><Ic size={13} /></span>
-                    <div className="tx"><b>{a.title.split(" ").slice(0, 3).join(" ")}</b> {a.title.split(" ").slice(3).join(" ")}<small>{a.meta}</small></div>
+                    <div className="tx" style={{ fontWeight: 500 }}>{a.title}<small style={{ fontWeight: 400 }}>{a.meta}</small></div>
                   </div>
                 );
               })}
@@ -74,8 +79,8 @@ export function Overview() {
             <table className="table">
               <thead><tr><th>Sév.</th><th>Intitulé</th><th className="hide-sm">Emplacement</th><th>État</th><th className="hide-sm">Vu</th><th /></tr></thead>
               <tbody>
-                {findings.map((f) => (
-                  <tr key={f.id} onClick={() => { location.hash = `#/app/findings/${f.id}`; }}>
+                {sorted.map((f) => (
+                  <tr key={f.id}>
                     <td><SeverityChip sev={f.sev} /></td>
                     <td className="t-title">{f.title}</td>
                     <td className="hide-sm mono faint">{f.location}</td>

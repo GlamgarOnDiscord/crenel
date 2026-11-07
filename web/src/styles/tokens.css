@@ -22,7 +22,7 @@
   /* Text, four steps on --panel */
   --fg: #ECEDF2;
   --fg-muted: #9EA3B2;
-  --fg-faint: #767C8E;
+  --fg-faint: #8A90A1;
   --fg-ghost: #474C5D;
 
   /* Brand: amber-gold. Fill for what is selected or alive; ink for text. */
@@ -44,7 +44,7 @@
 
   /* Type: display Space Grotesk (stand-in for Mona Sans), UI Instrument Sans,
      mono JetBrains Mono (stand-in for Commit Mono). */
-  --f-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --f-display: "Mona Sans", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --f-ui: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 

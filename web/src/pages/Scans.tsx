@@ -21,7 +21,7 @@ export function Scans() {
               <thead><tr><th>Quand</th><th>Déclencheur</th><th>Findings</th><th>Prouvés</th><th className="hide-sm">Durée</th><th>Statut</th></tr></thead>
               <tbody>
                 {runs.map((r, i) => (
-                  <tr key={i} onClick={() => { location.hash = "#/app/scan/run"; }}>
+                  <tr key={i}>
                     <td className="t-title">{r.when}</td>
                     <td className="mono faint">{r.trigger}</td>
                     <td className="mono">{r.found}</td>

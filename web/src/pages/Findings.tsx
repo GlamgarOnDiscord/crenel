@@ -2,6 +2,11 @@ import { Link } from "react-router-dom";
 import { Topbar } from "../components/Shell.tsx";
 import { Button, SeverityChip, StateBadge } from "../components/ui.tsx";
 import { findings } from "../data/mock.ts";
+import { SEV_RANK } from "../lib/types.ts";
+
+const sorted = [...findings].sort((a, b) =>
+  (a.state === "proven" ? 0 : 1) - (b.state === "proven" ? 0 : 1) || SEV_RANK[a.sev] - SEV_RANK[b.sev],
+);
 
 export function Findings() {
   return (
@@ -16,8 +21,8 @@ export function Findings() {
             <table className="table">
               <thead><tr><th>Sév.</th><th>Intitulé</th><th className="hide-sm">Emplacement</th><th className="hide-sm">Check</th><th>État</th><th className="hide-sm">Vu</th><th /></tr></thead>
               <tbody>
-                {findings.map((f) => (
-                  <tr key={f.id} onClick={() => { location.hash = `#/app/findings/${f.id}`; }}>
+                {sorted.map((f) => (
+                  <tr key={f.id}>
                     <td><SeverityChip sev={f.sev} /></td>
                     <td className="t-title">{f.title}</td>
                     <td className="hide-sm mono faint">{f.location}</td>

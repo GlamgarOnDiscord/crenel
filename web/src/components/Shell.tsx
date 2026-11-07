@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
+import { DOCS_URL } from "../lib/links.ts";
 
 const nav = [
   { group: "Sécurité", items: [
@@ -43,7 +44,7 @@ export function Shell() {
         ))}
         <div className="spacer" />
         <div className="foot">
-          <a className="nav" href="#/app/docs"><BookOpen size={16} /> Documentation</a>
+          <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} /> Documentation</a>
         </div>
       </aside>
       <main className="main"><Outlet /></main>

@@ -65,7 +65,9 @@ export function EmptyState({ icon, title, children, action }: {
 export function Sparkline({ points, color = "var(--brand)", glow = true }: {
   points: number[]; color?: string; glow?: boolean;
 }) {
-  const w = 160, h = 30, max = Math.max(...points), min = Math.min(...points);
+  const w = 160, h = 30;
+  if (points.length < 2) points = [points[0] ?? 0, points[0] ?? 0];
+  const max = Math.max(...points), min = Math.min(...points);
   const span = max - min || 1;
   const d = points
     .map((p, i) => `${(i / (points.length - 1)) * w},${h - 2 - ((p - min) / span) * (h - 4)}`)
