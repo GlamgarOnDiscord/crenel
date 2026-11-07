@@ -126,7 +126,11 @@ async function main(): Promise<number> {
       writeFileSync(flags.sarif, toSarif(result));
     }
     if (flags.audit && typeof flags.audit === "string") {
-      appendAudit(flags.audit, result);
+      appendAudit(flags.audit, result, {
+        allowedHosts: config.scope.allowedHosts,
+        allowActiveTesting: config.scope.allowActiveTesting,
+        stagingUrl: config.scope.stagingUrl,
+      });
     }
 
     // Baseline: diff against a saved snapshot, and/or update it.

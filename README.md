@@ -139,6 +139,12 @@ Self-contained next steps, in priority order from the Nov 2026 research
 - `mcp-surface`: checks for LLM and MCP features exposed to users.
 - Give findings a repo-relative path so generated tests resolve from the repo
   root (today their paths are relative to the scanned projectDir).
+- Pin the vetted IP into the connection for live checks, to close the residual
+  DNS-rebinding window (the scoped client re-checks on redirects but `fetch`
+  re-resolves after the pre-flight `lookup`). Threat needs an attacker who
+  controls DNS for a host you declared you own.
+- Let the baseline gate only *new* proven high/criticals (today a proven
+  high/critical fails CI whether or not it is in the baseline).
 - A Tauri desktop app over the same core.
 
 Done since the first draft: malware denylist synced from OSV in CI
