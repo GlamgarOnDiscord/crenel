@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeHeaders } from "./headers.js";
+import { analyzeHeaders, headers as headersCheck } from "./headers.js";
+import { Scope } from "../core/scope.js";
 
 test("flags every missing security header", () => {
   const found = analyzeHeaders(new Headers(), "https://staging.example.com");
@@ -101,4 +102,27 @@ test("credentials with a specific origin, or wildcard without credentials, is no
     "access-control-allow-origin": "*",
   });
   assert.ok(!analyzeHeaders(noCreds, "https://s.example.com").some((f) => f.id.includes(":cors:")));
+});
+
+test("live: runs against a staging response and flags its missing headers", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_req, res) => { res.writeHead(200); res.end("ok"); }); // no security headers
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: `http://127.0.0.1:${port}` });
+    const found = await headersCheck.run({ scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options: {}, log: () => {} });
+    const ids = found.map((f) => f.id.split(":")[1]);
+    for (const id of ["csp", "hsts", "xcto", "refpol"]) assert.ok(ids.includes(id), `expected missing ${id}`);
+    assert.ok(found.every((f) => f.state === "proven"), "missing headers are proven on the live response");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("live: no stagingUrl yields a single lead", async () => {
+  const found = await headersCheck.run({ scope: new Scope({ allowedHosts: [] }), projectDir: "/tmp", options: {}, log: () => {} });
+  assert.equal(found.length, 1);
+  assert.equal(found[0]!.id, "headers:no-staging");
+  assert.equal(found[0]!.state, "unproven");
 });
