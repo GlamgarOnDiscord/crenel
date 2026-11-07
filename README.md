@@ -84,6 +84,8 @@ Uploads SARIF to GitHub code scanning. JUnit and JSON outputs too: [`docs/USAGE.
 
 Every request goes through a scoped client that refuses undeclared hosts, private addresses and unsafe methods, and re-checks each redirect. Point Crenel only at systems you own or are authorised to test. It is a hardening tool, not an attack tool. [`SECURITY.md`](SECURITY.md)
 
+Optional toolbox: `crenel tools build` then `crenel tools nuclei|katana|trufflehog` runs those tools in a Docker container whose only network exit is a proxy applying the same perimeter (their results stay leads until a Crenel validator replays them). What it filters, and what it cannot filter over HTTPS: [`docs/TOOLBOX.md`](docs/TOOLBOX.md).
+
 ## Measured, not claimed
 
 [`bench/`](bench/) holds small multi-tenant targets with ground truth: real flaws to find and decoys that must stay quiet. `node bench/run.mjs` scores Crenel, misses included. Other tools get adapters next.
