@@ -51,3 +51,33 @@ test("a Stripe test key is a low-severity note, not a critical incident", async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("detects additional distinctive-prefix secrets (slack, npm, github fine-grained, google oauth, sendgrid)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec2-"));
+  try {
+    writeFileSync(join(dir, "bundle.js"), [
+      'a="xoxb-123456789012-abcdefghijkl"',
+      'b="npm_' + "A".repeat(36) + '"',
+      'c="github_pat_' + "A".repeat(22) + "_" + "B".repeat(59) + '"',
+      'd="GOCSPX-abcdefghijklmnopqrstuvwx"',
+      'e="SG.' + "A".repeat(22) + "." + "B".repeat(43) + '"',
+    ].join("\n"));
+    const ids = (await exposedSecrets.run(ctx(dir))).map((f) => f.id.split(":")[1]);
+    for (const id of ["slack-token", "npm-token", "github-fine-grained-pat", "google-oauth-secret", "sendgrid-key"]) {
+      assert.ok(ids.includes(id), `missing ${id}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ordinary minified code does not trip the new patterns", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec3-"));
+  try {
+    writeFileSync(join(dir, "app.js"), "const ghost=1;const box='xoxo';function sg(){return SG;}\nconst npmrc='registry';\n");
+    const found = await exposedSecrets.run(ctx(dir));
+    assert.equal(found.length, 0, "should not false-positive on ordinary code");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

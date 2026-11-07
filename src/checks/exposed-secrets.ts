@@ -34,6 +34,12 @@ const PATTERNS: SecretPattern[] = [
   { id: "openai-key", title: "OpenAI API key", regex: /\bsk-[A-Za-z0-9]{20,}\b/g, severity: "high", sensitive: true },
   { id: "anthropic-key", title: "Anthropic API key", regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}/g, severity: "high", sensitive: true },
   { id: "github-pat", title: "GitHub personal access token", regex: /\bghp_[A-Za-z0-9]{36}\b/g, severity: "high", sensitive: true },
+  { id: "github-fine-grained-pat", title: "GitHub fine-grained token", regex: /\bgithub_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}\b/g, severity: "high", sensitive: true },
+  { id: "github-oauth", title: "GitHub OAuth/app token", regex: /\bgh[ousr]_[A-Za-z0-9]{36}\b/g, severity: "high", sensitive: true },
+  { id: "slack-token", title: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}/g, severity: "high", sensitive: true },
+  { id: "npm-token", title: "npm access token", regex: /\bnpm_[A-Za-z0-9]{36}\b/g, severity: "high", sensitive: true },
+  { id: "google-oauth-secret", title: "Google OAuth client secret", regex: /\bGOCSPX-[A-Za-z0-9_-]{20,}/g, severity: "high", sensitive: true },
+  { id: "sendgrid-key", title: "SendGrid API key", regex: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, severity: "high", sensitive: true },
   { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, severity: "critical", sensitive: true },
   { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]*role[A-Za-z0-9_-]*service_role[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+/g, severity: "critical", sensitive: true },
 ];
