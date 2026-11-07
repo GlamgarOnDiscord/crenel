@@ -44,3 +44,14 @@ Passe d'auto-review sur la v2, tout local, 4 commits:
 - **Moteur revérifié de bout en bout**: `pnpm demo` sort 2 critical + 1 high prouvés (clé Stripe, paquet malveillant, clé Google) et 9 leads; SARIF 2.1.0 valide; `bastion init` écrit bien sa config. 24 tests verts, builds propres.
 
 Responsive validé à 390 / 834 / 1440px. Rien de ceci n'est poussé: en attente de ta relecture et de tes décisions ci-dessus.
+
+## Recherche web de contexte (07/11, fin de nuit)
+
+Trois recherches web à jour (Sonnet en parallèle, synthèse Opus), dans `/root/research_notes/Etat art defensif IA nov 2026/` (3 notes sourcées + SYNTHESE.md). À retenir:
+
+- Le marché a basculé en fév./mars 2026: Anthropic (Claude Security) et OpenAI (Codex Security) sont entrés sur le créneau « agent qui lit le code et valide ». Fait structurant de l'année.
+- Trois constats mesurés qui valident notre conception: un LLM seul fait 82 à 86 % de faux positifs (Semgrep, sept. 2025); l'autorisation inter-tenant répartie est l'angle mort (0 vrai positif, nov. 2025); tout ce qui tient a un oracle déterministe, et le LLM-juge se laisse manipuler (32/33, ICSE 2027).
+- Différenciation la plus solide pour Crenel: l'axe autorisation inter-tenant à preuve rejouable, le moins couvert par les gros et raté par les LLM nus. Le plancher de prix est zéro (Aikido, Semgrep, Socket gratuits), donc la valeur est « gratuit, local, sans compte, sortie lisible par un agent ».
+- Les garde-fous sont tous justifiés par des incidents 2026 (TanStack pour la supply chain, série de CVE SSRF d'agents pour le client HTTP à périmètre). J'ai ancré dans les tests les IP de métadonnées cloud exactes visées par ces CVE (déjà bloquées).
+
+Pistes concrètes dans la synthèse: pousser l'authz inter-tenant comme coeur produit, ajouter un contrôle d'âge/éditeur des dépendances (slopsquatting), ne pas concurrencer la détection de secrets, soigner la sortie SARIF/JSON pour les agents de code.
