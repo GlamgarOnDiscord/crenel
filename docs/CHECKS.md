@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs thirteen checks. Each is deterministic and read-only, and marks every
+Crenel runs fourteen checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -22,6 +22,7 @@ empty list runs every read-only check.
 | public-env | A secret behind a client-exposed env prefix | no (leads) | no |
 | tls-verification | Code/config disabling TLS cert verification | no (leads) | no |
 | jwt-config | JWT config that defeats signature verification | no (leads) | no |
+| committed-credentials | Committed .npmrc/.pypirc/.netrc/... credentials | yes (file+field) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -125,4 +126,12 @@ Flags JWT configuration that defeats signature verification: `algorithm: "none"`
 `"none"` in an `algorithms` list, or verifying with a null/empty secret. Any of
 these accepts an unsigned token, a classic authentication bypass. Leads. Fix: pin
 a strong algorithm (RS256/ES256/HS256), never `none`, and verify with the real key.
+
+## committed-credentials
+
+Flags committed package-manager / registry credential files that carry a secret:
+`.npmrc` (`_authToken`), `.pypirc`, `.netrc`, `.git-credentials`, a Docker
+`config.json`/`.dockercfg` `auth`. The file name plus a credential field is a
+**proven** match (these hold tokens no key-shape scanner sees). Fix: remove from
+the repo and history, rotate, and gitignore credential files.
 

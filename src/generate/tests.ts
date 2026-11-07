@@ -59,6 +59,14 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "committed-credentials": {
+      // the committed credential file must be gone (and the credential rotated).
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  expect(existsSync(${JSON.stringify(f.location)})).toBe(false);`,
+        `});`,
+      ].join("\n");
+    }
     case "committed-env": {
       // location is the committed .env path; it must no longer be tracked.
       return [
