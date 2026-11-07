@@ -8,7 +8,9 @@ A defensive security harness for SaaS. It helps you attack your own app before a
 
 Bastion exists because new SaaS, and especially apps built fast with AI, keep shipping the same few bugs: a secret in the client bundle, and one account able to read another account's data. Bastion checks for exactly those, proves them so you do not chase false alarms, and hands you a regression test so they cannot come back.
 
-> Status: early. The core, the scope guard and two checks are real and run today. More checks are planned (see the roadmap).
+> Status: early but real. The core, the scope guard and six checks (secrets,
+> dependency-risk, ci-hardening, headers, authz-matrix, cloudflare-audit) run
+> today, with 33 tests. More depth is planned (see the roadmap).
 
 ## The console
 
@@ -121,12 +123,25 @@ landing page. Run it with `cd web && pnpm install && pnpm dev`.
 Needs the user's credentials or a product decision (not done autonomously):
 - Auto-PR of the generated tests and fixes to GitHub.
 - Hosted/continuous scanning and a trust page.
-- `cloudflare-audit`: wrap cloudflare/security-audit-skill and normalise its output.
+- Run cloudflare/security-audit-skill end to end (the `cloudflare-audit` check
+  already ingests and normalises its `findings.json`; wiring the skill run is
+  the remaining, network-touching part).
 
-Self-contained next steps:
-- Sync the malware denylist from OSV / GitHub advisories in CI.
+Self-contained next steps, in priority order from the Nov 2026 research
+(see `docs/NIGHT-SUMMARY.md`):
+- Deepen `authz-matrix`: beyond status codes, compare the two tenants' response
+  bodies so a `200` that returns another account's data is itself proof. This is
+  the differentiation the market leaves open.
+- `dependency-risk`: add a version age / publisher signal (flag freshly published
+  or unusual-publisher versions) to blunt slopsquatting and maintainer takeovers.
+- Secrets: do not compete on detection; add liveness verification and a rotation
+  path, or consume an existing detector's output.
 - `mcp-surface`: checks for LLM and MCP features exposed to users.
 - A Tauri desktop app over the same core.
+
+Done since the first draft: malware denylist synced from OSV in CI
+(`pnpm sync-denylist`, run weekly by `security.yml`); SARIF 2.1.0 output;
+JSONL audit log; regression-test generation.
 
 ## License
 
