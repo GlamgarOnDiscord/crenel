@@ -1,0 +1,11 @@
+{
+  "title": "A Spring-style API that serves its full definition, admin routes included, next to a JSON status page",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "spec-served", "check": "api-docs", "text": "v3/api-docs", "state": "proven", "minSeverity": "medium", "why": "The whole API map, admin operations included, is public." }
+  ],
+  "mustNotFlag": [
+    { "id": "status-json", "check": "api-docs", "text": "openapi\\.json", "forbid": "any", "why": "A JSON status object is not an API definition." }
+  ]
+}

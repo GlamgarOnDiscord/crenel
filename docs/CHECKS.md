@@ -43,6 +43,7 @@ empty list runs every read-only check.
 | auth-config | Supabase open sign-up without email confirmation, Better Auth OpenAPI published | yes (public settings) | GETs |
 | auth-variants | Protected route served through another spelling (.rsc, ?_rsc=, /_next/data, //, case) | yes (canonical refused, variant served) | GETs |
 | next-image | Next.js image optimizer fetching any host (remotePatterns `**`) | yes (Next's own answer to a control URL) | GETs on the declared host; the target fetches one control URL |
+| api-docs | OpenAPI or Swagger definition served by the deployed API | yes (the body parses as a spec) | GETs on declared bases |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -428,6 +429,20 @@ never contacts it. The default is `https://example.com/`, a domain IANA reserves
 for examples: public, free, stable. Change it with
 `options.next-image.controlUrl` (http or https only) and the endpoint with
 `options.next-image.path`.
+
+## api-docs
+
+Requests the frameworks' default definition paths (`/openapi.json`,
+`/openapi.yaml`, `/swagger.json`, `/swagger.yaml`, `/api/openapi.json`,
+`/api/swagger.json`, `/api-docs`, `/api-docs.json`, `/v3/api-docs`,
+`/v2/api-docs`, `/swagger/v1/swagger.json`, `/docs/openapi.json`; override with
+`options.api-docs.paths`) on the staging URL and `options.api-docs.urls`. A hit
+needs a 200 whose body parses as JSON or YAML with an `openapi`/`swagger`
+version and a `paths` object, so an SPA shell or a status JSON never counts. One
+finding per base: low, medium when the spec lists admin, internal or debug
+routes. A public API may publish its spec on purpose; the finding then mainly
+says which object routes belong in the authorization matrix
+(`options.authz-matrix.openapi` imports the same file).
 
 ## What goes out
 

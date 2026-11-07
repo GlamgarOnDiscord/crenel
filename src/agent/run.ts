@@ -59,7 +59,7 @@ const TOOL_CHECKS: Record<string, string[]> = {
   "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit", "webhook-signature", "ssrf"],
   "scan.deps": ["dependency-risk"],
   "scan.baas": ["baas-exposure"],
-  "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns", "dev-server", "ai-infra", "vercel-preview", "cache-deception", "auth-config", "auth-variants", "next-image"],
+  "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns", "dev-server", "ai-infra", "vercel-preview", "cache-deception", "auth-config", "auth-variants", "next-image", "api-docs"],
 };
 const LABEL: Record<string, string> = {
   "scan.secrets": "Chercher des secrets dans le bundle",
