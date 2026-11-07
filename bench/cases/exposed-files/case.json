@@ -1,0 +1,11 @@
+{
+  "title": "A .env served by the web server, next to friendly 200 error pages",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "env-served", "check": "exposed-files", "text": "\\.env", "state": "proven", "minSeverity": "critical", "why": "Anyone can download the production secrets." }
+  ],
+  "mustNotFlag": [
+    { "id": "soft-404-backup", "check": "exposed-files", "text": "backup\\.sql|\\.git", "forbid": "any", "why": "A 200 error page is not a dump or a repository." }
+  ]
+}

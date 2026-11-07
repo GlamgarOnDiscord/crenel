@@ -134,6 +134,14 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "exposed-files": {
+      if (f.state !== "proven") return null;
+      return [
+        `test(${JSON.stringify(title)}, async () => {`,
+        `  expect((await fetch(${JSON.stringify(f.location)})).status).not.toBe(200);`,
+        `});`,
+      ].join("\n");
+    }
     case "baas-exposure": {
       // Only a proven read (a table or database root answered without auth)
       // becomes a test; a lead has nothing concrete to assert yet.

@@ -27,6 +27,7 @@ empty list runs every read-only check.
 | webhook-signature | Webhook handler acting on an unverified payload | no (leads) | no |
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
+| exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -242,3 +243,14 @@ browser, hidden routes and flags, debug code, keys of unknown formats, internal
 hosts. Each item must quote an excerpt that exists verbatim in the served file,
 or it is dropped. Everything it returns is a lead labelled *IA, non vérifié*;
 endpoints are listed so the authorization matrix can replay them.
+
+## exposed-files
+
+Requests a short list of paths on `scope.stagingUrl` (`/.env`,
+`/.env.production`, `/.git/config`, `/.git/HEAD`, SQL dumps, `/.DS_Store`,
+`/server-status`, `/actuator/env`, `/.vscode/sftp.json`, `/phpinfo.php`), the
+method of nuclei's exposure templates. A hit needs a 200, a body that matches
+the file's own signature (`KEY=value` lines for a .env, `[core]` for a Git
+config, `CREATE TABLE` for a dump), and a body different from what a random
+path returns, so a single-page app that answers everything with index.html is
+never reported.
