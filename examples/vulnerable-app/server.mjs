@@ -8,6 +8,9 @@
 //   - GET /*.js, /*.map     the client bundle, with a server key and its source map
 //   - GET /api/projects/:id any signed-in account reads any project (BOLA)
 //   - GET /api/renders/:id  correct: only the owner, 404 otherwise
+//   - GET /api/invoices/:id same BOLA as projects, but NOT declared in the live
+//                           config: `crenel tools katana` finds it from the
+//                           links on / and suggests adding it to the matrix
 //   - /rest/v1/*            a fake Supabase PostgREST: `profiles` has no RLS
 //                           (readable with the public anon key), `notes` has RLS
 //
@@ -24,6 +27,7 @@ const PROJECTS = {
   proj_b_1: { id: "proj_b_1", owner: "acct_b_demo", name: "B's roadmap", budget: 42000 },
 };
 const RENDERS = { rnd_b_1: { id: "rnd_b_1", owner: "acct_b_demo", status: "done" } };
+const INVOICES = { inv_b_1: { id: "inv_b_1", owner: "acct_b_demo", total: 1200 } };
 
 const json = (res, status, body, headers = {}) => {
   res.writeHead(status, { "content-type": "application/json", ...headers });
@@ -31,13 +35,16 @@ const json = (res, status, body, headers = {}) => {
 };
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  // A scanner sends odd paths ("///x"): parse them as a path, never let them crash the demo.
+  let url;
+  try { url = new URL(`http://127.0.0.1:${PORT}/${String(req.url).replace(/^\/+/, "")}`); }
+  catch { return json(res, 400, { error: "bad request" }); }
   const account = ACCOUNTS[(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "")];
   const p = url.pathname;
 
   if (p === "/") {
     res.writeHead(200, { "content-type": "text/html", "set-cookie": "session=demo; Path=/" });
-    return res.end('<!doctype html><title>demo app</title><h1>Demo vulnerable app</h1><script type="module" src="/app.js"></script><script type="module" src="/auth.js"></script><script type="module" src="/supabase.js"></script><script type="module" src="/http-client.js"></script>');
+    return res.end('<!doctype html><title>demo app</title><h1>Demo vulnerable app</h1><nav><a href="/api/projects/proj_a_1">project</a> <a href="/api/invoices/inv_b_1">invoice</a></nav><script type="module" src="/app.js"></script><script type="module" src="/auth.js"></script><script type="module" src="/supabase.js"></script><script type="module" src="/http-client.js"></script>');
   }
   // The built client bundle, served like any static host would (maps included, on purpose).
   const asset = p.match(/^\/([\w.-]+\.(?:js|map))$/);
@@ -59,6 +66,13 @@ const server = createServer((req, res) => {
     if (!account) return json(res, 401, { error: "sign in" });
     const r = RENDERS[decodeURIComponent(m[1])];
     return r && r.owner === account ? json(res, 200, r) : json(res, 404, { error: "not found" });
+  }
+  m = p.match(/^\/api\/invoices\/([^/]+)$/);
+  if (m) {
+    if (!account) return json(res, 401, { error: "sign in" });
+    const inv = INVOICES[decodeURIComponent(m[1])];
+    // BUG (on purpose): no ownership check, like projects.
+    return inv ? json(res, 200, inv) : json(res, 404, { error: "not found" });
   }
   if (p.startsWith("/rest/v1/")) {
     if (req.method !== "GET") return json(res, 405, { message: "demo is read-only" });

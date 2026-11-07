@@ -31,9 +31,11 @@ import { estimateTokens, type Llm } from "./llm.js";
 import { GOAL_LABEL, parseGoal, runGoal, type GoalCheck, type GoalSpec } from "./goal.js";
 import { uidOf, type AuthzMatrix, type StateStore, type StoredFinding, type StoredTest } from "./state.js";
 import { z } from "zod";
+import { dockerStatus } from "../toolbox/docker.js";
+import { runTool, toolboxOptions, type ToolName } from "../toolbox/run.js";
 
 export type Decision = "once" | "always" | "deny";
-export type Intent = "full" | "authz" | "secrets" | "tests" | "chat" | "goal";
+export type Intent = "full" | "authz" | "secrets" | "tests" | "chat" | "goal" | "tools";
 
 // Web-facing event shapes (mirror web/src/lib/types.ts AgentEvent).
 type Sev = "crit" | "high" | "med" | "low" | "info";
@@ -66,6 +68,9 @@ const LABEL: Record<string, string> = {
   "authz.matrix": "Prouver l'isolation entre comptes",
   "validate.claims": "Rejouer chaque preuve (validateurs)",
   "tests.generate": "Générer les tests de régression",
+  "tools.trufflehog": "trufflehog sur le projet (conteneur sans réseau)",
+  "tools.katana": "Découvrir les routes avec katana (conteneur, proxy à périmètre)",
+  "tools.nuclei": "Modèles nuclei non intrusifs (conteneur, proxy à périmètre)",
 };
 
 /** Pick an intent from the user's words. Deterministic: the model does not plan. */
@@ -76,6 +81,7 @@ export function intentOf(prompt: string): Intent {
   if (s.startsWith("/authz")) return "authz";
   if (s.startsWith("/secrets")) return "secrets";
   if (s.startsWith("/test")) return "tests";
+  if (s.startsWith("/tools")) return "tools";
   if (s.startsWith("/")) return "chat";
   if (/\bscan|analyse|audit|premier scan/.test(s)) return "full";
   if (/compte a|compte b|entre comptes|isolation|autorisation|authz|tenant/.test(s)) return "authz";
@@ -237,7 +243,10 @@ export class AgentRun {
     if (intent === "authz") return authzOn ? ["authz.matrix", ...tail] : [];
     if (intent === "secrets") return [...["scan.secrets", "scan.baas"].filter(has), "validate.claims"];
     if (intent === "tests") return this.deps.store.findings().items.length ? ["tests.generate"] : [...scan, ...tail];
-    return [...scan, ...(authzOn ? ["authz.matrix"] : []), ...tail];
+    // The optional toolbox: in a full scan when options.toolbox.enabled, always on /tools.
+    const tools = ["tools.trufflehog", ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
+    if (intent === "tools") return [...tools, ...tail];
+    return [...scan, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...tail];
   }
 
   /** One pass of the plan. Returns the findings it produced, validated. */
@@ -255,14 +264,22 @@ export class AgentRun {
     const claims: Claim[] = [];
     const ran = new Set<string>();
     const outputs: string[] = [];
+    // Toolbox leads, already replayed by the validators inside runTool.
+    const toolFound: { f: Finding; v?: ClaimVerdict }[] = [];
     for (const tool of steps) {
       if (this.aborted) break;
       if (tool === "validate.claims") {
-        const validated = await this.validateTool(found, claims, outputs);
+        const validated = await this.validateTool(found, claims, outputs, toolFound);
         return this.finish(validated, ran, steps.includes("tests.generate"));
       }
       if (tool === "tests.generate") continue; // done in finish()
       if (tool === "authz.matrix") { claims.push(...(await this.authzTool(found, ran))); continue; }
+      if (tool.startsWith("tools.")) {
+        const out = await this.toolboxTool(tool.slice(6) as ToolName);
+        toolFound.push(...out.found);
+        if (out.ran) ran.add(`toolbox.${tool.slice(6)}`);
+        continue;
+      }
       const out = await this.checkTool(tool);
       found.push(...out.findings);
       out.ran.forEach((c) => ran.add(c));
@@ -270,6 +287,69 @@ export class AgentRun {
     }
     if (steps.includes("tests.generate") && !this.aborted) return this.finish([], ran, true);
     return [];
+  }
+
+  private toolboxEnabled(): boolean {
+    try { return toolboxOptions(this.deps.config).enabled; } catch { return false; }
+  }
+
+  /**
+   * One toolbox tool in its container. Network tools go through the gate (the
+   * declared stagingUrl), then the scoped egress proxy enforces the same rules
+   * as the scoped client on every request the tool sends. Refusals of the proxy
+   * are journalled but do not trip the three-refusals monitor (blocking a tool's
+   * stray request is the proxy doing its job); a separate cap stops the run.
+   */
+  private async toolboxTool(name: ToolName): Promise<{ found: { f: Finding; v?: ClaimVerdict }[]; ran: boolean }> {
+    const tool = `tools.${name}`;
+    const t0 = Date.now();
+    const input = JSON.stringify({ outil: name, conteneur: name === "trufflehog" ? "--network none, projet en lecture seule" : "réseau interne, sortie unique: proxy à périmètre", cible: name === "trufflehog" ? "projectDir" : this.scope.stagingUrl }, null, 2);
+    let opts;
+    try { opts = toolboxOptions(this.deps.config); } catch (err) {
+      this.ui({ kind: "note", tone: "warn", text: `${tool}: ${(err as Error).message}` });
+      return { found: [], ran: false };
+    }
+    const st = await dockerStatus(opts.image);
+    if (!st.available || !st.imagePresent) {
+      this.ui({ kind: "note", tone: "muted", text: `${tool}: boîte à outils désactivée (${st.reason}). Le reste du scan continue.` });
+      return { found: [], ran: false };
+    }
+    if (name !== "trufflehog") {
+      const url = this.scope.stagingUrl;
+      if (!url || !(await this.gated(tool, [{ method: "GET", url }]))) return { found: [], ran: false };
+    }
+    let toolRefusals = 0;
+    const maxProbes = (this.deps.maxProbes ?? 1000) + opts.maxRequests;
+    const scope = new Scope({
+      allowedHosts: this.deps.config.scope.allowedHosts, allowActiveTesting: this.deps.config.scope.allowActiveTesting,
+      allowPrivate: this.deps.config.scope.allowPrivate, stagingUrl: this.deps.config.scope.stagingUrl, signal: this.ac.signal,
+      onRequest: (e) => {
+        this.journal.append("net", { ...e, tool: name });
+        if (e.refused) {
+          if (++toolRefusals >= 200 && !this.ac.signal.aborted) this.stop(`monitor: ${name} had 200 requests refused by the egress proxy`);
+          return;
+        }
+        this.probes++;
+        if (this.unattended) this.deps.store.appendAudit({ at: new Date().toISOString(), kind: "probe-unattended", run: this.id, mode: this.opts.mode, method: e.method, url: e.url, status: e.status, error: e.error, tool: name });
+        if (this.probes > maxProbes && !this.ac.signal.aborted) this.stop(`budget: more than ${maxProbes} requests in one run`);
+      },
+    });
+    const uid = this.ui({ kind: "tool", tool, args: name, input, lines: ["…"], dur: "" });
+    const r = await runTool({
+      tool: name, config: this.deps.config, projectDir: this.projectDir, scope, checks: this.checks, signal: this.ac.signal, status: st,
+      onEvent: (e) => this.deps.store.appendAudit({ ...e, run: this.id }),
+    });
+    this.unattended = false;
+    const verdictOf = new Map(r.verdicts.map((v) => [v.claimId.replace(/^claim:/, ""), v]));
+    const lines = r.ran
+      ? [`${r.findings.length} piste(s), ${r.findings.filter((f) => f.state === "proven").length} prouvée(s) par un validateur Crenel`,
+        r.network === "none" ? "aucun réseau (--network none)" : `${r.proxy?.requests ?? 0} requête(s) via le proxy, ${r.proxy?.refused ?? 0} refusée(s)`,
+        ...(r.timedOut ? ["arrêté: délai dépassé"] : []),
+        ...r.suggestions.slice(0, 5).map((s) => `route à déclarer dans la matrice: ${s.path}`)]
+      : [`non lancé: ${r.reason}`];
+    this.journal.append("toolbox", { tool: name, ran: r.ran, reason: r.reason, exit: r.exit, network: r.network, proxy: r.proxy, raw: r.raw ? { sha256: r.raw.sha256, bytes: r.raw.bytes } : undefined, suggestions: r.suggestions });
+    this.uiUpdate(uid, { kind: "tool", tool, args: name, input, lines, findings: r.findings.slice(0, 8).map((f) => ({ sev: SEV[f.severity], text: f.title, state: webState(f.state), id: uidOf(f.id) })), dur: ms(Date.now() - t0) });
+    return { found: r.findings.map((f) => ({ f, v: verdictOf.get(f.id) })), ran: r.ran };
   }
 
   private reasoning(intent: Intent, steps: string[]): string {
@@ -444,7 +524,7 @@ export class AgentRun {
   }
 
   /** Every finding and every agent claim goes through a validator. Nothing else writes proven. */
-  private async validateTool(found: Finding[], agentClaims: Claim[], outputs: string[]): Promise<StoredFinding[]> {
+  private async validateTool(found: Finding[], agentClaims: Claim[], outputs: string[], toolFound: { f: Finding; v?: ClaimVerdict }[] = []): Promise<StoredFinding[]> {
     const t0 = Date.now();
     const llmClaims = await this.proposeClaims(outputs);
     const fromChecks = found.map((f) => ({ f, claim: claimFor(f) }));
@@ -505,6 +585,14 @@ export class AgentRun {
       } else if (v.state === "proven" && c.source === "llm") {
         lines.push(`proposition du modèle confirmée par ${v.validator}: ${v.reason}`);
       }
+    }
+    // Toolbox leads: their state was decided by a validator inside runTool. A
+    // lead proven by replaying a Crenel check is dropped when that check's own
+    // finding is already in this run (same place), to avoid a duplicate.
+    const have = new Set(out.map((f) => `${f.check}|${f.location}`));
+    for (const { f, v } of toolFound) {
+      if (f.state === "proven" && v?.validator?.endsWith(":exposed-secrets") && have.has(`exposed-secrets|${f.location}`)) continue;
+      out.push({ ...f, uid: uidOf(f.id), firstSeen: now, lastSeen: now, validator: v?.validator ?? null, verdict: v?.reason, evidence: v?.evidence });
     }
     const proven = out.filter((f) => f.state === "proven").length;
     const noValidator = [...verdicts.values()].filter((v) => !v.validator).length;

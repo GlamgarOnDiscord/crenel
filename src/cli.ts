@@ -4,6 +4,7 @@
 //   serve  local web console + JSON API (127.0.0.1, random token)
 //   list   show available checks
 //   init   write a starter config
+//   tools  optional confined toolbox (nuclei, katana, trufflehog) behind the scoped proxy
 //
 // Kept dependency-free (no arg parser) so the tool stays small and auditable.
 
@@ -263,6 +264,28 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  if (cmd === "tools") {
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const { toolsCommand } = await import("./toolbox/cli.js");
+    try {
+      return await toolsCommand({
+        sub: _[1] ?? "status", config, configPath, json: !!flags.json,
+        audit: typeof flags.audit === "string" ? flags.audit : undefined,
+        out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s),
+      });
+    } catch (err) {
+      process.stderr.write(`crenel tools: ${(err as Error).message}\n`);
+      return 2;
+    }
+  }
+
   if (cmd === "triage") {
     // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
     const configPath = (flags.config as string) ?? defaultConfigPath();
@@ -341,6 +364,8 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
+      "  crenel tools  status|build|selftest|nuclei|katana|trufflehog [--config path] [--json] [--audit log.jsonl]",
+      "                 optional Docker toolbox; its only network exit is Crenel's scoped proxy",
       "  crenel list                                show available checks",
       "",
       "Crenel only tests hosts you declare you own. Active checks stay off until",

@@ -42,6 +42,10 @@ export const TOOLS: Record<string, ToolSpec> = {
   "validate.claims": { name: "validate.claims", network: true, active: false, mutating: false },
   "tests.generate": { name: "tests.generate", network: false, active: false, mutating: false },
   "llm.advise": { name: "llm.advise", network: false, active: false, mutating: false },
+  // Optional toolbox (containers whose only exit is the scoped egress proxy).
+  "tools.trufflehog": { name: "tools.trufflehog", network: false, active: false, mutating: false },
+  "tools.katana": { name: "tools.katana", network: true, active: false, mutating: false },
+  "tools.nuclei": { name: "tools.nuclei", network: true, active: true, mutating: false },
 };
 
 export interface PlannedRequest {
