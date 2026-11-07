@@ -41,6 +41,7 @@ import { claudeCli, type Llm } from "../agent/llm.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
 import { triageFinding } from "../agent/triage.js";
+import { generateRegressionFile } from "../generate/tests.js";
 
 export interface ServeOptions {
   configPath: string;
@@ -200,7 +201,12 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       runs: summaries().slice(0, 50),
       authz: store.authz(),
       authzResources: ((cfg?.options["authz-matrix"] ?? {}) as { resources?: { name: string; path: string; methods?: string[] }[] }).resources ?? [],
-      tests: store.tests(),
+      // Each generated test with its own code, for the finding page.
+      tests: store.tests().map((t) => {
+        const fd = f.items.find((x) => x.uid === t.uid);
+        const file = fd ? generateRegressionFile([fd]) : "";
+        return { ...t, code: file.includes("test(") ? file.slice(file.indexOf("test(")).trim() : undefined };
+      }),
       audit: store.audit().slice(-200),
     };
   }

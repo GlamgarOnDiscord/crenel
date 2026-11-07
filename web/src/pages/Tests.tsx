@@ -8,15 +8,17 @@ import { Gauge } from "../components/arc/gauge/gauge.tsx";
 import { LineChart } from "../components/arc/line-chart/line-chart.tsx";
 import { SortableDataTable, type DataColumn } from "../components/arc/sortable-data-table/sortable-data-table.tsx";
 import { useToast } from "../components/toast.tsx";
-import { daily, findings, guardedCount, tests } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 
 type Row = { name: string; check: string; status: string; when: string; finding: string; order: number };
 const DAY = 86400000;
-const LAST = Date.UTC(2026, 10, 7);
+const DEMO_LAST = Date.UTC(2026, 10, 7);
 const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
 
 export function Tests() {
   const toast = useToast();
+  const { daily, findings, guardedCount, tests, live } = useData();
+  const LAST = live ? Math.floor(Date.now() / DAY) * DAY : DEMO_LAST;
   const drafts = tests.length - guardedCount;
   const provenEver = findings.filter((f) => f.state === "proven" || (f.state === "fixed" && f.proof)).length;
   const provenGuarded = findings.filter((f) => (f.state === "proven" || (f.state === "fixed" && f.proof)) && f.guarded).length;
@@ -28,7 +30,7 @@ export function Tests() {
       const t = LAST - (29 - i) * DAY;
       return { key: String(t), label: dayFmt.format(t), axisLabel: i % 7 === 0 ? dayFmt.format(t) : undefined, values: { guarded: g, proven: p } };
     });
-  }, []);
+  }, [daily]);
 
   const rows: Row[] = tests.map((t, i) => ({ ...t, order: i }));
   const columns: DataColumn<Row>[] = [
@@ -46,7 +48,7 @@ export function Tests() {
         <div className="cols rev">
           <Card title="Couverture des failles prouvées">
             <div className="pad gauge-wrap">
-              <Gauge value={Math.round((provenGuarded / provenEver) * 100)} label="Failles prouvées gardées en CI" detail={`${provenGuarded} sur ${provenEver} prouvées`}
+              <Gauge value={provenEver ? Math.round((provenGuarded / provenEver) * 100) : 0} label="Failles prouvées gardées en CI" detail={`${provenGuarded} sur ${provenEver} prouvées`}
                 thresholds={[{ from: 0, tone: "danger", label: "à risque" }, { from: 50, tone: "warning", label: "partiel" }, { from: 80, tone: "success", label: "gardé" }]} />
             </div>
           </Card>

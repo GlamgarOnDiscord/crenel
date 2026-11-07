@@ -8,17 +8,17 @@ import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
 import { DOCS_URL } from "../lib/links.ts";
 import { WorkspaceProvider, useWorkspace } from "../lib/workspace.tsx";
-import { findings, guardedCount, secrets, targets, tasks } from "../data/mock.ts";
+import { useData, type Data } from "../data/api.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Picker } from "./ui.tsx";
 import { ToastProvider } from "./toast.tsx";
 import { AnimatedBackground } from "./kit/animated-background.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 
+const navOf = ({ findings, guardedCount, secrets, targets, tasks }: Data) => {
 const proven = findings.filter((f) => f.state === "proven").length;
 const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
-
-const nav = [
+return [
   { group: null, items: [
     { to: "/app/overview", icon: House, label: "Accueil" },
     { to: "/app/agent", icon: TerminalSquare, label: "Agent", live: true },
@@ -36,9 +36,11 @@ const nav = [
     { to: "/app/settings", icon: Settings, label: "Paramètres" },
   ]},
 ];
+};
 
 function TargetSwitcher() {
   const ws = useWorkspace();
+  const { targets } = useData();
   const Icon = ws.target.kind === "repo" ? FolderGit2 : Globe;
   return (
     <Picker
@@ -57,7 +59,7 @@ function TargetSwitcher() {
   );
 }
 
-function NavGroup({ g }: { g: (typeof nav)[number] }) {
+function NavGroup({ g }: { g: ReturnType<typeof navOf>[number] }) {
   const { pathname } = useLocation();
   const holds = g.items.some((it) => pathname.startsWith(it.to));
   const [open, setOpen] = useState(true);
@@ -89,6 +91,7 @@ function NavGroup({ g }: { g: (typeof nav)[number] }) {
 }
 
 function SideContent({ onSearch }: { onSearch: () => void }) {
+  const nav = navOf(useData());
   return (
     <>
       <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>

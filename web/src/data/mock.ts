@@ -152,6 +152,7 @@ export const CHECKS = [
   { id: "mcp-surface", group: "Chaîne d'appro.", desc: "Serveurs MCP commités qui lancent des commandes." },
   { id: "dockerfile", group: "Infra", desc: "Conteneur en root, image non épinglée." },
   { id: "cloudflare-audit", group: "Infra", desc: "Zone: TLS, WAF, règles de cache." },
+  { id: "baas-exposure", group: "Secrets", desc: "Clé publique Supabase ou Firebase: RLS vérifiée par une lecture d'une ligne." },
   { id: "headers", group: "Web", desc: "CSP, HSTS, cookies de session, CORS." },
   { id: "tls-verification", group: "Web", desc: "Vérification TLS désactivée dans le code." },
   { id: "sourcemaps", group: "Web", desc: "Source maps servies en production." },

@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/arc/tabs
 import { FunnelChart } from "../components/bklit/funnel-chart.tsx";
 import { StackedBars } from "../components/bencho/StackedBars.tsx";
 import "../components/bencho/StackedBars.css";
-import { daily, findings, guardedCount, onboarding, tasks } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 import { REPO_URL } from "../lib/links.ts";
 
@@ -24,6 +24,7 @@ const last30 = (a: number[]) => a.slice(-30);
 export function Overview() {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
+  const { daily, findings, guardedCount, onboarding, tasks, live } = useData();
   useEffect(() => { document.title = "Accueil · Crenel"; }, []);
 
   const proven = findings.filter((f) => f.state === "proven").length;
@@ -74,9 +75,9 @@ export function Overview() {
       <section className="home-posture" aria-labelledby="posture-t">
         <div className="tabsrow plain"><h2 id="posture-t" className="sec-t">Posture</h2><span className="faint small">30 derniers jours</span></div>
         <div className="kpis three">
-          <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={proven} delta={1} bad="up" comparison="vs 30 j" data={last30(daily.proven)} tone="danger" to="/app/findings" />
-          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} comparison="vs 30 j" data={last30(daily.guarded)} tone="brand" to="/app/tests" />
-          <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={leads} delta={3} comparison="vs 30 j" data={last30(daily.leads)} to="/app/findings" />
+          <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={proven} delta={live ? undefined : 1} bad="up" comparison="vs 30 j" data={last30(daily.proven)} tone="danger" to="/app/findings" />
+          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={live ? undefined : 2} comparison="vs 30 j" data={last30(daily.guarded)} tone="brand" to="/app/tests" />
+          <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={leads} delta={live ? undefined : 3} comparison="vs 30 j" data={last30(daily.leads)} to="/app/findings" />
         </div>
         <div className="posture-row">
           <Card title="Du détecté au gardé" meta="chaque faille doit se rejouer, puis rester en CI">

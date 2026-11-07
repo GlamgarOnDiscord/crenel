@@ -58,7 +58,7 @@ export type AgentEvent =
       kind: "tool"; tool: string; args: string; input: string; lines: string[]; findings?: InlineFinding[]; dur: string;
       code?: { file: string; body: string };
     }
-  | { kind: "permission"; tool: string; host: string; requests: string[] }
+  | { kind: "permission"; tool: string; host: string; requests: string[]; id?: string }
   | { kind: "note"; text: string; tone?: "warn" | "muted" };
 
 export const SEV_LABEL: Record<Severity, string> = {

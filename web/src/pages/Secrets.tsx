@@ -9,12 +9,13 @@ import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx"
 import { SlideConfirm } from "../components/bencho/SlideConfirm.tsx";
 import "../components/bencho/SlideConfirm.css";
 import { useToast } from "../components/toast.tsx";
-import { secrets } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 
 export function Secrets() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { secrets } = useData();
   const [confirm, setConfirm] = useState<string | null>(null);
   const [revoked, setRevoked] = useState<string[]>([]);
   const active = secrets.filter((s) => s.valid === "active" && !revoked.includes(s.finding)).length;

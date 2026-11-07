@@ -5,14 +5,17 @@ import { Topbar } from "../components/Shell.tsx";
 import { ActivityList, Button, Card, EmptyState, KpiTile, PERIODS, Segmented, TaskList, type Period } from "../components/ui.tsx";
 import { ActivityHeatmap, type ActivityDay } from "../components/arc/activity-heatmap/activity-heatmap.tsx";
 import { SearchField } from "../components/arc/search-field/search-field.tsx";
-import { activity, daily, tasks } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import type { TaskStatus } from "../lib/types.ts";
 
 type Filter = "all" | "live" | "done" | "archived";
 const DAY = 86400000;
-const LAST = Date.UTC(2026, 10, 7);
+const DEMO_LAST = Date.UTC(2026, 10, 7);
 
 export function Scans() {
+  const { activity, daily, tasks, live } = useData();
+  const LAST = live ? Math.floor(Date.now() / DAY) * DAY : DEMO_LAST;
+  const waitingN = tasks.filter((t) => t.status === "waiting").length;
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [period, setPeriod] = useState<Period>("30");
@@ -34,7 +37,7 @@ export function Scans() {
       const count = back < daily.tasks.length ? daily.tasks[daily.tasks.length - 1 - back]! : early;
       return { date: new Date(LAST - back * DAY).toISOString().slice(0, 10), count };
     });
-  }, []);
+  }, [daily]);
 
   const match = (s: TaskStatus, archived?: boolean): Record<Filter, boolean> => ({
     all: !archived, live: s === "running" || s === "waiting", done: (s === "done" || s === "stopped") && !archived, archived: !!archived,
@@ -49,13 +52,13 @@ export function Scans() {
   return (
     <>
       <Topbar crumb="Agent" title="Tâches" bar={<Segmented items={PERIODS} value={period} onChange={setPeriod} label="Période" />}
-        insight={<>Une tâche <b>attend votre accord</b> pour envoyer des requêtes à staging.</>}
+        insight={!live || waitingN ? <>{waitingN > 1 ? `${waitingN} tâches` : "Une tâche"} <b>attend{waitingN > 1 ? "ent" : ""} votre accord</b> pour envoyer des requêtes à staging.</> : <>Aucune tâche n'attend votre accord.</>}
         actions={<Button to="/app/overview"><SquarePen size={14} /> Nouvelle tâche</Button>} />
       <div className="content">
         <div className="kpis three">
-          <KpiTile label="Tâches lancées" icon={<ListTodo size={14} />} value={total} delta={4} comparison={`vs ${days} j`} data={win(daily.tasks)} />
-          <KpiTile label="Failles prouvées" icon={<ShieldAlert size={14} />} value={provenN} delta={1} bad="up" comparison={`vs ${days} j`} data={win(daily.proven)} tone="danger" />
-          <KpiTile label="Durée médiane" icon={<Clock size={14} />} value={`${Math.floor(med / 60)} min ${String(med % 60).padStart(2, "0")}`} delta={-6} deltaUnit=" s" comparison={`vs ${days} j`} data={win(daily.minutes)} />
+          <KpiTile label="Tâches lancées" icon={<ListTodo size={14} />} value={total} delta={live ? undefined : 4} comparison={`vs ${days} j`} data={win(daily.tasks)} />
+          <KpiTile label="Failles prouvées" icon={<ShieldAlert size={14} />} value={provenN} delta={live ? undefined : 1} bad="up" comparison={`vs ${days} j`} data={win(daily.proven)} tone="danger" />
+          <KpiTile label="Durée médiane" icon={<Clock size={14} />} value={`${Math.floor(med / 60)} min ${String(med % 60).padStart(2, "0")}`} delta={live ? undefined : -6} deltaUnit=" s" comparison={`vs ${days} j`} data={win(daily.minutes)} />
         </div>
 
         <Card title="Activité de l'agent" meta="12 derniers mois" className="chart-card">

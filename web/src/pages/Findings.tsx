@@ -9,17 +9,16 @@ import { DonutChart } from "../components/arc/donut-chart/donut-chart.tsx";
 import { DropdownMenu } from "../components/arc/dropdown-menu/dropdown-menu.tsx";
 import { SearchField } from "../components/arc/search-field/search-field.tsx";
 import { useToast } from "../components/toast.tsx";
-import { daily, findings, guardedCount } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 import { SEV_LABEL, SEV_NAME, SEV_RANK, type Finding, type FindingState, type Severity } from "../lib/types.ts";
 
 const STATE_ORDER: Record<FindingState, number> = { proven: 0, lead: 1, fixed: 2 };
-const sorted = [...findings].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || SEV_RANK[a.sev] - SEV_RANK[b.sev]);
 
 type Filter = "all" | FindingState;
 const SEVS: Severity[] = ["crit", "high", "med", "low"];
 const DAY = 86400000;
-const LAST = Date.UTC(2026, 10, 7);
+const DEMO_LAST = Date.UTC(2026, 10, 7);
 const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
 const longFmt = new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 
@@ -51,6 +50,9 @@ export function FindingRow({ f }: { f: Finding }) {
 }
 
 export function Findings() {
+  const { daily, findings, guardedCount, live } = useData();
+  const sorted = [...findings].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || SEV_RANK[a.sev] - SEV_RANK[b.sev]);
+  const LAST = live ? Math.floor(Date.now() / DAY) * DAY : DEMO_LAST;
   const loc = useLocation();
   const initialFilter = ((loc.state as { filter?: Filter } | null)?.filter) ?? "all";
   const [filter, setFilter] = useState<Filter>(initialFilter);
@@ -66,7 +68,7 @@ export function Findings() {
   const bars = useMemo(() => win(daily.detected).map((v, i, arr) => {
     const t = LAST - (arr.length - 1 - i) * DAY;
     return { key: String(t), label: longFmt.format(t), axisLabel: dayFmt.format(t), value: v };
-  }), [days]); // eslint-disable-line
+  }), [days, daily, LAST]); // eslint-disable-line
   const bySev = SEVS.map((s) => ({ key: s, label: SEV_NAME[s][0]!.toUpperCase() + SEV_NAME[s].slice(1), value: findings.filter((f) => f.sev === s && f.state !== "fixed").length,
     color: s === "crit" ? "var(--danger)" : s === "high" ? "var(--data-1)" : s === "med" ? "var(--data-2)" : "var(--data-3)" }));
 
@@ -85,14 +87,14 @@ export function Findings() {
   return (
     <>
       <Topbar scoped title="Findings" bar={<Segmented items={PERIODS} value={period} onChange={setPeriod} label="Période" />}
-        insight={<><b>{count("proven")} failles prouvées</b> à corriger, dont 3 critiques. Le reste n'est que des pistes.</>}
+        insight={<><b>{count("proven")} failles prouvées</b> à corriger, dont {sorted.filter((f) => f.state === "proven" && f.sev === "crit").length} critiques. Le reste n'est que des pistes.</>}
         actions={<Button variant="ghost" size="sm">Exporter SARIF</Button>} />
       <div className="content">
         <div className="kpis">
           <KpiTile label="Prouvés" icon={<ShieldAlert size={14} />} value={count("proven")} delta={clampD(dl(daily.proven), 3)} bad="up" comparison={`vs ${days} j`} data={win(daily.proven)} tone="danger" />
           <KpiTile label="Pistes" icon={<CircleDashed size={14} />} value={count("lead")} delta={clampD(dl(daily.leads), 4)} comparison={`vs ${days} j`} data={win(daily.leads)} />
-          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={1} comparison={`vs ${days} j`} data={win(daily.fixed)} />
-          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} comparison={`vs ${days} j`} data={win(daily.guarded)} tone="brand" to="/app/tests" />
+          <KpiTile label="Corrigés" icon={<CircleCheck size={14} />} value={count("fixed")} delta={live ? undefined : 1} comparison={`vs ${days} j`} data={win(daily.fixed)} />
+          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={live ? undefined : 2} comparison={`vs ${days} j`} data={win(daily.guarded)} tone="brand" to="/app/tests" />
         </div>
 
         <div className="cols charts">

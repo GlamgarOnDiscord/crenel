@@ -336,7 +336,6 @@ export class AgentRun {
     const t0 = Date.now();
     const args = checks.map((c) => c.name).join(", ");
     const input = JSON.stringify({ checks: checks.map((c) => c.name), dir: this.projectDir.split(/[\\/]/).slice(-2).join("/") }, null, 2);
-    const uid = this.ui({ kind: "tool", tool, args, input, lines: ["…"], dur: "" });
     let scope = this.offlineScope();
     let skip = false;
     if (tool === "scan.web") {
@@ -348,6 +347,7 @@ export class AgentRun {
         .map((h) => ({ method: "GET", url: `${(h as { url: string }).url}/rest/v1/` }));
       if (reqs.length && this.scope.allowActiveTesting && (await this.gated(tool, [...reqs, ...reqs.map((r) => ({ method: "GET", url: r.url + "<table>?select=*&limit=1" }))]))) scope = this.scope;
     }
+    const uid = this.ui({ kind: "tool", tool, args, input, lines: ["…"], dur: "" });
     const findings: Finding[] = [];
     const ran: string[] = [];
     const lines: string[] = [];
@@ -381,9 +381,9 @@ export class AgentRun {
     ];
     const t0 = Date.now();
     const input = JSON.stringify({ attaquants: actors.map((a) => a.label), cible: "ressources du compte B", ressources: resources.map((r) => r.path) }, null, 2);
-    const uid = this.ui({ kind: "tool", tool: "authz.matrix", args: `${actors.map((a) => a.label).join(", ")} → ressources de B`, input, lines: ["…"], dur: "" });
     const notes: string[] = [];
     if (!base || !opts.accounts?.a?.token) {
+      const uid = this.ui({ kind: "tool", tool: "authz.matrix", args: "hors ligne", input, lines: ["…"], dur: "" });
       // Offline: the registry check emits the test plan as a lead.
       const off = REGISTRY.find((c) => c.name === "authz-matrix")!;
       const out = await off.run(this.ctx(this.offlineScope()));
@@ -402,6 +402,7 @@ export class AgentRun {
     const requests = cases.map((c) => ({ method: "GET", url: c.url }));
     const unique = [...new Map(requests.map((r) => [r.url, r])).values()];
     const allowed = await this.gated("authz.matrix", unique);
+    const uid = this.ui({ kind: "tool", tool: "authz.matrix", args: `${actors.map((a) => a.label).join(", ")} → ressources de B`, input, lines: ["…"], dur: "" });
     const matrix: AuthzMatrix = {
       at: new Date().toISOString(), run: this.id,
       resources: resources.map((r) => ({ id: r.name, label: r.name, route: `${(r.methods ?? ["GET"]).join("/")} ${r.path}` })),

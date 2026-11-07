@@ -895,3 +895,12 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .folder-spark { --accent: var(--fg-muted); --accent-strong: var(--fg); }
 .metrics > article { padding: 20px 22px !important; }
 .filters > * { min-width: 0; max-width: 100%; }
+
+/* Live console (crenel serve). Bypass mode: a discreet amber pill on the
+   permissions control, visible even icon-only on phones. A goal chip turns
+   from muted to normal ink once set. The goal line sits above the composer. */
+.tbtn.warn { background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.tbtn.on { color: var(--fg); }
+.goalline { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 16px; padding: 0 10px 8px; font-size: var(--t-meta); color: var(--fg-faint); }
+.goalline .gl-t { color: var(--fg-muted); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.goalline .gl-ok { color: var(--brand-ink); font-weight: 500; }

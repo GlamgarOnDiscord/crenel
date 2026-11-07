@@ -8,6 +8,7 @@ import { Progress } from "../components/arc/progress/progress.tsx";
 import { Checklist } from "../components/bencho/Checklist.tsx";
 import "../components/bencho/Checklist.css";
 import { cn } from "../lib/cn.ts";
+import { apiFetch, isLive, refresh } from "../data/api.ts";
 
 const CHECKS = ["Je possède cette cible", "C'est un staging, pas la production", "J'ai deux comptes de test"] as const;
 const URL_RE = /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i;
@@ -27,7 +28,7 @@ export function Onboarding() {
   const owner = checks[0] === true;
   const done = (valid ? 1 : 0) + checks.filter(Boolean).length;
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!valid) {
       setError(mode === "url" ? "Une adresse comme staging.acme.app" : "Un dépôt comme acme/acme-app");
@@ -35,6 +36,11 @@ export function Onboarding() {
       return;
     }
     if (!owner) { setError("Cochez au moins « Je possède cette cible »."); setShake(true); setTimeout(() => setShake(false), 300); return; }
+    // With crenel serve, the site becomes a declared host (allowedHosts) first.
+    if (isLive() && mode === "url") {
+      try { await apiFetch("api/targets", { method: "POST", body: { host: value.trim(), owner: true } }); await refresh(); }
+      catch (err) { setError((err as Error).message); return; }
+    }
     navigate("/app/agent", { state: { prompt: `Premier scan de ${value.trim()}` } });
   }
 

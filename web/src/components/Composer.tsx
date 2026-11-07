@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, Check, ChevronDown, Eye, FolderGit2, Globe, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
-import { targets } from "../data/mock.ts";
+import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { MODELS, MODES, effortOf, modelOf, useWorkspace, type ModeId } from "../lib/workspace.tsx";
+import { GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type ModeId } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -17,11 +17,12 @@ export const SLASH = [
   { cmd: "/explain", desc: "Expliquer une faille prouvée" },
   { cmd: "/fix", desc: "Préparer le correctif et son test" },
   { cmd: "/test", desc: "Générer les tests de régression" },
+  { cmd: "/goal", desc: "Fixer un objectif: l'agent continue jusqu'à l'atteindre" },
   { cmd: "/cible", desc: "Afficher la cible et son périmètre" },
   { cmd: "/clear", desc: "Effacer la conversation" },
 ];
 
-const MODE_ICON: Record<ModeId, typeof Eye> = { ask: Hand, readonly: Eye, probes: Radar };
+const MODE_ICON: Record<ModeId, typeof Eye> = { ask: Hand, readonly: Eye, bypass: Radar };
 
 /* Model + effort in one compact trigger, as in the Codex composer: the AI
    Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
@@ -102,6 +103,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
   variant?: "hero" | "dock"; busy?: boolean; onStop?: () => void; autoFocus?: boolean; extra?: React.ReactNode;
 }) {
   const ws = useWorkspace();
+  const { targets } = useData();
   const id = useId();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -192,11 +194,18 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
           </Tooltip>
           <Picker
             label="Permissions" value={ws.mode} onChange={ws.setMode} placement={placement}
-            buttonClassName={cn("tbtn", ws.mode === "probes" && "warn")}
+            buttonClassName={cn("tbtn", ws.mode === "bypass" && "warn")}
             options={MODES.map((m) => { const I = MODE_ICON[m.id]; return { value: m.id, label: m.label, desc: m.desc, icon: <I size={15} /> }; })}
           >
-            <ModeIcon size={14} aria-hidden="true" /><span className="tlabel">{MODES.find((m) => m.id === ws.mode)!.label}</span>
+            <ModeIcon size={14} aria-hidden="true" /><span className="tlabel">{ws.mode === "bypass" ? "Bypass" : MODES.find((m) => m.id === ws.mode)!.label}</span>
             <ChevronDown size={13} className="faint" aria-hidden="true" />
+          </Picker>
+          <Picker
+            label="Objectif" value={ws.goal} onChange={ws.setGoal} placement={placement}
+            buttonClassName={cn("tbtn", ws.goal !== "none" && "on")}
+            options={GOALS.map((g) => ({ value: g.id, label: g.label, desc: g.desc, icon: <Goal size={15} /> }))}
+          >
+            <Goal size={14} aria-hidden="true" /><span className="tlabel">{goalOf(ws.goal).short}</span>
           </Picker>
           <span className="sp" />
           {extra}
