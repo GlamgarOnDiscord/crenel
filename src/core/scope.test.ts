@@ -22,3 +22,30 @@ test("a staging url outside the allowlist fails at construction", () => {
     ScopeError,
   );
 });
+
+test("userinfo in the URL cannot spoof an allowed host", () => {
+  const s = new Scope({ allowedHosts: ["staging.example.com"] });
+  // The real host is evil.com; the allowed name is only in the userinfo.
+  assert.equal(s.isHostAllowed("https://staging.example.com@evil.com/"), false);
+  assert.throws(() => s.assertUrlAllowed("https://staging.example.com@evil.com/"), ScopeError);
+});
+
+test("host matching is case-insensitive", () => {
+  const s = new Scope({ allowedHosts: ["Staging.Example.com"] });
+  assert.equal(s.isHostAllowed("HTTPS://STAGING.EXAMPLE.COM/x"), true);
+});
+
+test("a port does not change the host decision", () => {
+  const s = new Scope({ allowedHosts: ["staging.example.com"] });
+  assert.equal(s.isHostAllowed("https://staging.example.com:8443/"), true);
+});
+
+test("a trailing-dot host is not treated as the allowed host (fails closed)", () => {
+  const s = new Scope({ allowedHosts: ["staging.example.com"] });
+  assert.equal(s.isHostAllowed("https://staging.example.com./"), false);
+});
+
+test("a non-URL string is refused, not thrown through", () => {
+  const s = new Scope({ allowedHosts: ["a.com"] });
+  assert.equal(s.isHostAllowed("not a url"), false);
+});
