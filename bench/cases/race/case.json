@@ -1,0 +1,21 @@
+{
+  "title": "Races on limits: a coupon checked then consumed, an invite accepted atomically, an idempotent gift card",
+  "type": "live",
+  "config": {
+    "options": {
+      "authz-matrix": { "accounts": { "a": { "token": "tok-a" } } },
+      "race": { "enabled": true, "targets": [
+        { "name": "coupon", "path": "/api/coupons/redeem", "body": { "code": "WELCOME50" }, "max": 1, "readPath": "/api/me", "readField": "wallet.credits", "perSuccess": 50 },
+        { "name": "invite", "path": "/api/invites/accept", "body": { "token": "inv_test" }, "max": 1, "readPath": "/api/me", "readField": "wallet.seats" },
+        { "name": "gift", "path": "/api/gift/redeem", "body": { "code": "GIFT1000" }, "max": 1, "readPath": "/api/me", "readField": "wallet.credits", "perSuccess": 1000 }
+      ] }
+    }
+  },
+  "mustFind": [
+    { "id": "coupon-race", "check": "race", "where": "/api/coupons/redeem", "state": "proven", "minSeverity": "high", "why": "A single-use coupon is redeemed by several concurrent requests: credits counted several times." }
+  ],
+  "mustNotFlag": [
+    { "id": "invite-atomic", "check": "race", "where": "/api/invites/accept", "forbid": "any", "why": "Check and consume happen in one step (a transaction): exactly one request wins." },
+    { "id": "gift-idempotent", "check": "race", "where": "/api/gift/redeem", "forbid": "proven", "why": "Every retry answers 200 but the gift is credited once. Counting 2xx alone calls this a race." }
+  ]
+}

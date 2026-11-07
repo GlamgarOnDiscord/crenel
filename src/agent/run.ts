@@ -29,6 +29,7 @@ import { Journal } from "./journal.js";
 import { authorize, type GateDecision, type Judge, type Mode, type PlannedRequest } from "./gate.js";
 import { plannedWrites } from "../checks/authz-write.js";
 import { plannedMass } from "../checks/mass-assignment.js";
+import { plannedRace } from "../checks/race.js";
 import { authzUrl, claimFor, validateClaim, type AuthzOptions, type Claim, type ClaimVerdict } from "./validators.js";
 import { fence, untrusted, UNTRUSTED_PREAMBLE } from "./untrusted.js";
 import { estimateTokens, type Llm } from "./llm.js";
@@ -69,6 +70,7 @@ const TOOL_CHECKS: Record<string, string[]> = {
 const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: string) => PlannedRequest[]> = {
   "authz-write": plannedWrites,
   "mass-assignment": plannedMass,
+  race: plannedRace,
 };
 const LABEL: Record<string, string> = {
   "active.writes": "Écritures actives sur staging (opt-in, valeurs restaurées)",

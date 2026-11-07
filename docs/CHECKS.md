@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 41 checks. Each is deterministic and read-only by default (the
+Crenel runs 42 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -50,6 +50,7 @@ empty list runs every read-only check.
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
+| race | A limit (coupon, credits, invite) consumed more than allowed by concurrent requests | yes (responses and A's read both above the limit) | **writes**: allowActiveTesting + `options.race.enabled`, one burst of at most 25 |
 | mass-assignment | Privileged fields (role, plan, credits, isAdmin, owner) accepted in a user's own update | yes (A's next read shows the value) | **writes**: allowActiveTesting + `options.mass-assignment.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
@@ -521,7 +522,9 @@ page, so the path is skipped. Redirects are read, never followed.
 ## business-logic
 
 Hypotheses, never proofs: the flaws behind "paid without paying" and "made
-myself admin" need writes to prove, which Crenel never sends. Offline, in client
+myself admin" need writes to prove, which this check never sends (the
+[active mode](#active-mode) checks `mass-assignment` and `race` can, on staging
+targets you declare). Offline, in client
 code (server folders such as `api/`, `server/`, `functions/` and route handlers
 are skipped), it flags:
 
@@ -535,7 +538,9 @@ are skipped), it flags:
   `/api/impersonate…` named in the client (one low lead).
 
 Each is `unproven`, medium (routes: low), and carries a regression test written
-out for the team to run on staging; Crenel does not run it, because it writes.
+out for the team to run on staging; this check does not run it, because it
+writes. To prove a privilege lead, declare the route under
+`options.mass-assignment`.
 
 ## supabase-functions
 
@@ -667,6 +672,44 @@ A field the read never returns cannot be seen to change: the receipt says so,
 declare a `readPath` that shows it. Writes per target: one update and one
 restore, on A's own object. The generated test sends the same fields as A and
 expects them unchanged on the next read.
+
+## race
+
+Active mode. A handler that reads a limit, awaits, then consumes it lets
+concurrent requests all pass the check: a single-use coupon redeemed ten times,
+an invite accepted twice, credits spent below zero. One burst per target, as
+account A:
+
+```yaml
+options:
+  race:
+    enabled: true
+    targets:
+      - name: coupon
+        path: /api/coupons/redeem
+        method: POST                  # default
+        body: { code: CRENEL-TEST }   # a coupon created for the test
+        max: 1                        # how many requests may succeed
+        concurrency: 10               # default 10, at most 25
+        readPath: /api/me             # A's read that shows what was consumed
+        readField: wallet.credits     # a number in that read
+        perSuccess: 50                # how much it moves per success (default 1)
+```
+
+1. A reads `readField` (before).
+2. `concurrency` identical requests are created at once and sent together.
+   Once: no retry, no loop. At most 5 targets per run.
+3. A reads `readField` again: uses consumed = change / `perSuccess`.
+4. **Proven** (high) only when more than `max` requests answered 2xx **and**
+   the read shows more than `max` uses consumed. Responses alone stay a lead
+   (an idempotent route answers 200 to every retry and counts one), and so does
+   a read that moved while the responses did not.
+
+What the burst consumed is **not restored**: the receipt lists every request
+and how many uses were spent. Use a resource created for the test (a coupon
+nobody else holds, a test wallet), never a real one. The generated test sends
+the same burst and expects at most `max` successes; it needs a fresh resource
+each time it runs.
 
 ## What goes out
 
