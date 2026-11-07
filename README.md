@@ -137,6 +137,8 @@ Self-contained next steps, in priority order from the Nov 2026 research
 - Secrets: do not compete on detection; add liveness verification and a rotation
   path, or consume an existing detector's output.
 - `mcp-surface`: checks for LLM and MCP features exposed to users.
+- Give findings a repo-relative path so generated tests resolve from the repo
+  root (today their paths are relative to the scanned projectDir).
 - A Tauri desktop app over the same core.
 
 Done since the first draft: malware denylist synced from OSV in CI
