@@ -145,3 +145,11 @@ test("live: a table without RLS is proven, one with RLS is not, reads are GET li
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Firestore collection names are read from the client code", async () => {
+  const { firestoreCollections } = await import("./baas-exposure.js");
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fs-"));
+  writeFileSync(join(dir, "app.js"), 'getDocs(collection(db, "invoices"));getDoc(doc(db, "users", uid));firebase.firestore().collection("orders").get();');
+  try { assert.deepEqual(firestoreCollections(dir).sort(), ["invoices", "orders", "users"]); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -20,9 +20,10 @@
 //     answers with a row is PROVEN exposed.
 //
 // Firebase: Realtime Database answers `/.json?shallow=true` with top-level keys
-// only when the rules allow public reads; that is the active probe. Firestore
-// needs a POST to list collections, which the harness never sends, so it stays a
-// lead. Appwrite, PocketBase and Convex have no public-key-equals-access model
+// only when the rules allow public reads; that is the active probe. Firestore:
+// listing collections needs a POST (never sent), but a collection the bundle
+// names is read with a GET on the REST API (firestore.googleapis.com must be
+// declared); one document back is the proof. Appwrite, PocketBase and Convex have no public-key-equals-access model
 // that a GET can prove, so they are leads that point at their permission model.
 
 import { readFileSync, statSync } from "node:fs";
@@ -238,6 +239,20 @@ export async function readFirebaseRoot(databaseURL: string, scope: Scope): Promi
   }
 }
 
+const FIRESTORE = "https://firestore.googleapis.com";
+
+/** Collection names the client code reads: collection(db, "x"), .collection("x"), doc(db, "x", …). */
+export function firestoreCollections(projectDir: string): string[] {
+  const out = new Set<string>();
+  for (const file of walkFiles(projectDir, { accept: (n) => [".js", ".mjs", ".ts", ".tsx", ".jsx"].includes(extOf(n)) })) {
+    let text = "";
+    try { if (statSync(file).size > 4 * 1024 * 1024) continue; text = readFileSync(file, "utf8"); } catch { continue; }
+    for (const m of text.matchAll(/\b(?:collection|doc|collectionGroup)\(\s*\w+\s*,\s*["'`]([A-Za-z0-9_-]{1,64})["'`]/g)) out.add(m[1]!);
+    for (const m of text.matchAll(/\.collection\(\s*["'`]([A-Za-z0-9_-]{1,64})["'`]/g)) out.add(m[1]!);
+  }
+  return [...out];
+}
+
 function hostOf(url: string): string {
   try { return new URL(url).hostname; } catch { return ""; }
 }
@@ -335,6 +350,31 @@ export const baasExposure: Check = {
           } catch (err) {
             ctx.log(`baas-exposure: firebase read failed: ${(err as Error).message}`);
           }
+        }
+        // Firestore: a named collection is read with a plain GET on the REST API
+        // (OpenFirebase's method). The names come from the bundle itself.
+        if (h.projectId && canProbe(FIRESTORE)) {
+          ctx.scope.assertActiveAllowed("baas-exposure (live read)");
+          let proved = false;
+          for (const coll of firestoreCollections(ctx.projectDir).slice(0, 20)) {
+            const url = `${FIRESTORE}/v1/projects/${encodeURIComponent(h.projectId)}/databases/(default)/documents/${encodeURIComponent(coll)}?pageSize=1`;
+            try {
+              const res = await safeFetch(url, ctx.scope);
+              const docs = res.status === 200 ? ((JSON.parse(res.body) as { documents?: unknown[] }).documents ?? []) : [];
+              if (!docs.length) continue;
+              proved = true;
+              findings.push({
+                id: `baas-exposure:firestore:${h.projectId}:${coll}`, check: "baas-exposure",
+                title: `Firestore collection ${coll} readable without signing in (${h.projectId})`, severity: "critical", state: "proven",
+                location: url.replace("?pageSize=1", ""),
+                description: `An anonymous GET on the Firestore REST API returned a document of ${coll}. Anyone can read the collection. The document was not kept.`,
+                remediation: `Firestore rules: deny by default and allow reads of ${coll} only when request.auth.uid owns the document.`,
+                proof: { method: "anonymous GET of one document of a collection named in the bundle (content not kept)", replay: `curl -s '${url}'`, evidence: "HTTP 200, 1 document returned without signing in" },
+                regressionHint: `The Firestore collection ${coll} must not be readable without auth.`,
+              });
+            } catch (err) { ctx.log(`baas-exposure: firestore ${coll}: ${(err as Error).message}`); }
+          }
+          if (proved) continue;
         }
         findings.push(lead);
         continue;

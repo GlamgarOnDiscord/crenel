@@ -155,6 +155,14 @@ asserts that the table returns no row with the anon key.
 Secret keys (`service_role`, `sb_secret_`) are `exposed-secrets` findings,
 critical and proven on their own.
 
+
+**Firestore.** With `firestore.googleapis.com` declared and active testing on,
+each collection the client code names (`collection(db, "x")`, `doc(db, "x", …)`,
+`.collection("x")`) is read with one anonymous GET on the Firestore REST API
+(`pageSize=1`). A document coming back proves the rules allow public reads; the
+document is not kept. Listing all collections would need a POST, which Crenel
+never sends.
+
 ## authz-matrix
 
 The cross-tenant check, and deliberately **not** an LLM (research shows LLMs are
