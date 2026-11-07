@@ -18,8 +18,10 @@ import { tlsVerification } from "../checks/tls-verification.js";
 import { jwtConfig } from "../checks/jwt-config.js";
 import { committedCredentials } from "../checks/committed-credentials.js";
 import { baasExposure } from "../checks/baas-exposure.js";
+import { webhookSignature } from "../checks/webhook-signature.js";
+import { ssrf } from "../checks/ssrf.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

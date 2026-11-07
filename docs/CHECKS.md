@@ -24,6 +24,8 @@ empty list runs every read-only check.
 | jwt-config | JWT config that defeats signature verification | no (leads) | no |
 | committed-credentials | Committed .npmrc/.pypirc/.netrc/... credentials | yes (file+field) | no |
 | baas-exposure | Supabase/Firebase public key in the bundle, tables readable without RLS | yes (one-row read, opt-in) | static no; live read yes + active gate |
+| webhook-signature | Webhook handler acting on an unverified payload | no (leads) | no |
+| ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -164,3 +166,27 @@ Flags committed package-manager / registry credential files that carry a secret:
 **proven** match (these hold tokens no key-shape scanner sees). Fix: remove from
 the repo and history, rotate, and gitignore credential files.
 
+## webhook-signature
+
+Flags a source file that looks like a webhook handler (a quoted Stripe, GitHub,
+Clerk/Svix or Lemon Squeezy event name or signature header, or `webhook` in the
+path), reads the request body, and contains no verification call at all
+(`constructEvent`, `webhooks.verify`, `new Webhook`, `timingSafeEqual`,
+`createHmac`, `verify…`). Anyone who knows the URL can then forge a paid event.
+High lead, not proof: a verification done in a shared middleware is invisible
+from the handler file.
+
+Fix: verify the provider's signature on the raw body before acting, reject on
+failure. Test: POST a forged unsigned event and expect 400/401 with no effect.
+
+## ssrf
+
+Flags server code where a value taken from the request (`searchParams.get`,
+`req.query`, `req.params`, `req.body`, Hono's `c.req.query/param/json`) flows
+into `fetch`, `axios`, `got` or `http(s).get` in the same file, when the file
+shows no host allowlist (`ALLOWED…`, `allowedHosts`, a `.hostname` comparison).
+High lead: the taint tracking is a same-file heuristic, not a data-flow
+analysis.
+
+Fix: require https, allow an explicit list of hosts, resolve the host and refuse
+private, loopback and link-local addresses, do not follow cross-host redirects.

@@ -12,8 +12,8 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-15-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-171%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Checks](https://img.shields.io/badge/checks-17-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -56,6 +56,7 @@ pnpm crenel generate-tests     # one regression test per finding
 | **Authorization** | `authz-matrix` account A reaching account B's objects, anonymous access, proven live on staging |
 | **BaaS** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) |
 | **Supply chain** | `dependency-risk` known-malware versions, install hooks · `ci-hardening` · `dockerfile` · `mcp-surface` |
+| **Server code** | `webhook-signature` unverified Stripe, GitHub or Clerk webhooks · `ssrf` fetching a URL from the request |
 | **Config** | `headers` · `jwt-config` · `tls-verification` · `cloudflare-audit` |
 
 Details and fixes: [`docs/CHECKS.md`](docs/CHECKS.md).

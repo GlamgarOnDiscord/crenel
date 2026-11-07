@@ -1,16 +1,44 @@
 {
   "title": "Supabase keys in a client bundle: service_role is the leak, anon and publishable are public by design",
   "type": "static",
-  "config": { "projectDir": "project" },
+  "config": {
+    "projectDir": "project"
+  },
   "mustFind": [
-    { "id": "service-role-in-bundle", "where": "dist/app\\.js(:7)?$", "text": "supabase|service|jwt|secret", "state": "proven", "minSeverity": "high",
-      "why": "A Supabase service_role key bypasses RLS: anyone reading the bundle owns the database." }
+    {
+      "id": "service-role-in-bundle",
+      "where": "dist/app\\.js(:7)?$",
+      "text": "supabase|service|jwt|secret",
+      "state": "proven",
+      "minSeverity": "high",
+      "why": "A Supabase service_role key bypasses RLS: anyone reading the bundle owns the database."
+    },
+    {
+      "id": "commented-live-key",
+      "where": "dist/app\\.js:5$",
+      "state": "any",
+      "minSeverity": "high",
+      "why": "A commented-out sk_live_ key in a shipped bundle is still served to every visitor: the comment does not hide it."
+    }
   ],
   "mustNotFlag": [
-    { "id": "anon-key-as-high", "where": "dist/app\\.js:3$", "forbid": "high",
-      "why": "The anon key is public by design. At most a lead pointing to RLS, never high or critical on its own." },
-    { "id": "stripe-publishable", "where": "dist/app\\.js:4$", "forbid": "any", "why": "pk_live_ is meant to ship to the browser." },
-    { "id": "commented-key", "where": "dist/app\\.js:5$", "forbid": "proven", "why": "A commented-out line is not shipped behaviour." },
-    { "id": "docs-placeholder", "where": "docs/SETUP\\.md", "forbid": "proven", "why": "sk_live_xxxx is a placeholder in documentation." }
+    {
+      "id": "anon-key-as-high",
+      "where": "dist/app\\.js:3$",
+      "forbid": "high",
+      "why": "The anon key is public by design. At most a lead pointing to RLS, never high or critical on its own."
+    },
+    {
+      "id": "stripe-publishable",
+      "where": "dist/app\\.js:4$",
+      "forbid": "any",
+      "why": "pk_live_ is meant to ship to the browser."
+    },
+    {
+      "id": "docs-placeholder",
+      "where": "docs/SETUP\\.md",
+      "forbid": "proven",
+      "why": "sk_live_xxxx is a placeholder in documentation."
+    }
   ]
 }
