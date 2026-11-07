@@ -1,6 +1,6 @@
 # Nuit du 07/11/2026 — récap pour Tom
 
-Tout est en local dans `/root/work/bastion`, commité, rien poussé, rien touché côté Scenivia.
+Tout est en local dans `/root/work/bastion`, commité, rien poussé.
 
 ## Fait
 
