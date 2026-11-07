@@ -61,13 +61,13 @@ function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string
       continue;
     }
     const key = body;
-    if (!BOOLEAN_FLAGS.has(key) && !VALUE_FLAGS.has(key)) warnings.push(`flag inconnu ignoré: --${key}`);
+    if (!BOOLEAN_FLAGS.has(key) && !VALUE_FLAGS.has(key)) warnings.push(`unknown flag ignored: --${key}`);
     if (BOOLEAN_FLAGS.has(key)) { flags[key] = true; continue; }
     const next = argv[i + 1];
     if (next !== undefined && !next.startsWith("-")) { flags[key] = next; i++; }
     else { // value flag with no value
       flags[key] = true;
-      if (VALUE_FLAGS.has(key)) warnings.push(`--${key} attend une valeur, ignoré`);
+      if (VALUE_FLAGS.has(key)) warnings.push(`--${key} expects a value, ignored`);
     }
   }
   return { _, flags, warnings };
@@ -80,7 +80,7 @@ async function runGuarded(config: Parameters<typeof run>[0], configPath: string,
   try {
     return await run(config, configPath, { verbose });
   } catch (err) {
-    process.stderr.write(`Erreur de périmètre ou de configuration: ${(err as Error).message}\n`);
+    process.stderr.write(`Scope or configuration error: ${(err as Error).message}\n`);
     return null;
   }
 }
@@ -129,7 +129,7 @@ async function main(): Promise<number> {
     // A check that threw produced no findings; surface it loudly so a partial
     // run is never mistaken for a clean one (the exit code reflects it below).
     if (result.errors.length > 0) {
-      process.stderr.write(`\n${result.errors.length} check(s) ont échoué, résultat partiel:\n`);
+      process.stderr.write(`\n${result.errors.length} check(s) failed, partial result:\n`);
       for (const e of result.errors) process.stderr.write(`  - ${e.check}: ${e.message}\n`);
     }
     if (flags.out && typeof flags.out === "string") {
@@ -165,13 +165,13 @@ async function main(): Promise<number> {
         process.stdout.write("\n" + renderDiff(d));
         regressed = hasRegression(d);
       } else if (!base && !baselineBroken) {
-        process.stderr.write(`Pas de baseline à ${baselinePath} (utilise --update-baseline pour en créer une).\n`);
+        process.stderr.write(`No baseline at ${baselinePath} (use --update-baseline to create one).\n`);
       }
     }
     // Never overwrite a baseline we could not read.
     if (flags["update-baseline"] && baselinePath && !baselineBroken) {
       saveBaseline(baselinePath, result);
-      process.stdout.write(`Baseline écrite dans ${baselinePath}.\n`);
+      process.stdout.write(`Baseline written to ${baselinePath}.\n`);
     }
 
     // Exit non-zero on a proven high/critical, on a regression vs baseline, when
@@ -195,7 +195,7 @@ async function main(): Promise<number> {
     const out = typeof flags.out === "string" ? flags.out : "crenel.regression.test.ts";
     writeFileSync(out, content);
     const n = content.match(/\btest\(/g)?.length ?? 0;
-    process.stdout.write(`${n} test(s) de régression écrits dans ${out}.\n`);
+    process.stdout.write(`${n} regression test(s) written to ${out}.\n`);
     return 0;
   }
 
@@ -213,13 +213,13 @@ async function main(): Promise<number> {
     if (!result) return 2;
     const model = typeof flags.model === "string" ? flags.model : "opus";
     const max = typeof flags.max === "string" ? Number(flags.max) : 3;
-    process.stdout.write(`Triage de ${Math.min(max, result.findings.filter((f) => f.state === "unproven").length)} lead(s) via claude -p (${model})...\n\n`);
+    process.stdout.write(`Triaging ${Math.min(max, result.findings.filter((f) => f.state === "unproven").length)} lead(s) via claude -p (${model})...\n\n`);
     const advice = await triageLeads(result.findings, model, max);
     for (const a of advice) {
       const f = result.findings.find((x) => x.id === a.id);
       process.stdout.write(`• ${f?.title ?? a.id}\n${a.advice}\n\n`);
     }
-    process.stdout.write("Note: ceci est un avis du modèle, jamais une preuve. Seul un validateur déterministe marque 'prouvé'.\n");
+    process.stdout.write("Note: this is the model's opinion, never proof. Only a deterministic validator marks a finding proven.\n");
     return 0;
   }
 

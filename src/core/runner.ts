@@ -14,6 +14,8 @@ export interface RunResult {
   findings: Finding[];
   errors: { check: string; message: string }[];
   checksRun: string[];
+  /** Wall-clock duration of the run, in milliseconds. */
+  durationMs?: number;
 }
 
 export interface RunOptions {
@@ -52,6 +54,7 @@ export async function run(
     log,
   };
 
+  const started = Date.now();
   const findings: Finding[] = [];
   const errors: RunResult["errors"] = [];
   const checksRun: string[] = [];
@@ -68,9 +71,10 @@ export async function run(
 
   return {
     project: config.project,
-    startedAt: new Date().toISOString(),
+    startedAt: new Date(started).toISOString(),
     findings,
     errors,
     checksRun,
+    durationMs: Date.now() - started,
   };
 }

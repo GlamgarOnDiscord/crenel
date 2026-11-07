@@ -32,14 +32,15 @@ test("sortFindings: proven before leads, then by severity", () => {
 test("renderText shows proven counts, leads, proof and fix; renderJson round-trips", () => {
   const r = result([f({ title: "Secret", state: "proven", severity: "critical", proof: { method: "m", replay: "grep x" } }), f({ id: "y", state: "unproven", severity: "low" })]);
   const txt = renderText(r);
-  assert.match(txt, /Proven:/);
+  assert.match(txt, /1 proven/);
   assert.match(txt, /grep x/); // proof replay shown
-  assert.match(txt, /Leads \(unproven\): 1/);
+  assert.match(txt, /1 lead/);
+  assert.match(txt, /CI fails/);
   assert.deepEqual(JSON.parse(renderJson(r)).findings.length, 2);
 });
 
 test("renderText surfaces errored checks", () => {
   const txt = renderText(result([], [{ check: "headers", message: "timeout" }]));
-  assert.match(txt, /errored/i);
+  assert.match(txt, /Checks that errored/);
   assert.match(txt, /headers: timeout/);
 });
