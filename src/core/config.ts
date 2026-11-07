@@ -22,7 +22,7 @@ export const ConfigSchema = z.object({
   /** Which checks to run. Empty means "all read-only checks". */
   checks: z.array(z.string()).default([]),
   /** Per-check options, keyed by check name. */
-  options: z.record(z.unknown()).default({}),
+  options: z.record(z.string(), z.unknown()).default({}),
 }).strict();
 
 export type Config = z.infer<typeof ConfigSchema>;
