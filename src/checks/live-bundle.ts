@@ -48,6 +48,9 @@ export function extractAssetUrls(body: string, base: string, kind: "html" | "js"
     const p = m[1]!.startsWith("/") ? m[1]! : `/_next/${m[1]!}`;
     add(p);
   }
+  // Chunks a visitor never loads (getfrontend's method): the bundler lists them
+  // all in its runtime, as an id -> hash table or a dependency array.
+  for (const u of runtimeChunkUrls(body, base)) out.add(u);
   const map = /\/\/[#@]\s*sourceMappingURL\s*=\s*(\S+)\s*$/m.exec(body);
   if (map && !map[1]!.startsWith("data:")) add(map[1]!);
   return [...out];
@@ -69,6 +72,34 @@ export function extractEndpoints(js: string): string[] {
     out.add(p);
   }
   return [...out].sort();
+}
+
+/**
+ * Every chunk the bundler's runtime knows, loaded or not:
+ *  - webpack/Next: "static/chunks/" + ({12:"admin"}[e]||e) + "." + {12:"3f2a"}[e] + ".js",
+ *    resolved against the runtime's public path (__webpack_require__.p = "/_next/");
+ *  - Vite: the __vite__mapDeps array of "assets/x-hash.js" paths.
+ */
+export function runtimeChunkUrls(body: string, base: string): string[] {
+  const out: string[] = [];
+  const origin = (() => { try { return new URL(base).origin; } catch { return ""; } })();
+  if (!origin) return out;
+  const publicPath = /\.p\s*=\s*"([^"]*)"/.exec(body)?.[1] ?? "/";
+  const table = (s: string) => Object.fromEntries([...s.matchAll(/(?:"?)([\w-]+)"?\s*:\s*"([^"]+)"/g)].map((m) => [m[1]!, m[2]!]));
+  const re = /"([\w./-]*\/)"\s*\+\s*(?:\(\s*\{([^{}]*)\}\s*\[\s*\w+\s*\]\s*\|\|\s*\w+\s*\)|\w+)\s*\+\s*"\."\s*\+\s*\{([^{}]*)\}\s*\[\s*\w+\s*\]\s*\+\s*"(\.[\w.]*js)"/g;
+  for (const m of body.matchAll(re)) {
+    const names = m[2] ? table(m[2]) : {};
+    const hashes = table(m[3]!);
+    for (const [id, hash] of Object.entries(hashes).slice(0, 400)) {
+      try { out.push(new URL(`${publicPath}${m[1]}${names[id] ?? id}.${hash}${m[4]}`, origin + "/").toString()); } catch { /* skip */ }
+    }
+  }
+  if (body.includes("__vite__mapDeps")) {
+    for (const m of body.matchAll(/["'`]((?:\.\/)?assets\/[\w.-]+\.m?js)["'`]/g)) {
+      try { out.push(new URL(m[1]!.replace(/^\.\//, ""), origin + "/").toString()); } catch { /* skip */ }
+    }
+  }
+  return out;
 }
 
 const kindOf = (url: string, contentType: string): "html" | "js" | "map" =>
