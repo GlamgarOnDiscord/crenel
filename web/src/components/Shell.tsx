@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutGrid, ShieldAlert, Radar, FolderClosed, KeyRound, LockKeyhole,
@@ -6,6 +7,7 @@ import {
 import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
 import { DOCS_URL } from "../lib/links.ts";
+import { CommandPalette } from "./CommandPalette.tsx";
 
 const nav = [
   { group: "Sécurité", items: [
@@ -26,11 +28,20 @@ const nav = [
 ];
 
 export function Shell() {
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   return (
     <div className="app">
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <aside className="side">
         <NavLink to="/" className="brand"><Mark /><Wordmark /></NavLink>
-        <div className="search"><Search size={15} /> Rechercher <span className="kbd">⌘K</span></div>
+        <button className="search" onClick={() => setPalette(true)}><Search size={15} /> Rechercher <span className="kbd">⌘K</span></button>
         {nav.map((g) => (
           <div key={g.group}>
             <div className="navlabel">{g.group}</div>
