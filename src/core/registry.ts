@@ -10,8 +10,9 @@ import { ciHardening } from "../checks/ci-hardening.js";
 import { headers } from "../checks/headers.js";
 import { cloudflareAudit } from "../checks/cloudflare-audit.js";
 import { mcpSurface } from "../checks/mcp-surface.js";
+import { dockerfile } from "../checks/dockerfile.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {
