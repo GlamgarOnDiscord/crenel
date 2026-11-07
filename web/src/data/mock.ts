@@ -1,7 +1,7 @@
 import type { Activity, Finding, ScanStep, Target } from "../lib/types.ts";
 
 export const targets: Target[] = [
-  { id: "acme-app", name: "acme-app", url: "staging.acme.app", env: "staging", findings: 7, proven: 3, lastScan: "il y a 12 min" },
+  { id: "acme-app", name: "acme-app", url: "staging.acme.app", env: "staging", findings: 12, proven: 3, lastScan: "il y a 12 min" },
   { id: "inboxly", name: "inboxly", url: "app.inboxly.io", env: "production", findings: 3, proven: 0, lastScan: "il y a 3 h" },
   { id: "pagefold", name: "pagefold", url: "staging.pagefold.dev", env: "staging", findings: 7, proven: 1, lastScan: "hier" },
 ];
@@ -55,13 +55,43 @@ export const findings: Finding[] = [
     description: "Le cookie de session ne fixe pas SameSite, ce qui élargit la surface CSRF.",
     remediation: "Poser SameSite=Lax ou Strict et Secure sur le cookie de session.",
   },
+  {
+    id: "f-publicenv", sev: "high", title: "Secret derrière un préfixe exposé au client: NEXT_PUBLIC_STRIPE_SECRET", location: ".env:4",
+    state: "lead", seen: "12 min", check: "public-env",
+    description: "NEXT_PUBLIC_STRIPE_SECRET porte un préfixe que le framework inline dans le bundle navigateur: sa valeur fuite côté client.",
+    remediation: "Retirer le préfixe public et ne lire ce secret que côté serveur.",
+  },
+  {
+    id: "f-dockerfile", sev: "med", title: "Conteneur lancé en root (pas de USER)", location: "Dockerfile",
+    state: "lead", seen: "12 min", check: "dockerfile",
+    description: "Aucune instruction USER: le conteneur tourne en root. Une évasion de process a alors root dans le conteneur.",
+    remediation: "Ajouter un USER non-root avant l'entrypoint.",
+  },
+  {
+    id: "f-env", sev: "med", title: "Fichier .env commité", location: ".env",
+    state: "lead", seen: "12 min", check: "committed-env",
+    description: "Un .env commité contient souvent des secrets (URLs de base, jetons) qu'aucun scanner de format de clé ne verrait.",
+    remediation: "L'ajouter au .gitignore, le retirer de l'historique, et faire tourner ce qu'il contenait.",
+  },
+  {
+    id: "f-mcp", sev: "low", title: "Config MCP commitée: .mcp.json (1 serveur)", location: ".mcp.json",
+    state: "lead", seen: "12 min", check: "mcp-surface",
+    description: "Un serveur MCP local déclaré exécute une commande: exécution arbitraire si la config est altérée.",
+    remediation: "Épingler et revoir chaque serveur; garder les secrets hors du fichier commité.",
+  },
+  {
+    id: "f-sourcemap", sev: "low", title: "Source map livrée dans le bundle: app.js.map", location: "dist/app.js.map",
+    state: "lead", seen: "12 min", check: "sourcemaps",
+    description: "Une source map servie au navigateur laisse reconstruire le code source original.",
+    remediation: "Ne pas déployer les .map publiquement; les envoyer au tracker d'erreurs au build.",
+  },
 ];
 
 export const activity: Activity[] = [
   { kind: "bad", title: "Clé Stripe prouvée dans le bundle", meta: "dist/app.js:5 · critique" },
   { kind: "brand", title: "Test de régression généré pour l'isolation projet", meta: "authz-matrix · il y a 11 min" },
   { kind: "info", title: "Clé API Google à vérifier (lead)", meta: "dist/app.js:7 · high" },
-  { kind: "info", title: "Scan planifié lancé sur acme-app", meta: "7 findings · il y a 12 min" },
+  { kind: "info", title: "Scan planifié lancé sur acme-app", meta: "12 findings · il y a 12 min" },
 ];
 
 // Barres empilées: prouvés (bas) + leads (haut), 14 jours.

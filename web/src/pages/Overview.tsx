@@ -28,8 +28,8 @@ export function Overview() {
           </div>
           <div className="kpi">
             <div className="top"><span className="ic32"><Clock size={16} /></span><span className="dp down">+2</span></div>
-            <span className="lab">Findings ouverts</span><span className="fig">7</span>
-            <div className="spark"><Sparkline points={[4,5,5,6,6,7,7]} /></div>
+            <span className="lab">Findings ouverts</span><span className="fig">12</span>
+            <div className="spark"><Sparkline points={[7,8,9,10,11,11,12]} /></div>
           </div>
           <div className="kpi">
             <div className="top"><span className="ic32"><CheckCheck size={16} /></span><span className="dp up">▼ 0,4 j</span></div>

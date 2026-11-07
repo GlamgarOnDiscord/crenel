@@ -12,7 +12,7 @@ import { CommandPalette } from "./CommandPalette.tsx";
 const nav = [
   { group: "Sécurité", items: [
     { to: "/app/overview", icon: LayoutGrid, label: "Vue d'ensemble" },
-    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: 7 },
+    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: 12 },
     { to: "/app/scans", icon: Radar, label: "Scans" },
     { to: "/app/targets", icon: FolderClosed, label: "Cibles", count: 3 },
   ]},
