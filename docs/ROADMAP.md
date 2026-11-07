@@ -2,7 +2,7 @@
 
 Not done yet, in rough order:
 
-- **Authorization**: import routes from the JS bundle (or `review-bundle`'s endpoints) to fill the matrix; replay ids leaked in responses (UUIDs, GraphQL global ids); an admin role with an expected "allow"; old and new objects per resource in generated tests. Action-level BOLA (update or delete someone else's object) stays off by default: later, only with declared test accounts, a throwaway object Crenel creates, and a separate opt-in.
+- **Authorization**: import routes from the JS bundle (or `review-bundle`'s endpoints) to fill the matrix; replay GraphQL global ids leaked in responses; an admin role with an expected "allow"; old and new objects per resource in generated tests. Action-level BOLA (update or delete someone else's object) stays off by default: later, only with declared test accounts, a throwaway object Crenel creates, and a separate opt-in.
 - **Secrets**: liveness checks with a read-only provider call (e.g. Stripe `GET /v1/balance`), strictly opt-in with the provider host declared, giving active / revoked / unknown; rotation paths.
 - **BaaS**: anonymous writes on Supabase (a separate opt-in, on a throwaway row Crenel creates), Firestore rules (needs a POST, never sent today).
 - **Dependencies**: an age and publisher signal against slopsquatting and maintainer takeovers.

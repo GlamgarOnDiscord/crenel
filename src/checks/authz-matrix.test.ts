@@ -85,3 +85,11 @@ test("live probe: B's object returned to A is proven; a 403 or a soft 404 is not
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+test("discoverIds finds ids shaped like B's declared ones (prefix or UUID), nothing for undeclared shapes", async () => {
+  const { discoverIds } = await import("./authz-matrix.js");
+  const resources = [{ name: "file", path: "/f/:id" }, { name: "user", path: "/u/:id" }, { name: "note", path: "/n/:id" }];
+  const body = '{"files":["file_b_9","file_b_10"],"owner":"3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e","note":"note_x"}';
+  const got = discoverIds(body, resources, { file: ["file_b_1"], user: ["11111111-2222-4333-8444-555555555555"] }).map((d) => `${d.resource.name}:${d.id}`);
+  assert.deepEqual(got, ["file:file_b_9", "file:file_b_10", "user:3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e"]);
+});

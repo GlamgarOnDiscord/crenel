@@ -135,6 +135,11 @@ path prefix). An operation with `security: []` is imported as public by design
 and never probed. Hand-declared resources win on a name clash. You still list
 the ids account B owns: the matrix never guesses objects.
 
+**Ids found in B's own responses.** With `accounts.b.token` set, ids shaped like
+B's declared ones (same prefix, or UUIDs) that appear in B's responses are
+replayed too, up to 25. Since ownership is inferred, a discovered id counts only
+if B can read it and an anonymous caller does not get the same object.
+
 ## sourcemaps
 
 Looks under `projectDir` for `.map` files and for `sourceMappingURL` comments

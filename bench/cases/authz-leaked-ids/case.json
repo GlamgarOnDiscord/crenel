@@ -1,0 +1,20 @@
+{
+  "title": "An attachment id that only appears in B's own data, next to a public and a protected one",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [
+        { "name": "project", "path": "/api/projects/:id", "methods": ["GET"] },
+        { "name": "attachment", "path": "/api/attachments/:id", "methods": ["GET"] }
+      ],
+      "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "project": ["proj_b_1"], "attachment": ["att_b_0"] } } }
+    } }
+  },
+  "mustFind": [
+    { "id": "discovered-attachment", "check": "authz", "text": "att_b_7", "state": "proven", "minSeverity": "high", "why": "att_b_7 is listed in B's project and readable by A, though nobody declared it." }
+  ],
+  "mustNotFlag": [
+    { "id": "public-attachment", "check": "authz", "text": "att_pub_1", "forbid": "any", "why": "Public by design: an anonymous caller gets the same object." },
+    { "id": "protected-attachment", "check": "authz", "text": "att_b_8", "forbid": "any", "why": "Correctly denied to A." }
+  ]
+}

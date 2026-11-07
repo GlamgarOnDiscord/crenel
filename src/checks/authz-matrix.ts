@@ -123,6 +123,7 @@ export const authzMatrix: Check = {
       ...(accounts.c?.token ? [{ key: "c" as const, who: "account C's token (another tenant)", token: accounts.c.token }] : []),
       { key: "anon", who: "no token at all" },
     ];
+    const ownerBodies: string[] = [];
     for (const c of cases) {
       if (c.method !== "GET") { ctx.log(`authz-matrix: ${c.method} ${c.resource.path} skipped, only GET is probed live`); continue; }
       const url = base + c.resource.path.replace(":id", encodeURIComponent(c.id));
@@ -130,6 +131,7 @@ export const authzMatrix: Check = {
       ctx.scope.assertUrlAllowed(url);
       try {
         const owner = accounts.b?.token ? await get(url, accounts.b.token) : undefined;
+        if (owner && owner.status >= 200 && owner.status < 300) ownerBodies.push(owner.body);
         for (const actor of actors) {
           const attacker = await get(url, actor.token);
           const control = await get(controlUrl, actor.token);
@@ -166,10 +168,89 @@ export const authzMatrix: Check = {
       }
     }
 
+    // Ids that leak in B's own responses (XBOW's method): a project names its
+    // renders, an invoice its customer. They are B's objects nobody declared, so
+    // they are replayed too, under stricter conditions since ownership is
+    // inferred: B must read it, an anonymous caller must not get the same body
+    // (otherwise it is public), and the oracle must still see B's object in A's
+    // response.
+    if (accounts.b?.token && ownerBodies.length) {
+      const declared = new Set(cases.map((c) => `${c.resource.name}:${c.id}`));
+      const found = discoverIds(ownerBodies.join("\n"), resources.filter((r) => !r.public), b?.owns ?? {})
+        .filter((d) => !declared.has(`${d.resource.name}:${d.id}`))
+        .slice(0, MAX_DISCOVERED);
+      if (found.length) ctx.log(`authz-matrix: ${found.length} id(s) of B discovered in B's responses, replayed`);
+      for (const d of found) {
+        const url = base + d.resource.path.replace(":id", encodeURIComponent(d.id));
+        const controlUrl = base + d.resource.path.replace(":id", `crenel-nonexistent-${randomBytes(6).toString("hex")}`);
+        try {
+          ctx.scope.assertUrlAllowed(url);
+          const owner = await get(url, accounts.b.token);
+          if (owner.status < 200 || owner.status >= 300) continue; // not readable by B: not provably B's
+          const anon = await get(url);
+          if (anon.status >= 200 && anon.status < 300 && anon.body === owner.body) continue; // public object
+          for (const actor of actors.filter((x) => x.key !== "anon")) {
+            const attacker = await get(url, actor.token);
+            const control = await get(controlUrl, actor.token);
+            const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
+            if (o.verdict !== "leak") continue;
+            findings.push({
+              id: `authz-matrix:${d.resource.name}:GET:${d.id}${actor.key === "a" ? "" : `:${actor.key}`}:discovered`,
+              check: "authz-matrix",
+              title: `Account ${actor.key.toUpperCase()} reached account B's ${d.resource.name} (GET ${attacker.status}), id found in B's own data`,
+              severity: "critical",
+              state: "proven",
+              location: url,
+              description: `The id ${d.id} appeared in a response account B received, B can read it, an anonymous caller cannot, and with ${actor.who} the server returned B's object: ${o.reason}.`,
+              remediation: `Enforce the ownership check on ${d.resource.name}, and declare ${d.id} (or ids like it) under accounts.b.owns so the regression test covers it.`,
+              proof: {
+                method: "live cross-tenant replay of an id discovered in the owner's response: owner baseline, anonymous check, attacker, negative control",
+                replay: `curl -i -H 'authorization: Bearer <${actor.key.toUpperCase()}_TOKEN>' '${url}'`,
+                evidence: `HTTP ${attacker.status}; owner ${owner.status}; anonymous ${anon.status}; control ${control.status}. ${o.reason}`,
+              },
+              regressionHint: renderTestFile([d.resource]),
+            });
+            break;
+          }
+        } catch (err) {
+          ctx.log(`authz-matrix: GET ${url} failed: ${(err as Error).message}`);
+        }
+      }
+    }
+
     ctx.log(`authz-matrix: ${findings.length} broken-authorization case(s) proven`);
     return findings;
   },
 };
+
+const MAX_DISCOVERED = 25;
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
+
+/**
+ * Ids in `text` that have the shape of a resource's declared ids: a UUID when B's
+ * declared ids are UUIDs, the same prefix otherwise ("proj_" for "proj_b_1"). A
+ * resource with no declared id has no known shape and is left out.
+ */
+export function discoverIds(text: string, resources: ResourceSpec[], owns: Record<string, string[]>): { resource: ResourceSpec; id: string }[] {
+  const out: { resource: ResourceSpec; id: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of resources) {
+    const sample = owns[r.name]?.[0];
+    if (!sample) continue;
+    let re: RegExp | null = null;
+    if (new RegExp(`^${UUID.source}$`, "i").test(sample)) re = new RegExp(UUID.source, "gi");
+    else {
+      const prefix = /^([A-Za-z]{2,12}[_-])/.exec(sample)?.[1];
+      if (prefix) re = new RegExp(`\\b${prefix.replace(/[-]/g, "\\-")}[A-Za-z0-9_-]{2,64}\\b`, "g");
+    }
+    if (!re) continue;
+    for (const m of text.matchAll(re)) {
+      const key = `${r.name}:${m[0]}`;
+      if (!seen.has(key)) { seen.add(key); out.push({ resource: r, id: m[0] }); }
+    }
+  }
+  return out;
+}
 
 // Emit a framework-agnostic test skeleton the team can drop into its suite.
 function renderTestFile(resources: ResourceSpec[]): string {
