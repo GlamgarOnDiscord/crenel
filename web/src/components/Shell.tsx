@@ -69,6 +69,9 @@ export function Shell() {
 }
 
 export function Topbar({ crumb, title, actions }: { crumb?: string; title: string; actions?: React.ReactNode }) {
+  // Keep the document title in sync with the page, so a route change is a real
+  // navigation a screen reader announces (and browser history is legible).
+  useEffect(() => { document.title = `${title} · Crenel`; }, [title]);
   return (
     <header className="topbar">
       <div>
