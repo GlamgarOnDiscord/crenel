@@ -54,6 +54,9 @@ export class Scope {
   readonly signal?: AbortSignal;
   readonly onRequest?: (e: NetEvent) => void;
 
+  /** The declared hosts, for checks that look at each of them (DNS, takeover). */
+  get allowedHosts(): string[] { return [...this.allowed]; }
+
   constructor(config: ScopeConfig) {
     this.signal = config.signal;
     this.onRequest = config.onRequest;

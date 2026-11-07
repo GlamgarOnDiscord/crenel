@@ -24,8 +24,12 @@ import { liveBundle } from "../checks/live-bundle.js";
 import { exposedFiles } from "../checks/exposed-files.js";
 import { graphql } from "../checks/graphql.js";
 import { openRedirect } from "../checks/open-redirect.js";
+import { nextMiddleware } from "../checks/next-middleware.js";
+import { subdomainTakeover } from "../checks/subdomain-takeover.js";
+import { emailDns } from "../checks/email-dns.js";
+import { transport } from "../checks/transport.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

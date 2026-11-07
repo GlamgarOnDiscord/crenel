@@ -30,6 +30,10 @@ empty list runs every read-only check.
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
+| next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
+| subdomain-takeover | Declared host with a CNAME to a hosting service where nothing is deployed | yes (CNAME + service's not-found page) | DNS + one GET per declared host |
+| email-dns | Missing or permissive SPF and DMARC on the mail domain | yes (DNS records) | DNS only |
+| transport | Plain HTTP served instead of redirected, certificate close to expiry | yes | one GET over http://, one TLS handshake |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -274,3 +278,33 @@ the usual parameters (`redirect`, `redirect_uri`, `next`, `returnTo`,
 that never resolves), reads the redirect without following it, and proves the
 flaw when `Location` (or a meta refresh) points at the sentinel. Override the
 lists with `options.open-redirect.paths` and `.params`.
+
+## next-middleware
+
+CVE-2025-29927: Next.js before 12.3.5, 13.5.9, 14.2.25 and 15.2.3 skips the
+middleware for a request that carries `x-middleware-subrequest`. Apps that check
+auth in middleware then serve protected pages to anyone. `/dashboard`, `/admin`,
+`/settings`, `/app`, `/account`, `/api/admin` (or `options.next-middleware.paths`)
+are requested without and with the header; denied or redirected without it and
+served (200, a different page) with it is the proof.
+
+## subdomain-takeover
+
+For each host in `scope.allowedHosts`: if its CNAME points at Heroku, GitHub
+Pages, Netlify, Vercel, S3, Azure, Shopify, Fastly, Render or Fly.io, and the
+host answers with that service's own "nothing deployed here" page, anyone can
+claim the name on the service and serve content on your subdomain. Nothing is
+ever claimed.
+
+## email-dns
+
+TXT lookups for the mail domain (`options.email-dns.domain`, else the staging
+host without a leading `www`/`app`/`staging` label): no SPF, SPF ending in
+`+all`/`?all`, several SPF records, no DMARC, or DMARC `p=none`. Without an
+enforcing DMARC, a forged password-reset mail can carry your exact From address.
+
+## transport
+
+On an https staging URL: GET over plain `http://` (redirect read, not followed)
+must not serve the page, and a TLS handshake reads the certificate's expiry
+(under 21 days is reported, under 7 is high).
