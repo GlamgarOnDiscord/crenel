@@ -8,6 +8,19 @@ test("private and loopback addresses are refused", () => {
   }
 });
 
+// The exact cloud-metadata endpoints the 2026 agent SSRF CVEs target
+// (PraisonAI, Pydantic AI, AgentScope). Pinned so the guard can never regress.
+test("cloud metadata endpoints are refused, in every form", () => {
+  for (const ip of [
+    "169.254.169.254", // AWS/GCP IMDS (IPv4 link-local)
+    "fd00:ec2::254", // AWS IMDS over IPv6 (unique-local)
+    "100.100.100.200", // Alibaba metadata (CGNAT range)
+    "::ffff:169.254.169.254", // IPv4-mapped link-local
+  ]) {
+    assert.equal(isPrivateIp(ip), true, `${ip} must be refused`);
+  }
+});
+
 test("public addresses are allowed", () => {
   for (const ip of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700:4700::1111"]) {
     assert.equal(isPrivateIp(ip), false, `${ip} should be public`);
