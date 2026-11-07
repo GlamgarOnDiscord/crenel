@@ -32,3 +32,15 @@ Le reste du backlog technique self-contained est fait cette nuit (client HTTP à
 
 - App: `cd web && pnpm install && pnpm dev` (ou `pnpm build` puis servir `web/dist`).
 - CLI: `cd .. && pnpm demo` ; triage: `pnpm bastion triage --config examples/bastion.config.yaml --max 1`.
+
+## Session de fin de nuit (07/11, ~3 h 30-4 h Paris)
+
+Passe d'auto-review sur la v2, tout local, 4 commits:
+
+- **Captures de chaque page** en desktop (1440), mobile (390) et tablette (834), dans `web/shots/`. Planches contact envoyées à Tom.
+- **Bug responsive corrigé** (086d54f): sur mobile la nav se repliait en colonnes désalignées (les liens étaient groupés dans des `<div>` par section). Aplati avec `display:contents`, nav en barre horizontale défilante.
+- **Accessibilité** (59674bd): audit contraste WCAG de toute la palette. 15/16 paires en AA; `--fg-ghost` était à 2,15:1 (sous AA) alors qu'il porte les étiquettes d'axe du graphe et le hint ⌘K. Remonté à #6B7183 (~3,8:1, AA-large). Focus clavier (`*:focus-visible`, halo ambre) et `prefers-reduced-motion` déjà présents.
+- **README illustré** (97d86a3) et **clarification du demo** (9f9c5ae): l'exit non-zéro du `pnpm demo` est le gate CI, pas un plantage.
+- **Moteur revérifié de bout en bout**: `pnpm demo` sort 2 critical + 1 high prouvés (clé Stripe, paquet malveillant, clé Google) et 9 leads; SARIF 2.1.0 valide; `bastion init` écrit bien sa config. 24 tests verts, builds propres.
+
+Responsive validé à 390 / 834 / 1440px. Rien de ceci n'est poussé: en attente de ta relecture et de tes décisions ci-dessus.
