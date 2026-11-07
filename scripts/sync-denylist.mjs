@@ -14,7 +14,14 @@ const OUT = join(HERE, "..", "src", "data", "known-bad-packages.json");
 
 const ADVISORIES = process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ["GHSA-g7cv-rxg3-hmpx"]; // @tanstack/* malware
+  : [
+      "GHSA-g7cv-rxg3-hmpx", // @tanstack/* malware (May 2026)
+      "MAL-2026-3744", // node-ipc malicious releases (OSV)
+    ];
+
+// OSV MAL-* ids live on osv.dev; GHSA ids on github.com/advisories.
+const sourceUrl = (id) =>
+  id.startsWith("MAL-") ? `https://osv.dev/vulnerability/${id}` : `https://github.com/advisories/${id}`;
 
 async function fetchAdvisory(id) {
   const res = await fetch(`https://api.osv.dev/v1/vulns/${id}`);
@@ -55,7 +62,7 @@ for (const id of ADVISORIES) {
 merged.sort((a, b) => (a.name + a.version).localeCompare(b.name + b.version));
 const out = {
   _comment: existing._comment,
-  _sources: [...new Set([...(existing._sources ?? []), ...ADVISORIES.map((id) => `https://github.com/advisories/${id}`)])],
+  _sources: [...new Set([...(existing._sources ?? []), ...ADVISORIES.map(sourceUrl)])],
   packages: merged,
 };
 writeFileSync(OUT, JSON.stringify(out, null, 2) + "\n");

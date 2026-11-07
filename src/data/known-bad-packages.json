@@ -1,7 +1,8 @@
 {
   "_comment": "Seed denylist of npm packages known to have shipped malware at a specific version. Deterministic, offline match against the lockfile. Sync from OSV / GitHub advisories in CI; this is a starter set, not exhaustive.",
   "_sources": [
-    "https://github.com/advisories/GHSA-g7cv-rxg3-hmpx"
+    "https://github.com/advisories/GHSA-g7cv-rxg3-hmpx",
+    "https://osv.dev/vulnerability/MAL-2026-3744"
   ],
   "packages": [
     {
@@ -507,6 +508,24 @@
       "version": "1.166.15",
       "advisory": "GHSA-g7cv-rxg3-hmpx",
       "note": "Malware in @tanstack/* packages exfiltrates cloud credentials, GitHub tokens, and SSH keys"
+    },
+    {
+      "name": "node-ipc",
+      "version": "12.0.1",
+      "advisory": "MAL-2026-3744",
+      "note": "Malicious code in node-ipc (npm)"
+    },
+    {
+      "name": "node-ipc",
+      "version": "9.1.6",
+      "advisory": "MAL-2026-3744",
+      "note": "Malicious code in node-ipc (npm)"
+    },
+    {
+      "name": "node-ipc",
+      "version": "9.2.3",
+      "advisory": "MAL-2026-3744",
+      "note": "Malicious code in node-ipc (npm)"
     }
   ]
 }
