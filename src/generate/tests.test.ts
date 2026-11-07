@@ -41,3 +41,13 @@ test("generates tests for committed-env, sourcemaps and public-env", () => {
   assert.match(out, /not\.toContain\("NEXT_PUBLIC_API_SECRET"\)/);
   assert.equal((out.match(/\btest\(/g) ?? []).length, 3);
 });
+
+test("generates tests for tls-verification and jwt-config", () => {
+  const out = generateRegressionFile([
+    f({ check: "tls-verification", title: "sets algorithm", location: "src/http.ts:4" }),
+    f({ check: "jwt-config", title: "sets algorithm none", location: "src/auth.ts:2" }),
+  ]);
+  assert.match(out, /rejectUnauthorized/);
+  assert.match(out, /none/);
+  assert.equal((out.match(/\btest\(/g) ?? []).length, 2);
+});

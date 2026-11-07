@@ -41,6 +41,24 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "tls-verification": {
+      const file = f.location.split(":")[0];
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  const src = readFileSync(${JSON.stringify(file)}, "utf8");`,
+        `  expect(src).not.toMatch(/rejectUnauthorized\\s*:\\s*false|NODE_TLS_REJECT_UNAUTHORIZED\\s*[=:]\\s*['"]?0|strictSSL\\s*:\\s*false/);`,
+        `});`,
+      ].join("\n");
+    }
+    case "jwt-config": {
+      const file = f.location.split(":")[0];
+      return [
+        `test(${JSON.stringify(title)}, () => {`,
+        `  const src = readFileSync(${JSON.stringify(file)}, "utf8");`,
+        `  expect(src).not.toMatch(/(algorithms?|alg)\\s*:\\s*\\[?[^\\]\\n]*['"]none['"]/i);`,
+        `});`,
+      ].join("\n");
+    }
     case "committed-env": {
       // location is the committed .env path; it must no longer be tracked.
       return [
