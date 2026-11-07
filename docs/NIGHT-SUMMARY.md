@@ -8,7 +8,7 @@ Tout est en local dans `/root/work/bastion`, commité, rien poussé, rien touch�
 
 **App web v1 puis v2 auto-revue.** Vraie app React + Vite dans `web/`, 12 pages: landing, vue d'ensemble, console Agent (type Claude Code: prompt, étapes, appels d'outils, loaders), findings + détail (preuve, remédiation, test de régression), scans, cibles (dossiers), secrets, autorisation (matrice + preuve rejouable), tests générés, intégrations, paramètres. Design system maison (3 couches, hairlines, 4 niveaux de texte, chiffres tabulaires, graphe en barres empilées). v2: relecture Opus indépendante (`web/REVIEW-v2.md`), puis correctifs (liens morts, tri par sévérité, a11y clavier, responsive 390 px, contraste, mascotte qui tient vraiment une clé, Mona Sans).
 
-**Moteur (le coeur).** 3 vérifications déterministes (secrets, dependency-risk avec denylist @tanstack, authz-matrix), scope guard, baseline/diff (nouveau/corrigé/persistant + blocage CI sur régression), tests unitaires, CI GitHub Actions. Nouveau: triage LLM expérimental via `claude -p` (le modèle conseille, il ne marque jamais "prouvé").
+**Moteur (le coeur).** 5 vérifications déterministes (secrets, dependency-risk avec denylist OSV de 84 versions @tanstack, ci-hardening, headers, authz-matrix), scope guard + client HTTP à périmètre (pas d'IP privée, redirections revalidées, corps plafonné), baseline/diff (blocage CI sur régression), export JSON + SARIF 2.1.0, journal d'audit JSONL, `generate-tests` (un test de régression par finding), `sync-denylist` (rafraîchit la denylist depuis OSV). 22 tests unitaires, CI GitHub Actions. Triage LLM via `claude -p` (le modèle conseille, ne marque jamais "prouvé"). Docs: `docs/ARCHITECTURE.md`, `CONTRIBUTING.md`.
 
 **Test en conditions réelles.** `claude -p --model opus` (Opus 4.8) a trié des findings sans refus, à travers le moteur. Détail: `research_notes/Bastion identite et app/test_reel_claude_p.md`.
 
@@ -19,11 +19,14 @@ Tout est en local dans `/root/work/bastion`, commité, rien poussé, rien touch�
 - Le nom (Crenel, ou une alternative), et la licence de la mascotte.
 - Logos de modèles: j'ai mis une pastille neutre, car les logos des fournisseurs sont des marques déposées (Anthropic demande une autorisation). À trancher avant de publier.
 
-## Reste à faire (priorisé, dans le backlog)
+## Reste à faire (demande ton intervention)
 
-- Durcissement moteur P0: client HTTP à périmètre réseau (refus des IP privées, revalidation des redirections), sorties d'outils plafonnées, journal rejouable. Voir `research_notes/Bastion identite et app/backlog_harnais.md`.
-- Onboarding (connecter un dépôt/site, premier scan), auto-PR de correctif, rapports PDF/CSV/SARIF.
-- Auto-héberger Commit Mono, enrichir la mascotte en illustration.
+Ces items sortent du périmètre sûr (identifiants, décision, action sortante) et ne sont pas faits exprès:
+- Auto-PR des tests et correctifs vers GitHub ; scan hébergé/continu.
+- Intégration de cloudflare/security-audit-skill (licence à valider).
+- Enrichir la mascotte en illustration, auto-héberger Commit Mono.
+
+Le reste du backlog technique self-contained est fait cette nuit (client HTTP à périmètre, SARIF, audit, generate-tests, ci-hardening, headers, denylist OSV, docs).
 
 ## Lancer en local
 
