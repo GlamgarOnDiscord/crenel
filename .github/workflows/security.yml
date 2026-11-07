@@ -1,0 +1,37 @@
+# Example: run Crenel in CI and upload its findings to GitHub code scanning.
+# Copy this into a consumer project (adjust the config path). Here it scans the
+# bundled example so the workflow is runnable as-is.
+name: security
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1" # weekly, also refreshes the malware denylist
+
+permissions:
+  contents: read
+  security-events: write # required to upload SARIF
+
+jobs:
+  crenel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      # Refresh the malware denylist from OSV (read-only, public data).
+      - run: pnpm sync-denylist || true
+      # Scan and emit SARIF. Does not fail the job here; gate on a baseline in
+      # a real project with: node dist/cli.js scan --baseline crenel-baseline.json
+      - run: node dist/cli.js scan --config examples/bastion.config.yaml --sarif crenel.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: crenel.sarif
+          category: crenel
