@@ -57,10 +57,10 @@ test("detects additional distinctive-prefix secrets (slack, npm, github fine-gra
   try {
     writeFileSync(join(dir, "bundle.js"), [
       'a="xoxb-123456789012-abcdefghijkl"',
-      'b="npm_' + "A".repeat(36) + '"',
-      'c="github_pat_' + "A".repeat(22) + "_" + "B".repeat(59) + '"',
+      'b="npm_' + "lM3nO5pQ7rS9tU1vW3xY5zA2bC4dE6fG8hJ0" + '"',
+      'c="github_pat_' + "lM3nO5pQ7rS9tU1vW3xY5z" + "_" + "Q7rS9tU1vW3xY5zA2bC4dE6fG8hJ0kL2mN4pQ6rS8tV0wX2yZ4aB3dE5fG7" + '"',
       'd="GOCSPX-abcdefghijklmnopqrstuvwx"',
-      'e="SG.' + "A".repeat(22) + "." + "B".repeat(43) + '"',
+      'e="SG.' + "lM3nO5pQ7rS9tU1vW3xY5z" + "." + "Q7rS9tU1vW3xY5zA2bC4dE6fG8hJ0kL2mN4pQ6rS8tV" + '"',
     ].join("\n"));
     const ids = (await exposedSecrets.run(ctx(dir))).map((f) => f.id.split(":")[1]);
     for (const id of ["slack-token", "npm-token", "github-fine-grained-pat", "google-oauth-secret", "sendgrid-key"]) {
@@ -97,10 +97,16 @@ test("the OpenAI pattern does not fire on short sk- tokens in minified code", as
 test("a real-length OpenAI key is still detected", async () => {
   const dir = mkdtempSync(join(tmpdir(), "crenel-sec5-"));
   try {
-    writeFileSync(join(dir, "app.js"), 'const k="sk-' + "A".repeat(48) + '";\n');
+    writeFileSync(join(dir, "app.js"), 'const k="sk-' + "lM3nO5pQ7rS9tU1vW3xY5zA2bC4dE6fG8hJ0kL2mN4pQ6rS8" + '";\n');
     const found = await exposedSecrets.run(ctx(dir));
     assert.ok(found.some((f) => f.id.includes("openai-key")), "48-char sk- key should be detected");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("placeholders that only look like keys are not findings", async () => {
+  const { isPlaceholder } = await import("./exposed-secrets.js");
+  for (const p of ["sk_live_xxxxxxxxxxxxxxxxxxxx", "sk_live_YOUR_SECRET_KEY_HERE_12", "ghp_000000000000000000000000000000000000", "sk-ant-api03-<your-key>-aaaaaaaaaa", "sk_test_EXAMPLEKEY1234567890ab"]) assert.ok(isPlaceholder(p), p);
+  for (const k of ["sk_live_51BenchServerKey9x8y7z6w5v4u", "sk_live_ABCDEFGHIJKLMNOP1234", "ghp_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"]) assert.ok(!isPlaceholder(k), k);
 });

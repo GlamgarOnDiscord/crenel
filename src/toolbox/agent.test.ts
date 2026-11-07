@@ -15,7 +15,7 @@ test("without Docker, a full scan with the toolbox enabled still runs every othe
   const prev = process.env.CRENEL_DOCKER;
   process.env.CRENEL_DOCKER = join(dir, "no-docker-here");
   try {
-    writeFileSync(join(dir, "app.js"), `const k = "ghp_${"B".repeat(36)}";\n`);
+    writeFileSync(join(dir, "app.js"), `const k = "ghp_${"Q7rS9tU1vW3xY5zA2bC4dE6fG8hJ0kL2mN4p"}";\n`);
     const config = ConfigSchema.parse({ project: "t", projectDir: dir, scope: { allowedHosts: [] }, options: { toolbox: { enabled: true } } });
     const store = new StateStore(join(dir, ".crenel"));
     for (const prompt of ["/scan", "/tools"]) {

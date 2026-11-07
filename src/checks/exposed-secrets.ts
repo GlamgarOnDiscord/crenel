@@ -29,6 +29,19 @@ export interface SecretPattern {
   accept?: (match: string, content: string, index: number) => boolean;
 }
 
+/**
+ * Placeholders that only look like keys: "sk_live_xxxxxxxx", "your_api_key_here",
+ * "sk_test_EXAMPLE…", or a body that is one repeated character. Docs, .env
+ * templates and tutorials are full of them; reporting them is pure noise.
+ */
+export function isPlaceholder(match: string): boolean {
+  const body = match.replace(/^[A-Za-z]{2,8}[_-](?:live|test|proj|ant)?[_-]?/, "");
+  if (/x{4,}|\*{4,}|\.{3,}|<[^>]*>/i.test(body)) return true;
+  if (/your|example|placeholder|dummy|changeme|replace|redacted|insert|sample/i.test(body)) return true;
+  const top = Math.max(...[...new Set(body)].map((c) => body.split(c).length - 1));
+  return body.length >= 8 && top / body.length >= 0.8;
+}
+
 /** Decode the payload of a JWT-shaped string, or null. Never verifies the signature. */
 export function jwtPayload(token: string): Record<string, unknown> | null {
   const part = token.split(".")[1];
@@ -118,6 +131,7 @@ export const exposedSecrets: Check = {
         let m: RegExpExecArray | null;
         while ((m = p.regex.exec(content)) !== null) {
           if (p.accept && !p.accept(m[0], content, m.index)) continue;
+          if (isPlaceholder(m[0])) continue;
           const line = content.slice(0, m.index).split("\n").length;
           const sensitive = p.sensitive !== false;
           findings.push({

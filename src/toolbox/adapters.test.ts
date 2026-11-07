@@ -67,9 +67,9 @@ test("trufflehog results never keep the secret, and a lead is proven only when e
   try {
     mkdirSync(join(dir, "assets"));
     // Line 2: a key shape exposed-secrets knows. Line 1: one it does not.
-    writeFileSync(join(dir, "assets", "app.js"), `const db = "postgres://u:p@db/x";\nconst k = "ghp_${"A".repeat(36)}";\n`);
+    writeFileSync(join(dir, "assets", "app.js"), `const db = "postgres://u:p@db/x";\nconst k = "ghp_${"lM3nO5pQ7rS9tU1vW3xY5zA2bC4dE6fG8hJ0"}";\n`);
     const out = [
-      JSON.stringify({ SourceMetadata: { Data: { Filesystem: { file: "/project/assets/app.js", line: 2 } } }, DetectorName: "Github", Verified: false, Raw: `ghp_${"A".repeat(36)}` }),
+      JSON.stringify({ SourceMetadata: { Data: { Filesystem: { file: "/project/assets/app.js", line: 2 } } }, DetectorName: "Github", Verified: false, Raw: `ghp_${"lM3nO5pQ7rS9tU1vW3xY5zA2bC4dE6fG8hJ0"}` }),
       JSON.stringify({ SourceMetadata: { Data: { Filesystem: { file: "/project/assets/app.js", line: 1 } } }, DetectorName: "Postgres", Verified: false, Raw: "postgres://u:p@db/x" }),
       JSON.stringify({ SourceMetadata: { Data: { Filesystem: { file: "/project/../etc/passwd", line: 1 } } }, DetectorName: "X", Raw: "x" }),
     ].join("\n");

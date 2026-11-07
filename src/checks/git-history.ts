@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { PATTERNS } from "./exposed-secrets.js";
+import { PATTERNS, isPlaceholder } from "./exposed-secrets.js";
 
 function repoRoot(start: string): string | null {
   let dir = start;
@@ -47,7 +47,7 @@ export const gitHistory: Check = {
         let m: RegExpExecArray | null;
         while ((m = p.regex.exec(line)) !== null) {
           if (p.accept && !p.accept(m[0], line, m.index)) continue;
-          if (seen.has(m[0])) continue;
+          if (isPlaceholder(m[0]) || seen.has(m[0])) continue;
           seen.add(m[0]);
           const stillThere = spawnSync("git", ["-C", root, "grep", "-q", "-F", m[0], "HEAD"]).status === 0;
           if (stillThere) continue; // exposed-secrets reports what is in the tree today
