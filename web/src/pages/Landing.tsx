@@ -1,119 +1,191 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Github } from "lucide-react";
+import { ArrowRight, Github, KeyRound, Users, Database, Package, FileWarning, ShieldCheck, Hand, Eye, Zap } from "lucide-react";
 import { Mark, Wordmark, Mascot } from "../brand/Logo.tsx";
 import { Button, CopyButton } from "../components/ui.tsx";
-import { CHECKS } from "../data/mock.ts";
-import { Badge } from "../components/arc/badge/badge.tsx";
-import { AnimatedCounter } from "../components/arc/animated-counter/animated-counter.tsx";
 import { Tooltip } from "../components/arc/tooltip/tooltip.tsx";
 import { Shimmer } from "../components/ai/shimmer.tsx";
 import { REPO_URL, DOCS_URL } from "../lib/links.ts";
+import "../styles/landing.css";
 
-const STEPS = [
-  { n: "1", title: "Détecter", desc: "14 checks déterministes parcourent le bundle, le dépôt, les dépendances, la CI et vos en-têtes.", code: "npx crenel scan --target acme-app" },
-  { n: "2", title: "Prouver", desc: "Chaque faille doit se rejouer: une commande, une requête, une réponse. Sinon ce n'est qu'une piste.", code: "curl -H 'Bearer A' /api/projects/proj_b_1  → 200" },
-  { n: "3", title: "Garder", desc: "La preuve devient un test de régression. En CI, la faille ne revient plus sans casser le build.", code: "✓ A ne peut pas lire le projet de B  (en CI)" },
+// The engine's real check list (src/core/registry.ts), grouped for reading.
+const CHECK_GROUPS: { name: string; ids: string[] }[] = [
+  { name: "Secrets", ids: ["exposed-secrets", "live-bundle", "public-env", "sourcemaps", "committed-env", "committed-credentials", "git-history"] },
+  { name: "Autorisation", ids: ["authz-matrix", "auth-variants", "auth-config", "jwt-config", "baas-exposure", "storage-buckets", "webhook-signature"] },
+  { name: "Site en ligne", ids: ["headers", "exposed-files", "graphql", "open-redirect", "next-middleware", "cache-deception", "dev-server", "ai-infra", "mcp-surface", "vercel-preview", "ssrf"] },
+  { name: "Infra et DNS", ids: ["subdomain-takeover", "email-dns", "transport", "cloudflare-audit", "dockerfile"] },
+  { name: "Chaîne d'appro.", ids: ["dependency-risk", "ci-hardening", "tls-verification"] },
 ];
-
-const GROUPS = Array.from(new Set(CHECKS.map((c) => c.group)));
+const CHECK_COUNT = CHECK_GROUPS.reduce((n, g) => n + g.ids.length, 0);
 
 function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
+function Eyebrow({ n, children }: { n: string; children: string }) {
+  return <span className="ln-eyebrow mono">[{n} / {children}]</span>;
+}
+
 export function Landing() {
   useEffect(() => { document.title = "Crenel · prouvé, puis gardé"; }, []);
   return (
-    <div className="lp">
-      <nav className="lp-nav landing" aria-label="Navigation du site">
-        <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>
-        <span className="sp" />
-        <button type="button" className="lp-link hide-sm" onClick={() => scrollTo("how")}>Comment ça marche</button>
-        <button type="button" className="lp-link hide-sm" onClick={() => scrollTo("checks")}>Checks</button>
-        <a className="lp-link hide-sm" href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
-        <Button to="/app/overview" size="sm">Ouvrir la console</Button>
+    <div className="lp ln">
+      <div className="ln-beam" aria-hidden="true" />
+
+      <nav className="ln-nav" aria-label="Navigation du site">
+        <Link to="/" className="brand"><Mark size={26} /><Wordmark /></Link>
+        <div className="ln-links hide-sm">
+          <button type="button" onClick={() => scrollTo("methode")}>Méthode</button>
+          <button type="button" onClick={() => scrollTo("couverture")}>Couverture</button>
+          <button type="button" onClick={() => scrollTo("controle")}>Contrôle</button>
+          <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
+        </div>
+        <Button to="/app/overview" size="sm">Console <ArrowRight size={14} /></Button>
       </nav>
 
-      <header className="landing lp-hero">
-        <div className="lp-hero-tx">
-          <Badge tone="success" icon={<span className="fd amber" />}>Open source · pour fondateurs de SaaS</Badge>
-          <h1>Attaquez votre app <em>avant</em> qu'on le fasse.</h1>
-          <p className="sub">Crenel trouve les secrets exposés et les failles d'autorisation entre comptes, prouve chacune par une requête rejouable, puis la garde en CI pour qu'elle ne revienne jamais.</p>
-          <div className="cta">
-            <Button to="/app/overview">Ouvrir la console <ArrowRight size={15} /></Button>
-            <Button href={REPO_URL} variant="ghost"><Github size={15} /> GitHub</Button>
-          </div>
-          <div className="install"><code><span className="k" aria-hidden="true">$</span> npx crenel scan</code><Tooltip content="Copier la commande"><span><CopyButton text="npx crenel scan" /></span></Tooltip></div>
+      <header className="ln-hero ln-wrap">
+        <a className="ln-pill" href={REPO_URL} target="_blank" rel="noopener noreferrer">
+          <span className="ln-pill-tag">MIT</span> Open source, lecture seule par défaut <ArrowRight size={13} />
+        </a>
+        <h1>Attaquez votre app<br /><span className="ln-dim"><em>avant</em> qu'on le fasse.</span></h1>
+        <p className="ln-sub">Crenel cherche les secrets exposés et les failles d'autorisation entre comptes, prouve chacune par une requête rejouable, puis la garde en CI.</p>
+        <div className="ln-cta">
+          <Button to="/app/overview">Ouvrir la console <ArrowRight size={15} /></Button>
+          <Button href={REPO_URL} variant="ghost"><Github size={15} /> GitHub</Button>
         </div>
-        <div className="lp-mascot" aria-hidden="false">
-          <div className="halo big"><Mascot size={280} mood="hello" /></div>
-          <span className="float f1"><i className="fd red" />sk_live_ prouvée</span>
-          <span className="float f2"><i className="fd amber" />gardée en CI</span>
+        <div className="ln-install">
+          <code><span aria-hidden="true">$</span> npx crenel scan</code>
+          <Tooltip content="Copier la commande"><span><CopyButton text="npx crenel scan" /></span></Tooltip>
         </div>
       </header>
 
-      <section className="landing" aria-label="Démo">
-        <div className="term">
-          <div className="term-bar"><i /><i /><i /><span className="mono">crenel · acme-app</span></div>
-          <div className="term-body mono">
-            <div className="tl-user">› Scanne acme-app, et prouve ce que tu trouves</div>
-            <div className="tl-row"><span className="b ok" />scan.secrets<span className="dim">(dist/ · 12 motifs)</span></div>
-            <div className="tl-res"><span className="tag crit">CRIT</span> sk_live_ dans dist/app.js:5 <span className="pv">prouvé</span></div>
-            <div className="tl-row"><span className="b ok" />scan.deps<span className="dim">(pnpm-lock.yaml · 842 paquets)</span></div>
-            <div className="tl-res"><span className="tag crit">CRIT</span> @tanstack/react-router@1.169.5 <span className="pv">prouvé</span></div>
-            <div className="tl-row"><span className="b wait" /><Shimmer>authz.matrix</Shimmer><span className="dim">(compte A → compte B)</span></div>
-            <div className="tl-perm">Envoyer 4 requêtes à staging.acme.app ? <span className="opt on">1 Autoriser une fois</span><span className="opt">2 Toujours</span><span className="opt">3 Refuser</span></div>
-            <div className="tl-res"><span className="tag high">HAUTE</span> GET /api/projects/:id → 200 <span className="pv">prouvé</span></div>
-            <div className="tl-row"><span className="b amb" />tests.generate<span className="dim">(4 failles)</span></div>
-            <div className="tl-res"><span className="gd">gardé</span> 4 tests prêts pour la CI</div>
+      <section className="ln-wrap ln-shot" aria-label="Démo de l'agent">
+        <div className="ln-frame">
+          <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
+          <div className="ln-term">
+            <div className="ln-term-bar"><span /><span /><span /><b className="mono">crenel · acme-app</b><em className="mono">lecture seule</em></div>
+            <div className="ln-term-body mono">
+              <div className="u">› Scanne acme-app, et prouve ce que tu trouves</div>
+              <div className="r"><i className="b" />scan.secrets <s>(dist/ · bundle en ligne)</s></div>
+              <div className="x"><span className="t crit">CRIT</span> sk_live_ dans assets/index-4f2a.js <span className="p">prouvé</span></div>
+              <div className="r"><i className="b" />scan.deps <s>(pnpm-lock.yaml · OSV)</s></div>
+              <div className="x"><span className="t crit">CRIT</span> better-auth 1.6.26 · GHSA-965c <span className="p">avis publié</span></div>
+              <div className="r"><i className="b a" /><Shimmer>authz.matrix</Shimmer> <s>(compte A → objet de B)</s></div>
+              <div className="perm">Envoyer 4 GET à staging.acme.app ? <span className="on">1 Autoriser une fois</span><span>2 Toujours</span><span>3 Refuser</span></div>
+              <div className="x"><span className="t high">HAUTE</span> GET /api/projects/proj_b_1 → 200, rejoué 3 fois <span className="p">prouvé</span></div>
+              <div className="r"><i className="b a" />tests.generate <s>(3 preuves)</s></div>
+              <div className="x"><span className="g">gardé</span> 3 tests de régression prêts pour la CI</div>
+            </div>
           </div>
+          <div className="ln-mascot" aria-hidden="true"><Mascot size={92} mood="found" /></div>
         </div>
       </section>
 
-      <section id="how" className="landing lp-sec" aria-labelledby="how-t">
-        <h2 id="how-t" className="lp-h2">Prouvé, puis gardé.</h2>
-        <p className="lp-lede">Pas de liste de 300 alertes. Une faille compte quand elle se rejoue, et elle ne compte plus quand un test l'empêche de revenir.</p>
-        <ol className="how">
-          {STEPS.map((s) => (
-            <li key={s.n} className={`how-step s${s.n}`}>
-              <span className="how-n" aria-hidden="true">{s.n}</span>
-              <h3>{s.title}</h3>
-              <p>{s.desc}</p>
-              <code className="how-code">{s.code}</code>
-            </li>
-          ))}
+      <section className="ln-wrap ln-stats" aria-label="En chiffres">
+        <div><b>{CHECK_COUNT}</b><span>checks déterministes</span></div>
+        <div><b>13/13</b><span>failles trouvées sur notre banc</span></div>
+        <div><b>0/14</b><span>leurres signalés à tort</span></div>
+        <div><b>GET</b><span>seulement, sauf accord explicite</span></div>
+      </section>
+
+      <section id="methode" className="ln-wrap ln-sec" aria-labelledby="m-t">
+        <div className="ln-head">
+          <Eyebrow n="01">MÉTHODE</Eyebrow>
+          <h2 id="m-t">Prouvé, <span className="ln-dim">puis gardé.</span></h2>
+          <p>Pas de liste de 300 alertes. Une faille compte quand elle se rejoue, et cesse de compter quand un test l'empêche de revenir.</p>
+        </div>
+        <ol className="ln-steps">
+          <li>
+            <span className="mono n">01</span><h3>Détecter</h3>
+            <p>Bundle servi, dépôt, historique git, dépendances, CI, en-têtes, DNS.</p>
+            <code className="mono">npx crenel scan</code>
+          </li>
+          <li>
+            <span className="mono n">02</span><h3>Prouver</h3>
+            <p>Propriétaire, attaquant, contrôle négatif. Sans rejeu, ce n'est qu'une piste.</p>
+            <code className="mono">A lit proj_b_1 → 200 (×3)</code>
+          </li>
+          <li>
+            <span className="mono n">03</span><h3>Garder</h3>
+            <p>La preuve devient un test. La faille ne revient plus sans casser le build.</p>
+            <code className="mono g">✓ A ne lit pas le projet de B</code>
+          </li>
         </ol>
       </section>
 
-      <section id="checks" className="landing lp-sec" aria-labelledby="checks-t">
-        <h2 id="checks-t" className="lp-h2"><AnimatedCounter value={CHECKS.length} animateOnView /> checks, zéro magie.</h2>
-        <p className="lp-lede">Chacun est déterministe et lisible dans le dépôt. L'agent les orchestre; le verdict ne dépend jamais d'un modèle.</p>
-        <div className="checks">
-          {GROUPS.map((g) => (
-            <div key={g} className="chk-group">
-              <h3>{g}</h3>
-              <ul>
-                {CHECKS.filter((c) => c.group === g).map((c) => (
-                  <li key={c.id} className="chk"><span className="mono chk-id">{c.id}</span><span className="chk-d">{c.desc}</span></li>
-                ))}
-              </ul>
+      <section id="couverture" className="ln-wrap ln-sec" aria-labelledby="c-t">
+        <div className="ln-head">
+          <Eyebrow n="02">COUVERTURE</Eyebrow>
+          <h2 id="c-t">Ce que le code généré <span className="ln-dim">oublie le plus souvent.</span></h2>
+        </div>
+        <div className="ln-bento">
+          <article className="ln-card wide">
+            <header><KeyRound size={16} /><h3>Clés serveur dans le bundle</h3></header>
+            <p>Chaque chunk JS servi est relu, source maps comprises. Une clé est vérifiée en direct seulement si vous l'autorisez.</p>
+            <pre className="ln-code mono"><span className="dim">// assets/index-4f2a.js</span>{"\n"}const stripe = new Stripe(<mark>"sk_live_51N…q8"</mark>){"\n"}<span className="dim">// supabase: anon key + table sans RLS</span></pre>
+          </article>
+          <article className="ln-card">
+            <header><Users size={16} /><h3>Autorisation entre comptes</h3></header>
+            <p>Chaque ressource lue par A, par C et sans session.</p>
+            <div className="ln-matrix mono" role="table" aria-label="Exemple de matrice">
+              <span /><span>A</span><span>C</span><span>anon</span>
+              <span>/projects/:id</span><i className="no" /><i className="ok" /><i className="ok" />
+              <span>/invoices/:id</span><i className="ok" /><i className="ok" /><i className="ok" />
+              <span>/files/:id</span><i className="no" /><i className="no" /><i className="ok" />
             </div>
-          ))}
+          </article>
+          <article className="ln-card">
+            <header><Database size={16} /><h3>BaaS ouverts</h3></header>
+            <p>Supabase sans RLS, Firestore lisible, buckets listables, inscription auto-confirmée.</p>
+          </article>
+          <article className="ln-card">
+            <header><Package size={16} /><h3>Dépendances</h3></header>
+            <p>Avis OSV sur le lockfile et sur la version de Next.js réellement servie.</p>
+          </article>
+          <article className="ln-card">
+            <header><FileWarning size={16} /><h3>Fichiers exposés</h3></header>
+            <p>.env, .git, dumps SQL. Signature du contenu et contrôle négatif, jamais un simple 200.</p>
+          </article>
+        </div>
+        <details className="ln-all">
+          <summary>Voir les {CHECK_COUNT} checks</summary>
+          <div className="ln-groups">
+            {CHECK_GROUPS.map((g) => (
+              <div key={g.name}>
+                <h4>{g.name}</h4>
+                <ul>{g.ids.map((id) => <li key={id} className="mono">{id}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      </section>
+
+      <section id="controle" className="ln-wrap ln-sec" aria-labelledby="k-t">
+        <div className="ln-head">
+          <Eyebrow n="03">CONTRÔLE</Eyebrow>
+          <h2 id="k-t">Rien ne part <span className="ln-dim">sans votre accord.</span></h2>
+          <p>L'agent ne touche qu'aux hôtes déclarés. Chaque requête passe par une porte, chaque action est écrite dans un journal chaîné.</p>
+        </div>
+        <div className="ln-modes">
+          <div><Hand size={16} /><h3>Demander</h3><p>Une question avant chaque sonde réseau.</p></div>
+          <div><Eye size={16} /><h3>Lecture seule</h3><p>Code et bundle seulement, aucune requête vers la cible.</p></div>
+          <div><Zap size={16} /><h3>Bypass</h3><p>Tout autorisé dans le périmètre, pour la CI.</p></div>
+          <div><ShieldCheck size={16} /><h3>Objectif</h3><p>L'agent continue jusqu'à l'atteindre, puis s'arrête.</p></div>
         </div>
       </section>
 
-      <section className="landing lp-sec">
-        <div className="lp-cta">
-          <Mark size={44} />
-          <div><h2>Lancez votre premier scan.</h2><p className="muted">Deux minutes, lecture seule par défaut, rien ne part sans votre accord.</p></div>
-          <span className="sp" />
+      <section className="ln-wrap ln-final">
+        <Mascot size={96} mood="hello" />
+        <h2>Lancez votre premier scan.</h2>
+        <p>Deux minutes, en local, sur une app à vous.</p>
+        <div className="ln-cta">
           <Button to="/app/onboarding">Ajouter une cible <ArrowRight size={15} /></Button>
+          <Button href={DOCS_URL} variant="ghost">Lire la doc</Button>
         </div>
       </section>
 
-      <footer className="landing lp-foot">
-        <Mark size={20} /><span>crenel · MIT · un outil indépendant</span>
+      <footer className="ln-wrap ln-foot">
+        <Mark size={18} /><span>crenel · MIT · outil indépendant</span>
         <span className="sp" />
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
