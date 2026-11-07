@@ -11,6 +11,7 @@ import { readFileSync, statSync } from "node:fs";
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { walkFiles, extOf, relative } from "../core/walk.js";
+import { checkLiveness, verifierHost, type Liveness } from "./key-liveness.js";
 
 interface SecretPattern {
   id: string;
@@ -94,6 +95,8 @@ export const exposedSecrets: Check = {
   readOnly: true,
   async run(ctx: CheckContext): Promise<Finding[]> {
     const findings: Finding[] = [];
+    // The raw secret per finding, kept in memory only for the opt-in liveness call.
+    const rawOf = new Map<Finding, string>();
     const root = ctx.projectDir;
     for (const file of walk(root)) {
       let size = 0;
@@ -142,9 +145,36 @@ export const exposedSecrets: Check = {
             regressionHint:
               `Add a CI step that greps the build output for ${p.id} and fails if present.`,
           });
+          rawOf.set(findings[findings.length - 1]!, m[0]);
         }
       }
     }
+    // Opt-in liveness: ask each key's own provider whether it still works.
+    const verify = !!(ctx.options["exposed-secrets"] as { verify?: boolean } | undefined)?.verify;
+    if (verify) {
+      const cache = new Map<string, Promise<{ liveness: Liveness; status?: number; host?: string }>>();
+      for (const f of findings) {
+        const raw = rawOf.get(f);
+        const pattern = f.id.split(":")[1]!;
+        if (!raw || !verifierHost(pattern)) continue;
+        if (!cache.has(raw)) cache.set(raw, checkLiveness(pattern, raw, ctx.scope));
+        const r = await cache.get(raw)!;
+        if (r.liveness === "unknown") {
+          if (r.host && !ctx.scope.isHostAllowed(`https://${r.host}/`)) ctx.log(`exposed-secrets: liveness of ${pattern} skipped, declare ${r.host} in scope.allowedHosts to check it`);
+          continue;
+        }
+        if (r.liveness === "active") {
+          f.title = `${f.title} (key works right now)`;
+          f.description = `${f.description} Crenel checked with one read-only call to ${r.host}: the key authenticates (HTTP ${r.status}).`;
+        } else {
+          f.title = `${f.title} (revoked)`;
+          f.severity = "low";
+          f.description = `${f.description} Crenel checked with one read-only call to ${r.host}: the key is revoked (HTTP ${r.status}). Remove it from the bundle anyway.`;
+        }
+        if (f.proof) f.proof.evidence = `${f.proof.evidence ?? ""} · liveness: ${r.liveness} (HTTP ${r.status} from ${r.host})`;
+      }
+    }
+
     ctx.log(`exposed-secrets: scanned ${root}, ${findings.length} match(es)`);
     return findings;
   },

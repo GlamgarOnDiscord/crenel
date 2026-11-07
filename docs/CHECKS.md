@@ -41,6 +41,15 @@ web config is public by design and left to `baas-exposure`. A match is **proven*
 `grep` you can replay. Fix: rotate the key and move it server-side; client code
 holds only publishable keys.
 
+
+**Does the key still work? (opt-in, network).** With
+`options.exposed-secrets.verify: true`, each key that has a verifier (Stripe,
+OpenAI, Anthropic, GitHub, Slack, SendGrid, npm) gets one read-only "who am I"
+call to its own provider, only if that provider's API host is in
+`scope.allowedHosts` (e.g. `api.stripe.com`). The title then says *key works
+right now* or *revoked* (downgraded to low). The key travels only in the auth
+header and never appears in reports.
+
 ## dependency-risk
 
 Four offline signals: a locked `name@version` on the bundled OSV malware
