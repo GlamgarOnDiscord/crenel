@@ -22,14 +22,31 @@ const RULES: HeaderRule[] = [
   { id: "refpol", header: "referrer-policy", severity: "low", title: "Referrer-Policy absent", remediation: "Poser Referrer-Policy: strict-origin-when-cross-origin." },
 ];
 
+// True only if the CSP has a frame-ancestors directive with a value that
+// actually restricts framing. A bare `*`, or a value made only of scheme
+// sources (http:, https:, ws:, wss:), allows any origin to frame the page and
+// therefore does not replace X-Frame-Options.
+export function cspRestrictsFraming(csp: string): boolean {
+  const m = csp.toLowerCase().match(/frame-ancestors([^;]*)/);
+  if (!m) return false;
+  const tokens = m[1]!.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false; // empty directive: no restriction
+  if (tokens.includes("*")) return false; // wildcard: any origin may frame
+  // Only scheme sources (no host) means any host of that scheme may frame.
+  if (tokens.every((t) => /^(https?|wss?|data|blob):$/.test(t) || t === "*:")) return false;
+  return true;
+}
+
 /** Pure: given a response's headers, return the security findings. */
 export function analyzeHeaders(headers: Headers, url: string): Finding[] {
   const out: Finding[] = [];
   const csp = (headers.get("content-security-policy") ?? "").toLowerCase();
   for (const r of RULES) {
-    // frame-ancestors in the CSP is the modern replacement for X-Frame-Options;
-    // do not flag XFO as missing when the CSP already covers framing.
-    if (r.id === "xfo" && csp.includes("frame-ancestors")) continue;
+    // frame-ancestors in the CSP is the modern replacement for X-Frame-Options,
+    // but only a RESTRICTIVE value protects against framing. A permissive one
+    // (`frame-ancestors *`, or scheme-only sources) gives no protection, so it
+    // must not suppress the finding.
+    if (r.id === "xfo" && cspRestrictsFraming(csp)) continue;
     if (!headers.get(r.header)) {
       out.push({
         id: `headers:${r.id}:${url}`,

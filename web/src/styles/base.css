@@ -228,9 +228,10 @@ input, textarea { font-family: inherit; color: inherit; }
   }
   .side::-webkit-scrollbar { display: none; }
   .side .navlabel, .side .spacer, .side .foot, .search { display: none; }
-  /* Nav links are grouped in wrapper divs; flatten them so each link becomes a
-     direct flex item of the strip instead of stacking in per-group columns. */
-  .side > div { display: contents; }
+  /* Nav links are grouped in .navgroup wrappers; flatten only those so each link
+     becomes a direct flex item of the strip instead of stacking in per-group
+     columns. Scoped to .navgroup so hidden spacer/foot divs are never affected. */
+  .side > .navgroup { display: contents; }
   .side .brand { flex: none; padding: 0 6px 0 0; margin-right: 2px; }
   .side .nav { flex: none; white-space: nowrap; padding: 7px 11px; }
   .side .nav .count { margin-left: 6px; }

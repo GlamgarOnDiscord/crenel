@@ -43,7 +43,7 @@ export function Shell() {
         <NavLink to="/" className="brand"><Mark /><Wordmark /></NavLink>
         <button className="search" onClick={() => setPalette(true)}><Search size={15} /> Rechercher <span className="kbd">⌘K</span></button>
         {nav.map((g) => (
-          <div key={g.group}>
+          <div key={g.group} className="navgroup">
             <div className="navlabel">{g.group}</div>
             {g.items.map((it) => (
               <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>

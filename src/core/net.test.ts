@@ -15,7 +15,9 @@ test("cloud metadata endpoints are refused, in every form", () => {
     "169.254.169.254", // AWS/GCP IMDS (IPv4 link-local)
     "fd00:ec2::254", // AWS IMDS over IPv6 (unique-local)
     "100.100.100.200", // Alibaba metadata (CGNAT range)
-    "::ffff:169.254.169.254", // IPv4-mapped link-local
+    "::ffff:169.254.169.254", // IPv4-mapped link-local, dotted form
+    "::ffff:a9fe:a9fe", // same address, hex-compressed v4-mapped form
+    "::ffff:7f00:1", // 127.0.0.1 in hex-compressed v4-mapped form
   ]) {
     assert.equal(isPrivateIp(ip), true, `${ip} must be refused`);
   }

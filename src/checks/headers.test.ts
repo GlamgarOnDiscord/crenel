@@ -39,3 +39,29 @@ test("CSP frame-ancestors covers framing, so X-Frame-Options is not flagged", ()
   const ids = analyzeHeaders(h, "https://staging.example.com").map((f) => f.id.split(":")[1]);
   assert.ok(!ids.includes("xfo"), "frame-ancestors should satisfy the framing control");
 });
+
+test("a permissive frame-ancestors does NOT suppress the X-Frame-Options finding", () => {
+  for (const csp of ["frame-ancestors *", "default-src 'self'; frame-ancestors https:", "frame-ancestors"]) {
+    const h = new Headers({
+      "content-security-policy": csp,
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+    });
+    const ids = analyzeHeaders(h, "https://staging.example.com").map((f) => f.id.split(":")[1]);
+    assert.ok(ids.includes("xfo"), `permissive CSP (${csp}) should still flag XFO`);
+  }
+});
+
+test("a restrictive frame-ancestors suppresses XFO", () => {
+  for (const csp of ["frame-ancestors 'none'", "frame-ancestors 'self'", "frame-ancestors https://app.example.com"]) {
+    const h = new Headers({
+      "content-security-policy": csp,
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+    });
+    const ids = analyzeHeaders(h, "https://staging.example.com").map((f) => f.id.split(":")[1]);
+    assert.ok(!ids.includes("xfo"), `restrictive CSP (${csp}) should satisfy framing`);
+  }
+});

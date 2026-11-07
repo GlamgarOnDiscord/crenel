@@ -25,7 +25,21 @@ export function isPrivateIp(ip: string): boolean {
   if (a === "::1" || a === "::") return true;
   if (a.startsWith("fe80:")) return true; // link-local
   if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique local
-  if (a.startsWith("::ffff:")) return isPrivateIp(a.slice(7)); // v4-mapped
+  if (a.startsWith("::ffff:")) {
+    const rest = a.slice(7);
+    if (rest.includes(".")) return isPrivateIp(rest); // v4-mapped, dotted form
+    // v4-mapped in hex form (e.g. ::ffff:7f00:1 = 127.0.0.1): the last one or
+    // two hextets encode the four IPv4 octets. A resolver or URL literal can
+    // hand us this shape, so decode it rather than letting it look public.
+    const groups = rest.split(":");
+    if (groups.length <= 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
+      const nums = groups.map((g) => parseInt(g, 16));
+      const hi = nums.length === 2 ? nums[0]! : 0;
+      const lo = nums.length === 2 ? nums[1]! : nums[0]!;
+      return isPrivateIp(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
+    return false;
+  }
   // IPv4
   const m = a.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;

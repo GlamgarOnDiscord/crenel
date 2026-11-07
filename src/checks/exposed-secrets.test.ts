@@ -81,3 +81,26 @@ test("ordinary minified code does not trip the new patterns", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the OpenAI pattern does not fire on short sk- tokens in minified code", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec4-"));
+  try {
+    // a standalone sk- token of only 20 alnum chars (realistic minified noise)
+    writeFileSync(join(dir, "app.js"), 'const c="sk-1a2b3c4d5e6f7g8h9i0j";\n');
+    const found = await exposedSecrets.run(ctx(dir));
+    assert.ok(!found.some((f) => f.id.includes("openai")), "20-char sk- token must not be reported");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a real-length OpenAI key is still detected", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec5-"));
+  try {
+    writeFileSync(join(dir, "app.js"), 'const k="sk-' + "A".repeat(48) + '";\n');
+    const found = await exposedSecrets.run(ctx(dir));
+    assert.ok(found.some((f) => f.id.includes("openai-key")), "48-char sk- key should be detected");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
