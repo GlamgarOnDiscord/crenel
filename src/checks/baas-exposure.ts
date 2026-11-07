@@ -313,17 +313,20 @@ export const baasExposure: Check = {
           findings.push(lead);
           continue;
         }
-        let proven = 0;
+        let proven = 0, denied = 0, empty = 0;
         for (const t of tables) {
           try {
             const r = await readOneRow(h, t.table, t.columns, ctx.scope);
             if (r.readable) { findings.push(tableFinding(h, r)); proven++; }
+            // 401/403 is SQLSTATE 42501: anon was never granted the table (the default since 30/10/2026). 200 [] is RLS filtering or an empty table.
+            else if (r.status === 401 || r.status === 403) denied++;
+            else if (r.status >= 200 && r.status < 300) empty++;
           } catch (err) {
             ctx.log(`baas-exposure: ${t.table}: ${(err as Error).message}`);
           }
         }
         ctx.log(`baas-exposure: ${tables.length} table(s) exposed by the API, ${proven} readable without signing in`);
-        if (proven === 0) findings.push({ ...lead, description: lead.description + ` Live check: ${tables.length} table(s) listed, none returned a row with this key.` });
+        if (proven === 0) findings.push({ ...lead, description: lead.description + ` Live check: ${tables.length} table(s) listed, none returned a row with this key (${denied} not granted to anon, ${empty} empty under RLS or empty).` });
         continue;
       }
       if (h.kind === "firebase") {

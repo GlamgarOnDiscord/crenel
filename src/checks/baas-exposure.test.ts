@@ -183,3 +183,21 @@ test("Firebase: a listable Storage bucket and the default RTDB instance are prov
     assert.equal(closed.filter((f) => f.state === "proven").length, 0);
   } finally { globalThis.fetch = real; rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("Supabase: when no table answers, the lead tells a table never granted to anon from one RLS filters", async () => {
+  const server = createServer((req, res) => {
+    const j = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (req.url === "/rest/v1/") return j(200, { paths: { "/notes": {}, "/billing": {} }, definitions: {} });
+    if (req.url!.startsWith("/rest/v1/billing")) return j(401, { code: "42501", message: "permission denied for table billing" });
+    j(200, []);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-42501-"));
+  writeFileSync(join(dir, "app.js"), `createClient("${url}", "${ANON}")`);
+  try {
+    const f = await baasExposure.run(ctx(dir, new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true })));
+    assert.equal(f.length, 1);
+    assert.match(f[0]!.description, /1 not granted to anon, 1 empty under RLS/);
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
