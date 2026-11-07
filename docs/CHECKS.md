@@ -52,8 +52,9 @@ and `install` without `--ignore-scripts`. Leads: these are the entry points the
 With a `stagingUrl` you own, does a plain GET and checks for Content-Security-
 Policy, HSTS, X-Content-Type-Options, X-Frame-Options (satisfied by a restrictive
 CSP `frame-ancestors`), Referrer-Policy, and the Secure/HttpOnly/SameSite cookie
-flags. Proven against the live response. Without a `stagingUrl` it emits one lead
-asking you to set one.
+flags, plus a dangerous CORS combination (Access-Control-Allow-Credentials: true
+with an Allow-Origin of `*` or `null`). Proven against the live response. Without
+a `stagingUrl` it emits one lead asking you to set one.
 
 ## cloudflare-audit
 

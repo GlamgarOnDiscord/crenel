@@ -61,6 +61,26 @@ export function analyzeHeaders(headers: Headers, url: string): Finding[] {
       });
     }
   }
+  // CORS: credentials allowed together with a wildcard or null origin is a real
+  // cross-origin data-exposure bug (a reflected origin + credentials is the
+  // exploitable shape; `*` + credentials browsers block, but it signals the
+  // same misconfigured intent, and `null` is reachable from sandboxed frames).
+  const acac = (headers.get("access-control-allow-credentials") ?? "").toLowerCase().trim();
+  const acao = (headers.get("access-control-allow-origin") ?? "").trim();
+  if (acac === "true" && (acao === "*" || acao.toLowerCase() === "null")) {
+    out.push({
+      id: `headers:cors:${url}`,
+      check: "headers",
+      title: `CORS autorise les identifiants avec une origine ${acao}`,
+      severity: "high",
+      state: "proven",
+      location: `${url} (CORS)`,
+      description: `La réponse pose Access-Control-Allow-Credentials: true avec Access-Control-Allow-Origin: ${acao}. Une autre origine peut lire des réponses authentifiées.`,
+      remediation: "N'autorisez les identifiants qu'avec une allowlist d'origines exactes, jamais * ni null, et refusez les origines inconnues.",
+      proof: { method: "en-têtes CORS live", replay: `curl -sI ${url} | grep -i access-control-allow-` },
+    });
+  }
+
   const setCookie = headers.get("set-cookie");
   if (setCookie) {
     const low = setCookie.toLowerCase();

@@ -65,3 +65,40 @@ test("a restrictive frame-ancestors suppresses XFO", () => {
     assert.ok(!ids.includes("xfo"), `restrictive CSP (${csp}) should satisfy framing`);
   }
 });
+
+test("CORS credentials + wildcard/null origin is a proven high finding", () => {
+  for (const origin of ["*", "null"]) {
+    const h = new Headers({
+      "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "access-control-allow-credentials": "true",
+      "access-control-allow-origin": origin,
+    });
+    const f = analyzeHeaders(h, "https://staging.example.com").find((x) => x.id.includes(":cors:"));
+    assert.ok(f, `expected a CORS finding for origin ${origin}`);
+    assert.equal(f!.severity, "high");
+    assert.equal(f!.state, "proven");
+  }
+});
+
+test("credentials with a specific origin, or wildcard without credentials, is not flagged", () => {
+  const specific = new Headers({
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "access-control-allow-credentials": "true",
+    "access-control-allow-origin": "https://app.example.com",
+  });
+  assert.ok(!analyzeHeaders(specific, "https://s.example.com").some((f) => f.id.includes(":cors:")));
+  const noCreds = new Headers({
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "access-control-allow-origin": "*",
+  });
+  assert.ok(!analyzeHeaders(noCreds, "https://s.example.com").some((f) => f.id.includes(":cors:")));
+});
