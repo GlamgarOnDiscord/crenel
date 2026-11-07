@@ -1,4 +1,4 @@
-// Public API, for using Bastion as a library instead of a CLI.
+// Public API, for using Crenel as a library instead of a CLI.
 export { run } from "./core/runner.js";
 export type { RunResult, RunOptions } from "./core/runner.js";
 export { loadConfig } from "./core/config.js";

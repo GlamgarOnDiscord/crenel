@@ -1,6 +1,6 @@
 // Core domain types shared across the harness.
 //
-// A Bastion run turns a declared target into a list of Findings. Every finding
+// A Crenel run turns a declared target into a list of Findings. Every finding
 // that claims a real weakness must carry Proof: something a human (or CI) can
 // replay. Findings without proof are reported as "unproven" and never gate a
 // build, because the research is clear that un-validated agent findings are

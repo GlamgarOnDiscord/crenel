@@ -1,102 +1,81 @@
 <p align="center"><img src="brand/readme-banner.png" alt="Crenel" width="800"></p>
 
-# Bastion
+<p align="center"><b>Attack your own app before anyone else does.</b><br>
+Crenel finds exposed secrets and cross-account authorization bugs, proves each one with a replayable request, then turns it into a regression test so it never comes back.</p>
 
-> Product/UI working name: **Crenel** (Bastion is taken). Brand, mascot and web
-> console live under that name; see `docs/IDENTITY.md`. The engine package is
-> still `bastion` pending the final name.
+<p align="center">Free · local · no account · open source (MIT)</p>
 
-A defensive security harness for SaaS. It helps you attack your own app before anyone else does, then turns each finding into something that stays fixed.
+<p align="center"><img src="brand/cli-output.png" alt="crenel scan output" width="760"></p>
 
-Bastion exists because new SaaS, and especially apps built fast with AI, keep shipping the same few bugs: a secret in the client bundle, and one account able to read another account's data. Bastion checks for exactly those, proves them so you do not chase false alarms, and hands you a regression test so they cannot come back.
+## Why
 
-> Status: early but real. The core, the scope guard and fourteen checks (secrets,
-> dependency-risk, ci-hardening, headers, authz-matrix, cloudflare-audit,
-> mcp-surface, dockerfile, committed-env, sourcemaps, public-env, tls-verification,
-> jwt-config, committed-credentials) run today, with 105 tests. More depth is planned (see the roadmap).
+New SaaS apps, especially the ones built fast with AI, keep shipping the same few bugs: a server secret in the client bundle, and one account able to read another account's data. Crenel looks for exactly those, separates what is **proven** from what is only a **lead**, and gives you a test that keeps the fix in place.
 
-## The console
+- **Proof over noise.** Every finding is either `proven` (a deterministic match or a replayable request) or a `lead`. Only proven high and critical findings fail CI, so you can gate a pipeline on it without flaky alarms.
+- **Deterministic where it counts.** LLMs are near-blind to authorization bugs spread across files. Crenel's authorization check is a declarative matrix you can read, run and keep in CI.
+- **Scope lives in code, not in a prompt.** Crenel only touches hosts you declare you own. Active probes are off by default and nothing destructive is ever sent.
 
-![Crenel console — overview](docs/assets/console-overview.png)
+## Quick start
 
-Every finding opens to its proof and a one-click regression test. The console is
-read-only over the engine's output; it renders the same model the CLI produces.
-
-<table>
-<tr>
-<td><img src="docs/assets/console-finding.png" alt="Finding detail with replayable proof" /></td>
-<td><img src="docs/assets/console-mobile.png" alt="Responsive console on mobile" /></td>
-</tr>
-</table>
-
-Every check, what it flags and how to fix it: [`docs/CHECKS.md`](docs/CHECKS.md).
-
-## What makes it different
-
-Three ideas from the research on AI security agents are baked into the design:
-
-1. **Proof over noise.** Agent and scanner findings are mostly false positives when they are not validated. Every Bastion finding is either `proven` (a deterministic match or a replayable request) or clearly marked `unproven` and treated as a lead, never a gate.
-2. **Deterministic where it counts.** LLMs are near-blind to authorization bugs spread across files. So the authorization check is not an LLM: it is a declarative matrix you can read, run, and keep in CI.
-3. **Scope lives in code, not in a prompt.** Bastion only touches hosts you declare you own. Active testing is off by default, and destructive actions are never allowed. Pointed at a stranger's site, it does nothing but read what a normal visitor already sees.
-
-## Install and try it
+Crenel is not published to npm yet. From a clone:
 
 ```bash
 pnpm install
-pnpm demo          # scans the bundled vulnerable example, offline
+pnpm demo                     # scans the bundled, intentionally vulnerable example, offline
 ```
 
-The bundled example is intentionally vulnerable and exercises every check: you
-should see proven `critical` findings (a Stripe secret key, a known-malicious
-package) plus `leads` from the authorization matrix, CI, Dockerfile, committed
-`.env`, source map, agent/MCP config and client-exposed env checks. The command
-exits non-zero on purpose: a proven high/critical finding is a CI gate, not a crash.
+The demo exits non-zero on purpose: a proven high or critical finding is a CI gate, not a crash.
 
-## Use it on your project
+On your own project:
 
 ```bash
-pnpm bastion init                       # writes bastion.config.yaml
-# edit the config: point projectDir at your built bundle, list hosts you own
-pnpm bastion scan --config bastion.config.yaml
-pnpm bastion scan --json --out bastion-report.json   # for CI
+pnpm crenel init              # writes crenel.config.yaml
+# point projectDir at your built bundle, list the hosts you own
+pnpm crenel scan
+pnpm crenel scan --sarif crenel.sarif --out crenel-report.json   # for CI and code scanning
 ```
 
-`bastion scan` exits non-zero only when a **proven high or critical** finding exists, so it is safe to gate a pipeline on it without flaky failures from leads.
+## The 14 checks
 
-### Baseline and regressions
+| Check | Catches |
+| --- | --- |
+| `exposed-secrets` | Server keys and private keys in client code (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Slack, npm, SendGrid, Supabase, PEM). |
+| `dependency-risk` | A locked package whose exact version is known malware (OSV denylist), plus install hooks and non-registry deps. |
+| `authz-matrix` | One account reaching another account's objects. Generates the CI test; with a staging URL and two test accounts (opt-in), proves it live. |
+| `public-env` | A secret behind a client-exposed prefix (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`…). |
+| `committed-env` | A committed `.env` file. |
+| `committed-credentials` | Committed `.npmrc`, `.pypirc`, `.netrc`, Docker or git credential files that carry a secret. |
+| `sourcemaps` | Source maps shipped with the client bundle. |
+| `jwt-config` | JWT setups that accept `alg: none` or verify with an empty secret. |
+| `tls-verification` | Code that turns off TLS certificate checks. |
+| `headers` | Missing security headers and weak cookie flags on your staging response. |
+| `ci-hardening` | Risky GitHub Actions: `pull_request_target`, unpinned actions, installs without `--ignore-scripts`. |
+| `dockerfile` | Root containers, unpinned base images, baked secrets, `curl \| sh`. |
+| `mcp-surface` | Committed agent and MCP configs that run local commands or hold secrets. |
+| `cloudflare-audit` | Normalises the findings of Cloudflare's security-audit skill into the same model. |
 
-Record what you have today, then let later scans show only what changed:
+Details, examples and fixes for each: [`docs/CHECKS.md`](docs/CHECKS.md).
+
+## Keep fixes fixed
 
 ```bash
-pnpm bastion scan --config bastion.config.yaml --update-baseline --baseline bastion-baseline.json
-# later, in CI:
-pnpm bastion scan --config bastion.config.yaml --baseline bastion-baseline.json
+pnpm crenel scan --update-baseline --baseline crenel-baseline.json   # record today
+pnpm crenel scan --baseline crenel-baseline.json                     # in CI: new, fixed, persisting
+pnpm crenel generate-tests --out crenel.regression.test.ts           # one test per finding
 ```
 
-The diff reports what is **new** (a regression), what you **fixed** (a finding that was proven before and is gone now), and what **persists**. The scan exits non-zero if a new proven high or critical appears, so a regression breaks the build while known, accepted leads do not.
-
-## The two checks today
-
-| Check | Kind | What it catches |
-|---|---|---|
-| `exposed-secrets` | read-only, offline | Server-side keys and private keys shipped into a client bundle (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Supabase service role, PEM blocks). |
-| `dependency-risk` | read-only, offline | Supply-chain risk in your dependencies: a locked package whose exact version is on a malware denylist (proven), plus install hooks, non-registry deps and a missing lockfile (leads). |
-| `ci-hardening` | read-only, offline | Risky GitHub Actions workflows: `pull_request_target`, actions not pinned to a commit SHA, and installs without `--ignore-scripts`. |
-| `headers` | read-only | Missing security headers (CSP, HSTS, nosniff, frame-options, referrer) and cookie flags on your staging response. |
-| `authz-matrix` | read-only to generate, active to probe | One account reaching another account's objects. Generates a CI test always; with a staging URL and test accounts (opt-in), it replays each cross-tenant request and proves any that are not denied. |
-
-Run `bastion list` to see them.
+A new proven high or critical finding breaks the build; known, accepted leads do not.
 
 ## Configuration
 
 ```yaml
 project: my-saas
-projectDir: ./dist           # directory scanned for secrets
+projectDir: ./dist            # what gets scanned for secrets
 scope:
   allowedHosts: [staging.example.com]
-  allowActiveTesting: false  # must be true for live authz probes
+  allowActiveTesting: false   # must be true for live authz probes
   stagingUrl: https://staging.example.com
-checks: []                   # empty = all read-only checks
+checks: []                    # empty = every read-only check
 options:
   authz-matrix:
     resources:
@@ -106,60 +85,40 @@ options:
       b: { owns: { project: ["<id owned by B>"] } }
 ```
 
-## Safety and scope
+Older setups with `bastion.config.yaml` still work.
 
-Bastion is built to be safe to publish and safe to run. The scope guard (`src/core/scope.ts`) refuses any request to a host not in `allowedHosts`, refuses active checks unless you opt in, and never performs destructive actions. Every outbound request goes through a scoped HTTP client (`src/core/net.ts`) that also refuses hosts resolving to private or loopback addresses (set `scope.allowPrivate` only for an internal staging box you own), re-validates every redirect hop against the allowlist, and caps the response body. Only ever point it at systems you own or are explicitly authorised to test. It is a hardening tool, not an attack tool.
+## Safety
 
-## Web console
-
-A React + Vite app lives in `web/` (the Crenel console): overview, agent run
-(a Claude-Code-style prompt and streamed steps), findings and detail, targets,
-secrets, authorization matrix, generated tests, integrations, settings, and a
-landing page. Run it with `cd web && pnpm install && pnpm dev`.
+The scope guard (`src/core/scope.ts`) refuses any host outside `allowedHosts` and any active check you did not opt into. Every outbound request goes through a scoped client (`src/core/net.ts`) that also refuses private and loopback addresses, re-validates each redirect hop and caps response size. Only point Crenel at systems you own or are explicitly authorised to test. It is a hardening tool, not an attack tool. See [`SECURITY.md`](SECURITY.md).
 
 ## Commands
 
-- `scan` — run checks; `--out` JSON, `--sarif` SARIF 2.1.0, `--audit` JSONL log, `--baseline`/`--update-baseline` for regressions.
-- `generate-tests` — emit one regression test per finding (`--out`), so a fixed issue cannot return.
-- `triage` — experimental LLM triage of leads via the local Claude CLI (advice only, never proves).
-- `list`, `init`.
+| Command | |
+| --- | --- |
+| `crenel scan` | Run the checks. `--json`, `--out`, `--sarif` (SARIF 2.1.0), `--audit` (JSONL), `--baseline`, `--update-baseline`, `--verbose`. |
+| `crenel generate-tests` | One regression test per finding. |
+| `crenel triage` | Experimental: ask the local Claude CLI for advice on leads. Advice only, never proof. |
+| `crenel list` · `crenel init` | List checks · write a starter config. |
+
+## Web console
+
+A React app in [`web/`](web/) renders the same model as the CLI: a Codex-style launch screen, an agent run you can follow step by step, findings with their proof, the authorization matrix and the generated tests. It is being redesigned. Run it with `cd web && pnpm install && pnpm dev`.
+
+## Brand
+
+Mascot, logo, typography and usage rules live in [`brand/`](brand/).
 
 ## Roadmap
 
-Needs the user's credentials or a product decision (not done autonomously):
-- Auto-PR of the generated tests and fixes to GitHub.
-- Hosted/continuous scanning and a trust page.
-- Run cloudflare/security-audit-skill end to end (the `cloudflare-audit` check
-  already ingests and normalises its `findings.json`; wiring the skill run is
-  the remaining, network-touching part).
+- Compare the two tenants' response bodies in `authz-matrix`, so a `200` that returns someone else's data is itself proof.
+- An age and publisher signal in `dependency-risk` against slopsquatting and maintainer takeovers.
+- Liveness checks and rotation paths for found secrets.
+- Repo-relative finding paths, so generated tests resolve from the repo root.
 
-Self-contained next steps, in priority order from the Nov 2026 research
-(see `docs/NIGHT-SUMMARY.md`):
-- Deepen `authz-matrix`: beyond status codes, compare the two tenants' response
-  bodies so a `200` that returns another account's data is itself proof. This is
-  the differentiation the market leaves open.
-- `dependency-risk`: add a version age / publisher signal (flag freshly published
-  or unusual-publisher versions) to blunt slopsquatting and maintainer takeovers.
-- Secrets: do not compete on detection; add liveness verification and a rotation
-  path, or consume an existing detector's output.
-- Give findings a repo-relative path so generated tests resolve from the repo
-  root (today their paths are relative to the scanned projectDir).
-- Pin the vetted IP into the connection for live checks, to close the residual
-  DNS-rebinding window (the scoped client re-checks on redirects but `fetch`
-  re-resolves after the pre-flight `lookup`). Threat needs an attacker who
-  controls DNS for a host you declared you own.
-- Let the baseline gate only *new* proven high/criticals (today a proven
-  high/critical fails CI whether or not it is in the baseline).
-- A Tauri desktop app over the same core.
+## Contributing
 
-Done since the first draft: the `mcp-surface` check (flags committed agent/MCP
-config, a 2026 attack surface) and the `dockerfile` check (container hardening:
-root user, unpinned base, baked secrets, ADD-from-URL, curl|sh) and the
-`committed-env` check (flags a committed .env, which holds secrets no key-shape
-scanner would catch); malware denylist synced from OSV in CI
-(`pnpm sync-denylist`, run weekly by `security.yml`); SARIF 2.1.0 output;
-JSONL audit log; regression-test generation.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Engine: `pnpm test` (107 tests). Console: `cd web && pnpm test`.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).

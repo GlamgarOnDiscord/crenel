@@ -32,7 +32,7 @@ function loadDenylist(): KnownBad[] {
   return ((denylistData as { packages?: KnownBad[] }).packages ?? []);
 }
 
-// Walk up from the scanned dir to the nearest package root, so pointing Bastion
+// Walk up from the scanned dir to the nearest package root, so pointing Crenel
 // at a built bundle still finds the manifest above it.
 function findPackageRoot(start: string): string | null {
   let dir = start;

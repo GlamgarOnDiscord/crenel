@@ -1,9 +1,10 @@
 {
-  "name": "bastion",
+  "name": "crenel",
   "version": "0.1.0",
   "description": "A defensive security harness for SaaS: harden your own app, validate findings with replayable proof, and measure your tools before you trust them.",
   "type": "module",
   "bin": {
+    "crenel": "./dist/cli.js",
     "bastion": "./dist/cli.js"
   },
   "exports": {
@@ -13,12 +14,12 @@
     "dist"
   ],
   "scripts": {
-    "bastion": "tsx src/cli.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "demo": "tsx src/cli.ts scan --config examples/bastion.config.yaml",
-    "sync-denylist": "node scripts/sync-denylist.mjs"
+    "demo": "tsx src/cli.ts scan --config examples/crenel.config.yaml",
+    "sync-denylist": "node scripts/sync-denylist.mjs",
+    "crenel": "tsx src/cli.ts"
   },
   "engines": {
     "node": ">=20"

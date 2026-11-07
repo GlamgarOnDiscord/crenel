@@ -29,7 +29,7 @@ export function resolveChecks(names: string[]): Check[] {
   const out: Check[] = [];
   for (const n of names) {
     const c = byName.get(n);
-    if (!c) throw new Error(`Unknown check: "${n}". Run "bastion list" to see available checks.`);
+    if (!c) throw new Error(`Unknown check: "${n}". Run "crenel list" to see available checks.`);
     out.push(c);
   }
   return out;

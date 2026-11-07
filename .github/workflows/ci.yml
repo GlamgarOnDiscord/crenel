@@ -24,4 +24,4 @@ jobs:
       - run: pnpm build
       # Dogfood: scan the bundled example. It exits non-zero on purpose
       # (the example ships planted secrets), so we only assert it runs.
-      - run: pnpm bastion scan --config examples/bastion.config.yaml || true
+      - run: pnpm crenel scan --config examples/crenel.config.yaml || true

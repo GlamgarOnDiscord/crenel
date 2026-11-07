@@ -1,4 +1,4 @@
-// The scope guard is the safety core of Bastion.
+// The scope guard is the safety core of Crenel.
 //
 // Every action that leaves the local filesystem has to pass through here first.
 // The rule is simple and deliberately strict: you may only touch a host you have
@@ -62,7 +62,7 @@ export class Scope {
     if (!this.isHostAllowed(url)) {
       throw new ScopeError(
         `Refused: ${safeHost(url)} is not in allowedHosts. ` +
-          `Bastion only tests hosts you have declared you own.`,
+          `Crenel only tests hosts you have declared you own.`,
       );
     }
   }

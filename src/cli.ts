@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Bastion CLI. Three commands:
+// Crenel CLI. Three commands:
 //   scan   run the checks against a config and report
 //   list   show available checks
 //   init   write a starter config
@@ -17,7 +17,14 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 
-const STARTER = `# Bastion config. Declare only what you own.
+// Default config file. `crenel.config.yaml`, falling back to the pre-rename
+// `bastion.config.yaml` when only that one exists, so older setups keep working.
+function defaultConfigPath(): string {
+  if (!existsSync("crenel.config.yaml") && existsSync("bastion.config.yaml")) return "bastion.config.yaml";
+  return "crenel.config.yaml";
+}
+
+const STARTER = `# Crenel config. Declare only what you own.
 project: my-saas
 projectDir: ./dist          # the directory to scan for secrets (your built bundle)
 
@@ -42,7 +49,7 @@ options:
 `;
 
 // Flags that never take a value, so they do not swallow the following token
-// (e.g. `bastion --verbose scan` must keep `scan` as the command).
+// (e.g. `crenel --verbose scan` must keep `scan` as the command).
 const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
 const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max"]);
@@ -100,18 +107,18 @@ async function main(): Promise<number> {
   }
 
   if (cmd === "init") {
-    const path = (flags.config as string) ?? "bastion.config.yaml";
+    const path = (flags.config as string) ?? defaultConfigPath();
     if (existsSync(path) && !flags.force) {
       process.stderr.write(`${path} already exists. Use --force to overwrite.\n`);
       return 1;
     }
     writeFileSync(path, STARTER);
-    process.stdout.write(`Wrote ${path}. Edit it, then run: bastion scan --config ${path}\n`);
+    process.stdout.write(`Wrote ${path}. Edit it, then run: crenel scan --config ${path}\n`);
     return 0;
   }
 
   if (cmd === "scan") {
-    const configPath = (flags.config as string) ?? "bastion.config.yaml";
+    const configPath = (flags.config as string) ?? defaultConfigPath();
     let config;
     try {
       config = loadConfig(configPath);
@@ -181,7 +188,7 @@ async function main(): Promise<number> {
   }
 
   if (cmd === "generate-tests") {
-    const configPath = (flags.config as string) ?? "bastion.config.yaml";
+    const configPath = (flags.config as string) ?? defaultConfigPath();
     let config;
     try {
       config = loadConfig(configPath);
@@ -201,7 +208,7 @@ async function main(): Promise<number> {
 
   if (cmd === "triage") {
     // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
-    const configPath = (flags.config as string) ?? "bastion.config.yaml";
+    const configPath = (flags.config as string) ?? defaultConfigPath();
     let config;
     try {
       config = loadConfig(configPath);
@@ -225,17 +232,17 @@ async function main(): Promise<number> {
 
   process.stdout.write(
     [
-      "Bastion - a defensive security harness for SaaS",
+      "Crenel - a defensive security harness for SaaS",
       "",
       "Usage:",
-      "  bastion init   [--config path] [--force]   write a starter config",
-      "  bastion scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--verbose]",
+      "  crenel init   [--config path] [--force]   write a starter config",
+      "  crenel scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--verbose]",
       "                 [--baseline file.json] [--update-baseline] [--audit log.jsonl]",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
-      "  bastion triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
-      "  bastion list                                show available checks",
+      "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
+      "  crenel list                                show available checks",
       "",
-      "Bastion only tests hosts you declare you own. Active checks stay off until",
+      "Crenel only tests hosts you declare you own. Active checks stay off until",
       "you enable them in the config for your own staging.",
       "",
     ].join("\n"),
