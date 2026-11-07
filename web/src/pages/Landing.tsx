@@ -4,6 +4,10 @@ import { ArrowRight, Github } from "lucide-react";
 import { Mark, Wordmark, Mascot } from "../brand/Logo.tsx";
 import { Button, CopyButton } from "../components/ui.tsx";
 import { CHECKS } from "../data/mock.ts";
+import { Badge } from "../components/arc/badge/badge.tsx";
+import { AnimatedCounter } from "../components/arc/animated-counter/animated-counter.tsx";
+import { Tooltip } from "../components/arc/tooltip/tooltip.tsx";
+import { Shimmer } from "../components/ai/shimmer.tsx";
 import { REPO_URL, DOCS_URL } from "../lib/links.ts";
 
 const STEPS = [
@@ -33,14 +37,14 @@ export function Landing() {
 
       <header className="landing lp-hero">
         <div className="lp-hero-tx">
-          <span className="eyebrow">Open source · pour fondateurs de SaaS</span>
+          <Badge tone="success" icon={<span className="fd amber" />}>Open source · pour fondateurs de SaaS</Badge>
           <h1>Attaquez votre app <em>avant</em> qu'on le fasse.</h1>
           <p className="sub">Crenel trouve les secrets exposés et les failles d'autorisation entre comptes, prouve chacune par une requête rejouable, puis la garde en CI pour qu'elle ne revienne jamais.</p>
           <div className="cta">
             <Button to="/app/overview">Ouvrir la console <ArrowRight size={15} /></Button>
             <Button href={REPO_URL} variant="ghost"><Github size={15} /> GitHub</Button>
           </div>
-          <div className="install"><code><span className="k" aria-hidden="true">$</span> npx crenel scan</code><CopyButton text="npx crenel scan" /></div>
+          <div className="install"><code><span className="k" aria-hidden="true">$</span> npx crenel scan</code><Tooltip content="Copier la commande"><span><CopyButton text="npx crenel scan" /></span></Tooltip></div>
         </div>
         <div className="lp-mascot" aria-hidden="false">
           <div className="halo big"><Mascot size={280} /></div>
@@ -58,7 +62,7 @@ export function Landing() {
             <div className="tl-res"><span className="tag crit">CRIT</span> sk_live_ dans dist/app.js:5 <span className="pv">prouvé</span></div>
             <div className="tl-row"><span className="b ok" />scan.deps<span className="dim">(pnpm-lock.yaml · 842 paquets)</span></div>
             <div className="tl-res"><span className="tag crit">CRIT</span> @tanstack/react-router@1.169.5 <span className="pv">prouvé</span></div>
-            <div className="tl-row"><span className="b wait" />authz.matrix<span className="dim">(compte A → compte B)</span></div>
+            <div className="tl-row"><span className="b wait" /><Shimmer>authz.matrix</Shimmer><span className="dim">(compte A → compte B)</span></div>
             <div className="tl-perm">Envoyer 4 requêtes à staging.acme.app ? <span className="opt on">1 Autoriser une fois</span><span className="opt">2 Toujours</span><span className="opt">3 Refuser</span></div>
             <div className="tl-res"><span className="tag high">HAUTE</span> GET /api/projects/:id → 200 <span className="pv">prouvé</span></div>
             <div className="tl-row"><span className="b amb" />tests.generate<span className="dim">(4 failles)</span></div>
@@ -83,7 +87,7 @@ export function Landing() {
       </section>
 
       <section id="checks" className="landing lp-sec" aria-labelledby="checks-t">
-        <h2 id="checks-t" className="lp-h2">14 checks, zéro magie.</h2>
+        <h2 id="checks-t" className="lp-h2"><AnimatedCounter value={CHECKS.length} animateOnView /> checks, zéro magie.</h2>
         <p className="lp-lede">Chacun est déterministe et lisible dans le dépôt. L'agent les orchestre; le verdict ne dépend jamais d'un modèle.</p>
         <div className="checks">
           {GROUPS.map((g) => (

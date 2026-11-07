@@ -1,10 +1,17 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDownRight, ArrowUpRight, Check, Copy, FileCode2, Hand, Loader2, ShieldCheck, Square } from "lucide-react";
+import { Archive, ArrowDownRight, ArrowUpRight, Check, Copy, FileCode2, Hand, Link2, Loader2, MoreHorizontal, RotateCcw, ShieldCheck, Square } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { DropdownMenu } from "./arc/dropdown-menu/dropdown-menu.tsx";
+import { ShimmeringText } from "./bklit/shimmering-text.tsx";
+import { useToast } from "./toast.tsx";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { cn } from "../lib/cn.ts";
 import { SEV_LABEL, SEV_NAME, type FindingState, type Severity, type Task } from "../lib/types.ts";
 import { modelOf, type ModelId } from "../lib/workspace.tsx";
+import { Badge } from "./arc/badge/badge.tsx";
+import { AnimatedCounter } from "./arc/animated-counter/animated-counter.tsx";
+import SegmentedControl from "./arc/segmented-control/segmented-control.tsx";
 
 // A button, or (when `to` is given) a react-router Link styled as one, so we
 // never nest a <button> inside an <a>.
@@ -60,15 +67,16 @@ export function SeverityChip({ sev }: { sev: Severity }) {
 export function StateBadge({ state }: { state: FindingState }) {
   const label = state === "proven" ? "prouvé" : state === "fixed" ? "corrigé" : "piste";
   return (
-    <span className={cn("state", state)}>
+    <span className={cn("state", `is-${state}`)}>
       {state === "fixed" ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : <span className="d" aria-hidden="true" />}
       {label}
     </span>
   );
 }
 
+// "Gardé" = a regression test in CI: the Arc UI Badge, success tone (Crenel amber).
 export function GuardBadge({ label = "gardé" }: { label?: string }) {
-  return <span className="guard"><ShieldCheck size={12} aria-hidden="true" />{label}</span>;
+  return <Badge size="sm" tone="success" icon={<ShieldCheck size={12} />}>{label}</Badge>;
 }
 
 export function Pill({ children, tone = "neutral", dot }: { children: ReactNode; tone?: "neutral" | "brand" | "danger"; dot?: boolean }) {
@@ -140,7 +148,7 @@ export function CopyButton({ text, label = "Copier", what = "la commande", iconO
   return (
     <button type="button" className={cn("copybtn", done && "done", iconOnly && "icon")} onClick={async () => { await writeClipboard(text); setDone(true); }}
       aria-label={done ? "Copié" : `${label} ${what}`} title={`${label} ${what}`}>
-      {done ? <Check size={13} /> : <Copy size={13} />}
+      <span className="t-iconswap" data-state={done ? "b" : "a"} aria-hidden="true"><Copy size={13} className="ia" /><Check size={13} className="ib" /></span>
       {!iconOnly && <span>{done ? "Copié" : label}</span>}
       <span className="sr-only" aria-live="polite">{done ? "Copié dans le presse-papiers" : ""}</span>
     </button>
@@ -168,17 +176,13 @@ export function CodeBlock({ file, code }: { file: string; code: string }) {
 
 /* ---------- Period segment, delta, block bars, KPI tile ---------- */
 
+// Period and filter switches: the Arc UI SegmentedControl (sliding thumb).
 export function Segmented<T extends string>({ items, value, onChange, label }: {
   items: { id: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void; label: string;
 }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
-      {items.map((it) => (
-        <button type="button" key={it.id} aria-pressed={value === it.id} className={value === it.id ? "on" : ""} onClick={() => onChange(it.id)}>
-          {it.label}{it.count !== undefined && <span className="seg-n">{it.count}</span>}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl label={label} value={value} onValueChange={(v: string) => onChange(v as T)}
+      options={items.map((it) => ({ value: it.id, label: it.label, accessory: it.count !== undefined ? <span className="seg-n">{it.count}</span> : undefined }))} />
   );
 }
 
@@ -227,7 +231,7 @@ export function BlockBars({ data, tone = "neutral", columns = 24 }: { data: numb
 }
 
 export function KpiTile({ label, icon, value, unit, delta, deltaUnit, bad, comparison, data, tone, to }: {
-  label: string; icon: ReactNode; value: ReactNode; unit?: string; delta?: number; deltaUnit?: string; bad?: "up" | "down";
+  label: string; icon: ReactNode; value: number | string; unit?: string; delta?: number; deltaUnit?: string; bad?: "up" | "down";
   comparison?: string; data?: number[]; tone?: "neutral" | "danger" | "brand"; to?: string;
 }) {
   return (
@@ -238,7 +242,7 @@ export function KpiTile({ label, icon, value, unit, delta, deltaUnit, bad, compa
       </div>
       <div className="kpi-in">
         <div className="kpi-v">
-          <span className="kpi-n">{value}{unit && <small>{unit}</small>}</span>
+          <span className="kpi-n">{typeof value === "number" ? <AnimatedCounter value={value} /> : value}{unit && <small>{unit}</small>}</span>
           <span className="kpi-d">{delta !== undefined && <Delta value={delta} bad={bad} unit={deltaUnit} />}{comparison && <span className="kpi-c">{comparison}</span>}</span>
         </div>
         {data && <div className="kpi-g"><BlockBars data={data} tone={tone} /></div>}
@@ -381,6 +385,8 @@ export function TaskIcon({ status }: { status: Task["status"] }) {
 }
 
 export function TaskRow({ t }: { t: Task }) {
+  const navigate = useNavigate();
+  const toast = useToast();
   return (
     <li className="task">
       <TaskIcon status={t.status} />
@@ -388,7 +394,7 @@ export function TaskRow({ t }: { t: Task }) {
         <Link to="/app/agent" state={{ taskId: t.id }} className="task-title stretched">{t.title}</Link>
         <div className="task-meta">
           <span className="sr-only">Statut: {STATUS_LABEL[t.status]}. </span>
-          {t.status === "waiting" && <span className="task-wait">attend votre accord</span>}
+          {t.status === "waiting" && <ShimmeringText text="attend votre accord" className="task-wait [--color:var(--brand-ink)] [--shimmering-color:var(--fg)]" />}
           <span className="mono">{t.target}</span><span>{t.trigger}</span><span>{t.when}</span>{t.dur && <span className="hide-sm">{t.dur}</span>}
         </div>
       </div>
@@ -399,6 +405,13 @@ export function TaskRow({ t }: { t: Task }) {
         {!!t.leads && <span className="st hide-sm">{t.leads} piste{t.leads > 1 ? "s" : ""}</span>}
         {!t.proven && !t.fixed && !t.guarded && !t.leads && <span className="st">rien de neuf</span>}
       </div>
+      <span className="task-menu">
+        <DropdownMenu iconOnly label={`Actions pour ${t.title}`} icon={<MoreHorizontal size={16} />} items={[
+          { label: "Rouvrir dans l'agent", icon: <RotateCcw size={14} />, onSelect: () => navigate("/app/agent", { state: { taskId: t.id } }) },
+          { label: "Copier le lien", icon: <Link2 size={14} />, onSelect: () => toast({ type: "success", title: "Lien de la tâche copié" }) },
+          { label: t.archived ? "Désarchiver" : "Archiver", icon: <Archive size={14} />, separatorBefore: true, onSelect: () => toast({ type: "info", title: t.archived ? "Tâche désarchivée" : "Tâche archivée" }) },
+        ]} />
+      </span>
     </li>
   );
 }

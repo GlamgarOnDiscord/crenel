@@ -1,14 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowDown, Brain, Check, ChevronDown, CircleDashed, ExternalLink, Loader2, Minus, ShieldQuestion, SquarePen, Wrench, X } from "lucide-react";
+import { Check, CircleDashed, Copy, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
 import { Mark } from "../brand/Logo.tsx";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { Button, CodeBlock, ContextGauge, Dots, EffortBars, SeverityChip, Shimmer, StateBadge } from "../components/ui.tsx";
+import { Button, SeverityChip, StateBadge } from "../components/ui.tsx";
+import { EffortGauge } from "../components/EffortControl.tsx";
+import { useToast } from "../components/toast.tsx";
+import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "../components/ai/conversation.tsx";
+import { Message, MessageAction, MessageActions, MessageContent } from "../components/ai/message.tsx";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "../components/ai/reasoning.tsx";
+import { Plan, PlanAction, PlanContent, PlanHeader, PlanTitle, PlanTrigger, TaskItem, TaskItemFile } from "../components/ai/plan.tsx";
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "../components/ai/tool.tsx";
+import { CodeBlock } from "../components/ai/code-block.tsx";
+import { Source, Sources, SourcesContent, SourcesTrigger } from "../components/ai/sources.tsx";
+import { Confirmation, ConfirmationAccepted, ConfirmationAction, ConfirmationActions, ConfirmationRejected, ConfirmationRequest, ConfirmationTitle } from "../components/ai/confirmation.tsx";
+import { Context, ContextContent, ContextTrigger } from "../components/ai/context.tsx";
+import { Suggestion, Suggestions } from "../components/ai/suggestion.tsx";
+import { Shimmer } from "../components/ai/shimmer.tsx";
+import { Skeleton } from "../components/arc/skeleton/skeleton.tsx";
+import { Progress } from "../components/arc/progress/progress.tsx";
+import { ThinkingBar } from "../components/kit/thinking-bar.tsx";
+import { FeedbackBar } from "../components/kit/feedback-bar.tsx";
+import { BorderTrail } from "../components/kit/border-trail.tsx";
+import { TextMorph } from "../components/kit/text-morph.tsx";
+import { SlidingNumber } from "../components/kit/sliding-number.tsx";
+import { Loader } from "../components/kit/loader.tsx";
+import { Steps, StepsContent, StepsItem, StepsTrigger } from "../components/kit/steps.tsx";
 import { agentAfterAllow, agentAfterDeny, agentScript, tasks } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
-import type { AgentEvent, Source } from "../lib/types.ts";
+import type { AgentEvent } from "../lib/types.ts";
 import { CONTEXT_WINDOW, effortOf, modeLabel, modelOf, useWorkspace } from "../lib/workspace.tsx";
 
 type Phase = "running" | "waiting" | "idle" | "interrupted";
@@ -42,112 +64,6 @@ function initial(state: unknown, targetName: string): { events: AgentEvent[]; qu
 
 
 
-/* ---------- AI building blocks, re-implemented in Crenel's own CSS after the
-   patterns of Vercel AI Elements (Apache-2.0) and prompt-kit (MIT). No code
-   copied from either. ---------- */
-
-function Reasoning({ text, dur, live }: { text: string; dur: string; live: boolean }) {
-  const [open, setOpen] = useState(live);
-  useEffect(() => { if (!live) setOpen(false); }, [live]);
-  return (
-    <div className="reason">
-      <button type="button" className="reason-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <Brain size={14} aria-hidden="true" />
-        {live ? <Shimmer>Réflexion…</Shimmer> : <span>Réflexion · {dur}</span>}
-        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
-      </button>
-      {open && <p className="reason-b">{text}</p>}
-    </div>
-  );
-}
-
-type StepState = "done" | "run" | "todo" | "skip";
-function Plan({ steps, state }: { steps: { tool: string; label: string }[]; state: (tool: string) => StepState }) {
-  const [open, setOpen] = useState(true);
-  const done = steps.filter((s) => state(s.tool) === "done").length;
-  return (
-    <div className="plan">
-      <button type="button" className="plan-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span>Plan</span><span className="mono faint">{done}/{steps.length}</span>
-        <span className="plan-bar" aria-hidden="true"><i style={{ width: `${(done / steps.length) * 100}%` }} /></span>
-        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
-      </button>
-      {open && (
-        <ol className="plan-list">
-          {steps.map((s) => {
-            const st = state(s.tool);
-            return (
-              <li key={s.tool} className={cn("pstep", st)}>
-                <span className="pstep-ic" aria-hidden="true">
-                  {st === "done" ? <Check size={11} strokeWidth={3} /> : st === "run" ? <Loader2 size={11} className="spin" /> : st === "skip" ? <Minus size={11} /> : <CircleDashed size={11} />}
-                </span>
-                {st === "run" ? <Shimmer>{s.label}</Shimmer> : <span>{s.label}</span>}
-                <span className="sr-only">{st === "done" ? " (fait)" : st === "run" ? " (en cours)" : st === "skip" ? " (ignoré)" : " (à faire)"}</span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function ToolCall({ ev, running }: { ev: Extract<AgentEvent, { kind: "tool" }>; running: boolean }) {
-  const [open, setOpen] = useState(false);
-  const proven = ev.findings?.some((f) => f.state === "proven");
-  return (
-    <div className="tool">
-      <button type="button" className="tool-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <Wrench size={14} aria-hidden="true" />
-        <span className="mono tool-n">{running ? <Shimmer>{ev.tool}</Shimmer> : ev.tool}</span>
-        <span className="mono faint tool-a">{ev.args}</span>
-        <span className="sp" />
-        {running ? <span className="tpill run"><Loader2 size={11} className="spin" aria-hidden="true" />en cours</span>
-          : <span className={cn("tpill", proven && "bad")}>{proven ? "faille prouvée" : "terminé"}</span>}
-        {!running && <span className="mono faint tool-d">{ev.dur}</span>}
-        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="tool-b">
-          <div className="tool-sec"><span className="tool-lab">Entrée</span><pre>{ev.input}</pre></div>
-          <div className="tool-sec"><span className="tool-lab">Sortie</span><pre>{running ? "…" : ev.lines.join("\n")}</pre></div>
-        </div>
-      )}
-      {!running && ev.findings && ev.findings.length > 0 && (
-        <div className="tool-f">
-          {ev.findings.map((f, j) => (
-            <div key={j} className={cn("ev-find", f.state)}>
-              <SeverityChip sev={f.sev} />
-              <span className="ev-find-t">{f.text}</span>
-              <StateBadge state={f.state} />
-              {f.id && <Link to={`/app/findings/${f.id}`} className="linkish ev-find-l">voir</Link>}
-            </div>
-          ))}
-        </div>
-      )}
-      {!running && ev.code && <div className="tool-code"><CodeBlock file={ev.code.file} code={ev.code.body} /></div>}
-    </div>
-  );
-}
-
-function Sources({ items }: { items: Source[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="sources">
-      <button type="button" className="sources-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {items.length} sources <ChevronDown size={12} className={cn("chev", open && "up")} aria-hidden="true" />
-      </button>
-      {open && (
-        <ul className="sources-l">
-          {items.map((s) => (
-            <li key={s.label}><a href={s.href} target="_blank" rel="noopener noreferrer"><span className="faint">{s.kind}</span>{s.label}<ExternalLink size={11} aria-hidden="true" /></a></li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 export function Agent() {
   const location = useLocation();
   const ws = useWorkspace();
@@ -160,7 +76,6 @@ export function Agent() {
   const [allowed, setAllowed] = useState<string[]>([]);
   const [stream, setStream] = useState<{ idx: number; full: string; len: number } | null>(null);
   const [input, setInput] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
   const permRef = useRef<HTMLButtonElement>(null);
 
   // Reset when navigating here again with a new prompt or task.
@@ -204,25 +119,6 @@ export function Agent() {
     return () => clearTimeout(t);
   }, [stream]);
 
-  // Stick to the bottom while the user is near it; otherwise show a
-  // "Revenir en bas" button (after prompt-kit ScrollButton).
-  const [away, setAway] = useState(false);
-  const awayRef = useRef(false);
-  useEffect(() => {
-    const scroller = endRef.current?.closest(".main") as HTMLElement | null;
-    if (!scroller) return;
-    function onScroll() {
-      const a = scroller!.scrollHeight - scroller!.scrollTop - scroller!.clientHeight > 160;
-      awayRef.current = a; setAway(a);
-    }
-    scroller.addEventListener("scroll", onScroll, { passive: true });
-    return () => scroller.removeEventListener("scroll", onScroll);
-  }, []);
-  function toBottom() {
-    const scroller = endRef.current?.closest(".main") as HTMLElement | null;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
-  }
-  useEffect(() => { if (!awayRef.current) toBottom(); }, [events.length, stream?.len, phase]);
   useEffect(() => { if (phase === "waiting") permRef.current?.focus(); }, [phase]);
 
   const decide = useCallback((d: Decision) => {
@@ -289,9 +185,11 @@ export function Agent() {
   const effort = effortOf(ws.effort);
   const model = modelOf(ws.model);
   const phaseLabel = phase === "running" || stream ? "travaille" : phase === "waiting" ? "attend votre accord" : phase === "interrupted" ? "interrompu" : "prêt";
+  const toast = useToast();
+  const [feedback, setFeedback] = useState(true);
 
-  // Plan step state, derived from the events shown so far.
   const lastIdx = events.length - 1;
+  type StepState = "done" | "run" | "todo" | "skip";
   function stepState(tool: string): StepState {
     const i = events.findIndex((e) => e.kind === "tool" && e.tool === tool);
     if (i >= 0) return i === lastIdx && phase === "running" ? "run" : "done";
@@ -303,90 +201,199 @@ export function Agent() {
     }
     return "todo";
   }
+  const finalSay = [...events].map((e, i) => ({ e, i })).reverse().find(({ e }) => e.kind === "say" && !!e.sources)?.i;
 
   return (
     <div className="agent">
       <Topbar scoped compact crumb="Agent" title={init.title.length > 80 ? init.title.slice(0, 78) + "…" : init.title}
         actions={<Button variant="ghost" size="sm" to="/app/overview"><SquarePen size={14} /> Nouvelle tâche</Button>} />
 
-      <div className="transcript" role="log" aria-live="polite" aria-relevant="additions" aria-label="Déroulé de l'agent">
-        {events.length === 0 && (
-          <div className="tr-empty"><Mark size={28} /><p>Conversation effacée. Tapez <span className="mono">/scan</span> pour relancer.</p></div>
-        )}
-        {events.map((ev, i) => {
-          const isLast = i === lastIdx;
-          if (ev.kind === "user") return (
-            <div key={i} className="msg-user fade-up"><p>{ev.text}</p></div>
-          );
-          if (ev.kind === "think") return <div key={i} className="fade-up"><Reasoning text={ev.text} dur={ev.dur} live={isLast && phase === "running"} /></div>;
-          if (ev.kind === "plan") return <div key={i} className="fade-up"><Plan steps={ev.steps} state={stepState} /></div>;
-          if (ev.kind === "say") return (
-            <div key={i} className="msg-ai fade-up">
-              <span className="ev-av" aria-label="Crenel"><Mark size={20} /></span>
-              <div className="msg-ai-b">
-                <p>{ev.text}{stream?.idx === i && <span className="cursor cursor-blink" aria-hidden="true" />}</p>
-                {ev.sources && <Sources items={ev.sources} />}
-              </div>
-            </div>
-          );
-          if (ev.kind === "note") return (
-            <div key={i} className={cn("ev-note fade-up", ev.tone)}><span className="elbow" aria-hidden="true" />{ev.text}</div>
-          );
-          if (ev.kind === "tool") return <div key={i} className="fade-up"><ToolCall ev={ev} running={isLast && phase === "running"} /></div>;
-          // permission = Confirmation
-          const d = decisions[i];
-          return (
-            <div key={i} className="fade-up">
-              {d ? (
-                <div className="tool">
-                  <div className="tool-hd static">
-                    <ShieldQuestion size={14} aria-hidden="true" />
-                    <span className="mono tool-n">{ev.tool}</span><span className="mono faint tool-a">{ev.requests.length} requêtes vers {ev.host}</span>
-                    <span className="sp" />
-                    <span className={cn("tpill", d !== "deny" && "brand")}>{d === "once" ? "autorisé une fois" : d === "always" ? "toujours autorisé" : "refusé"}</span>
-                  </div>
+      <Conversation>
+        <ConversationContent aria-live="polite" aria-relevant="additions" aria-label="Déroulé de l'agent">
+          {events.length === 0 && (
+            <ConversationEmptyState icon={<Mark size={32} />} title="Conversation effacée" description="Tapez /scan pour relancer une analyse." />
+          )}
+          {events.map((ev, i) => {
+            const isLast = i === lastIdx;
+            if (ev.kind === "user") return (
+              <Message key={i} from="user" className="fade-up"><MessageContent>{ev.text}</MessageContent></Message>
+            );
+            if (ev.kind === "think") {
+              const live = isLast && phase === "running";
+              return (
+                <div key={i} className="fade-up">
+                  <Reasoning isStreaming={live} duration={live ? undefined : Number(ev.dur.replace(/\D/g, "")) || undefined}>
+                    <ReasoningTrigger />
+                    <ReasoningContent>{ev.text}</ReasoningContent>
+                  </Reasoning>
                 </div>
-              ) : (
-                <div className="perm" role="group" aria-labelledby={`perm-${i}`}>
-                  <div className="perm-hd" id={`perm-${i}`}>
-                    <span className="ichip brand" aria-hidden="true"><ShieldQuestion size={15} /></span>
+              );
+            }
+            if (ev.kind === "plan") {
+              const done = ev.steps.filter((st) => stepState(st.tool) === "done").length;
+              return (
+                <div key={i} className="fade-up">
+                  <Plan isStreaming={phase === "running" && done < ev.steps.length}>
+                    <PlanHeader>
+                      <PlanTitle>Plan d'attaque</PlanTitle>
+                      <PlanAction>
+                        <span className="font-mono text-[12px] text-fg-faint">{done}/{ev.steps.length}</span>
+                        <span className="w-24"><Progress value={done} max={ev.steps.length} label="Avancement du plan" /></span>
+                        <PlanTrigger />
+                      </PlanAction>
+                    </PlanHeader>
+                    <PlanContent>
+                      <ol className="plan-list">
+                        {ev.steps.map((st) => {
+                          const state = stepState(st.tool);
+                          return (
+                            <li key={st.tool} className={cn("pstep", state)}>
+                              <span className="pstep-ic" aria-hidden="true">
+                                {state === "done" ? <Check size={11} strokeWidth={3} className="t-check" /> : state === "run" ? <Loader2 size={11} className="spin" /> : state === "skip" ? <Minus size={11} /> : <CircleDashed size={11} />}
+                              </span>
+                              <TaskItem className={cn(state === "done" && "text-fg-muted")}>{state === "run" ? <Shimmer>{st.label}</Shimmer> : st.label}</TaskItem>
+                              <TaskItemFile>{st.tool}</TaskItemFile>
+                              <span className="sr-only">{state === "done" ? " (fait)" : state === "run" ? " (en cours)" : state === "skip" ? " (ignoré)" : " (à faire)"}</span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </PlanContent>
+                  </Plan>
+                </div>
+              );
+            }
+            if (ev.kind === "say") return (
+              <Message key={i} from="assistant" className="fade-up">
+                <span className="ev-av" aria-label="Crenel"><Mark size={22} /></span>
+                <MessageContent>
+                  <p>{ev.text}{stream?.idx === i && <span className="cursor cursor-blink" aria-hidden="true" />}</p>
+                  {ev.sources && (
+                    <Sources>
+                      <SourcesTrigger count={ev.sources.length} />
+                      <SourcesContent>{ev.sources.map((src) => <Source key={src.label} href={src.href} title={src.label} kind={src.kind} />)}</SourcesContent>
+                    </Sources>
+                  )}
+                  {i === finalSay && (
+                    <>
+                      <MessageActions>
+                        <MessageAction tooltip="Copier le bilan" onClick={async () => { try { await navigator.clipboard.writeText(ev.text); } catch { /* ignore */ } toast({ type: "success", title: "Bilan copié" }); }}><Copy className="size-3.5" /></MessageAction>
+                        <MessageAction tooltip="Relancer le scan" onClick={() => send("/scan")}><RotateCcw className="size-3.5" /></MessageAction>
+                      </MessageActions>
+                      <Suggestions aria-label="Suites possibles">
+                        {["/fix Préparer les correctifs", "/test Fusionner le test d'isolation", "/explain La clé Stripe"].map((sg) => (
+                          <Suggestion key={sg} suggestion={sg} onClick={(v) => send(v)} />
+                        ))}
+                      </Suggestions>
+                      {feedback && (
+                        <FeedbackBar className="w-fit" title="Ce bilan vous a aidé ?" icon={<Mark size={16} />}
+                          onHelpful={() => { setFeedback(false); toast({ type: "success", title: "Merci, c'est noté" }); }}
+                          onNotHelpful={() => { setFeedback(false); toast({ type: "info", title: "Merci, on va l'améliorer" }); }}
+                          onClose={() => setFeedback(false)} />
+                      )}
+                    </>
+                  )}
+                </MessageContent>
+              </Message>
+            );
+            if (ev.kind === "note") return (
+              <div key={i} className={cn("ev-note fade-up", ev.tone)}><span className="elbow" aria-hidden="true" />{ev.text}</div>
+            );
+            if (ev.kind === "tool") {
+              const running = isLast && phase === "running";
+              const proven = ev.findings?.some((f) => f.state === "proven");
+              return (
+                <div key={i} className="fade-up">
+                  <Tool>
+                    <ToolHeader title={ev.tool} args={ev.args} duration={ev.dur} state={running ? "input-available" : proven ? "output-proven" : "output-available"} />
+                    <ToolContent>
+                      <ToolInput input={ev.input} />
+                      <ToolOutput output={running ? "…" : ev.lines.join("\n")} />
+                    </ToolContent>
+                    {running ? (
+                      <div className="tool-run"><Loader variant="bars" label="Outil en cours" /><Skeleton lines={2} label="Résultats en cours" /></div>
+                    ) : (
+                      <>
+                        {ev.findings && ev.findings.length > 0 && (
+                          <div className="tool-f">
+                            {ev.findings.map((f, j) => (
+                              <div key={j} className={cn("ev-find", `is-${f.state}`)}>
+                                <SeverityChip sev={f.sev} />
+                                <span className="ev-find-t">{f.text}</span>
+                                <StateBadge state={f.state} />
+                                {f.id && <Link to={`/app/findings/${f.id}`} className="linkish ev-find-l">voir</Link>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {ev.code && <div className="tool-code"><CodeBlock filename={ev.code.file} code={ev.code.body} language="ts" /></div>}
+                      </>
+                    )}
+                  </Tool>
+                </div>
+              );
+            }
+            // permission: AI Elements Confirmation, with a motion-primitives BorderTrail while it waits
+            const d = decisions[i];
+            return (
+              <div key={i} className="fade-up">
+                <Confirmation state={d ? "approval-responded" : "approval-requested"} approved={d ? d !== "deny" : undefined} aria-labelledby={`perm-${i}`}>
+                  {!d && <BorderTrail size={90} className="bg-brand opacity-70" />}
+                  <ConfirmationTitle id={`perm-${i}`}>
+                    <span className={cn("ichip sm", !d && "brand")} aria-hidden="true"><ShieldQuestion size={14} /></span>
                     <span><b className="mono">{ev.tool}</b> veut envoyer {ev.requests.length} requêtes à <b className="mono">{ev.host}</b></span>
-                  </div>
-                  <pre className="perm-req">{ev.requests.join("\n")}</pre>
-                  <p className="perm-q">Le run est en pause. Lecture seule, avec le jeton du compte A.</p>
-                  <div className="perm-opts">
-                    <button ref={permRef} type="button" className="perm-b primary" onClick={() => decide("once")}><span className="kn">1</span>Autoriser une fois</button>
-                    <button type="button" className="perm-b" onClick={() => decide("always")}><span className="kn">2</span>Toujours pour cet hôte</button>
-                    <button type="button" className="perm-b" onClick={() => decide("deny")}><X size={13} aria-hidden="true" />Refuser <span className="kn">Échap</span></button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {phase === "running" && events[lastIdx]?.kind !== "tool" && events[lastIdx]?.kind !== "think" && (
-          <div className="ev-thinking"><Dots /><Shimmer>Crenel réfléchit</Shimmer></div>
-        )}
-        <div ref={endRef} />
-      </div>
+                  </ConfirmationTitle>
+                  <ConfirmationRequest>
+                    <pre className="perm-req">{ev.requests.join("\n")}</pre>
+                    <p className="perm-q">Le run est en pause. Lecture seule, avec le jeton du compte A.</p>
+                  </ConfirmationRequest>
+                  <ConfirmationAccepted><p className="perm-done"><Check size={13} className="t-check" aria-hidden="true" /> {d === "always" ? `Toujours autorisé pour ${ev.host}` : `Autorisé une fois, ${ev.requests.length} requêtes envoyées`}</p></ConfirmationAccepted>
+                  <ConfirmationRejected><p className="perm-done deny"><X size={13} aria-hidden="true" /> Refusé, rien n'a été envoyé</p></ConfirmationRejected>
+                  <ConfirmationActions>
+                    <ConfirmationAction ref={permRef} variant="primary" onClick={() => decide("once")}><span className="kn">1</span>Autoriser une fois</ConfirmationAction>
+                    <ConfirmationAction onClick={() => decide("always")}><span className="kn">2</span>Toujours pour cet hôte</ConfirmationAction>
+                    <ConfirmationAction onClick={() => decide("deny")}><X size={13} aria-hidden="true" />Refuser <span className="kn">Échap</span></ConfirmationAction>
+                  </ConfirmationActions>
+                </Confirmation>
+              </div>
+            );
+          })}
+          {phase === "running" && events[lastIdx]?.kind !== "tool" && events[lastIdx]?.kind !== "think" && (
+            <ThinkingBar className="fade-up" text="Crenel réfléchit" onStop={interrupt} stopLabel="Interrompre" />
+          )}
+          {events.some((e) => e.kind === "think") && (
+            <Steps defaultOpen={false} className="trace">
+              <StepsTrigger leftIcon={<CircleDashed size={14} />}>Journal du run</StepsTrigger>
+              <StepsContent>
+                {events.filter((e) => e.kind === "tool").map((e, k) => e.kind === "tool" && <StepsItem key={k}><span className="font-mono text-fg-muted">{e.tool}</span> · {e.dur} · {e.lines[0]}</StepsItem>)}
+                <StepsItem>{phaseLabel}</StepsItem>
+              </StepsContent>
+            </Steps>
+          )}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
       <div className="dock">
-        {away && (
-          <button type="button" className="tobottom" onClick={toBottom}><ArrowDown size={14} aria-hidden="true" /> Revenir en bas</button>
-        )}
         <Composer
           variant="dock" value={input} onChange={setInput} onSubmit={send} busy={busy} onStop={interrupt}
           placeholder={phase === "waiting" ? "Répondez à la demande, ou écrivez pour la refuser" : "Demandez une suite, ou tapez /"}
-          extra={<ContextGauge used={tokens} total={CONTEXT_WINDOW[ws.model]} />}
+          extra={
+            <Context usedTokens={tokens} maxTokens={CONTEXT_WINDOW[ws.model]} usage={{ input: Math.round(tokens * 0.72), output: Math.round(tokens * 0.2), reasoning: Math.round(tokens * 0.08) }}>
+              <ContextTrigger />
+              <ContextContent />
+            </Context>
+          }
         />
         <div className="statusline">
           <span className="sl-l">
             <span className={cn("sl-dot", busy && "on")} aria-hidden="true" />
-            <span className="sl-phase">{phaseLabel}</span>
+            <TextMorph className="sl-phase">{phaseLabel}</TextMorph>
             <span className="mono">{ws.target.name}</span>
             <span className="hide-sm">{modeLabel(ws.mode)}</span>
             <span className="sl-model hide-sm"><ModelLogo provider={model.provider} size={12} />{model.label}</span>
-            <span className="sl-eff hide-sm"><EffortBars level={effort.level} />{effort.label}</span>
+            <span className="sl-eff hide-sm"><EffortGauge level={effort.level} size={13} tone="muted" />{effort.label}</span>
+            <span className="sl-tok mono hide-sm" title="Tokens utilisés"><SlidingNumber value={Math.round(tokens / 100) / 10} /> k</span>
             {allowed.length > 0 && <span className="mono hide-sm">{allowed.join(", ")} autorisé</span>}
           </span>
           <span className="sl-r hide-sm"><kbd>/</kbd> commandes <kbd>Échap</kbd> interrompre</span>

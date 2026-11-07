@@ -1,0 +1,98 @@
+/*
+ * Motion for Crenel, built on transitions.dev (https://transitions.dev, Jakub
+ * Antalik). Licence: free for personal and commercial use inside a product;
+ * no redistribution of the library itself. Each block below keeps the
+ * "transitions.dev" mention its licence asks for. Values come from the
+ * transitions.dev token scale; reduced motion turns every one of them off.
+ */
+:root {
+  --t-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 250ms;
+  --t-quick: 150ms;
+  --t-slow: 400ms;
+  --t-blur: 2px;
+}
+
+/* transitions.dev · 21 Accordion expand, adapted to Radix Collapsible: height
+   from the measured content, with the snippet's fade + 2px blur. */
+.t-collapse { overflow: hidden; }
+.t-collapse[data-state="open"] { animation: t-acc-open var(--t-fast) var(--t-ease); }
+.t-collapse[data-state="closed"] { animation: t-acc-close var(--t-fast) var(--t-ease); }
+@keyframes t-acc-open {
+  from { height: 0; opacity: 0; filter: blur(var(--t-blur)); }
+  to { height: var(--radix-collapsible-content-height); opacity: 1; filter: blur(0); }
+}
+@keyframes t-acc-close {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; filter: blur(0); }
+  to { height: 0; opacity: 0; filter: blur(var(--t-blur)); }
+}
+
+/* transitions.dev · 05 Menu dropdown: origin-aware scale .97 to 1 on open,
+   quicker fade on close. Applied to every popover and Radix menu. */
+.t-pop, .pop { transform-origin: var(--radix-popper-transform-origin, top left); animation: t-drop-in var(--t-fast) var(--t-ease) both; }
+.pop.right { transform-origin: top right; }
+.pop.up { transform-origin: bottom left; }
+.pop.up.right { transform-origin: bottom right; }
+.t-pop[data-state="closed"] { animation: t-drop-out var(--t-quick) var(--t-ease) both; }
+@keyframes t-drop-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+@keyframes t-drop-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.99); } }
+
+/* transitions.dev · 09 Icon swap: two icons in one slot, blur + scale. */
+.t-iconswap { position: relative; display: inline-grid; }
+.t-iconswap > * { grid-area: 1 / 1; transition: opacity var(--t-fast) ease-in-out, filter var(--t-fast) ease-in-out, transform var(--t-fast) ease-in-out; }
+.t-iconswap[data-state="a"] .ia, .t-iconswap[data-state="b"] .ib { opacity: 1; filter: blur(0); transform: scale(1); }
+.t-iconswap[data-state="a"] .ib, .t-iconswap[data-state="b"] .ia { opacity: 0; filter: blur(var(--t-blur)); transform: scale(.25); }
+
+/* transitions.dev · 18 Texts reveal: a page head enters line by line, rising
+   12px out of a 3px blur, the second line 40ms behind. */
+.t-reveal > * { animation: t-rise 500ms var(--t-ease) both; }
+.t-reveal > *:nth-child(2) { animation-delay: 40ms; }
+.t-reveal > *:nth-child(3) { animation-delay: 80ms; }
+.t-reveal > *:nth-child(4) { animation-delay: 120ms; }
+@keyframes t-rise { from { opacity: 0; transform: translateY(12px); filter: blur(3px); } to { opacity: 1; transform: none; filter: blur(0); } }
+
+/* transitions.dev · 08 Page side-by-side, used as the route transition: the
+   new page slides 8px in from the side out of a 3px blur. */
+.t-page { animation: t-page-in var(--t-fast) var(--t-ease) both; }
+@keyframes t-page-in { from { opacity: 0; transform: translateX(8px); filter: blur(3px); } to { opacity: 1; transform: none; filter: blur(0); } }
+
+/* transitions.dev · 12 Error state shake: four legs, 80/60/80/60 ms. */
+.t-input.is-shaking { animation: t-input-shake 280ms linear; }
+@keyframes t-input-shake {
+  0% { transform: translateX(0); animation-timing-function: var(--t-ease); }
+  28.57% { transform: translateX(6px); animation-timing-function: var(--t-ease); }
+  57.14% { transform: translateX(-6px); animation-timing-function: var(--t-ease); }
+  78.57% { transform: translateX(4px); animation-timing-function: var(--t-ease); }
+  100% { transform: translateX(0); }
+}
+.t-error-msg { opacity: 0; visibility: hidden; transition: opacity 280ms ease-out, visibility 0s linear 280ms; }
+.is-error .t-error-msg { opacity: 1; visibility: visible; transition: opacity 280ms ease-out, visibility 0s; }
+
+/* transitions.dev · 28 Thinking states: the status line swaps up and out of a
+   2px blur when the agent's phase changes. */
+.t-think { display: inline-block; animation: t-think-in var(--t-quick) ease-in-out both; }
+@keyframes t-think-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } to { opacity: 1; transform: none; filter: blur(0); } }
+
+/* transitions.dev · 10 Success check: fade + rotate + bob for a done tick. */
+.t-check { animation: t-check-in 500ms var(--t-ease) both; }
+@keyframes t-check-in { 0% { opacity: 0; transform: rotate(-30deg) translateY(6px) scale(.6); filter: blur(4px); } 60% { transform: rotate(6deg) translateY(-1px) scale(1.05); } 100% { opacity: 1; transform: none; filter: blur(0); } }
+
+/* transitions.dev · 27 Toggle: the thumb travels with a double-bounce overshoot. */
+.switch .knob { transition: left 420ms cubic-bezier(0.34, 1.56, 0.64, 1), background var(--t-quick); }
+
+/* transitions.dev · 03 Notification badge: counters pop when they appear. */
+.t-badge { animation: t-badge-pop 500ms cubic-bezier(0.34, 1.36, 0.64, 1) both; }
+@keyframes t-badge-pop { from { opacity: 0; transform: scale(.4); filter: blur(2px); } to { opacity: 1; transform: none; filter: blur(0); } }
+
+/* prompt-kit loader keyframes (MIT, ibelick). */
+@keyframes pk-wave { 0%, 100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+@keyframes pk-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-4px); opacity: 1; } }
+@keyframes pk-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.pk-wave { transform-origin: bottom; animation: pk-wave 1.2s ease-in-out infinite; }
+.pk-bounce { animation: pk-bounce 1.4s ease-in-out infinite; }
+.pk-cursor { animation: pk-blink 1s step-end infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .t-collapse, .t-pop, .pop, .t-reveal > *, .t-page, .t-input, .t-think, .t-check, .t-badge, .pk-wave, .pk-bounce, .pk-cursor { animation: none !important; }
+  .t-iconswap > *, .switch .knob { transition: none !important; }
+}

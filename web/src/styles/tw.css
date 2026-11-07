@@ -1,0 +1,50 @@
+/* Tailwind v4 without its preflight (Crenel keeps its own base.css), theme
+   mapped onto Crenel tokens with shadcn-style names, so components ported
+   from AI Elements, prompt-kit, motion-primitives and bklit-ui render in the
+   grey + amber + red palette. The default Tailwind palette is removed. */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  --color-*: initial;
+  --font-*: initial;
+}
+@theme static {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--panel-raised);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--brand);
+  --color-primary-foreground: var(--on-brand);
+  --color-secondary: var(--panel-raised);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--panel-raised);
+  --color-muted-foreground: var(--fg-faint);
+  --color-accent: var(--active);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--brand-ring);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-ghost: var(--fg-ghost);
+  --color-panel: var(--panel);
+  --color-raised: var(--panel-raised);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --font-sans: var(--f-ui);
+  --font-display: var(--f-display);
+  --font-mono: var(--f-mono);
+}

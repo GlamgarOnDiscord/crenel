@@ -1,0 +1,91 @@
+/* Ported from Bencho (https://bencho.dev, github.com/cabralorenzo/bencho), MIT License, Copyright (c) 2026 Lorenzo Cabra.
+   Adapted for Crenel: French copy, Crenel data and tokens (see .bencho in base.css), motion/react. */
+/* ══ Rolling counter ═════════════════════════════════════ */
+.rct {
+  font-family: var(--font-ui);
+  /* positioned so the canvas's grab halo does not paint over
+     the buttons — see the note on .gen */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  /* 5px round each key — above, below and at the box's end —
+     and the corner is the box's less that same 5, so the keys
+     sit concentric in it at any Corner */
+  padding: 5px;
+  border-radius: var(--rct-r);
+  background: var(--fill-slab, var(--card));
+  color: var(--fill-on, var(--ink));}
+
+[data-stroke="on"] .rct { box-shadow: 0 0 0 1px var(--pane-edge); }
+
+.rct-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: var(--rct-cell);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--rct-in);
+  background: color-mix(in srgb, var(--fill-on) 6%, var(--fill-slab));
+  color: inherit;
+  cursor: pointer;
+  transition: scale 200ms cubic-bezier(0.3, 0.9, 0.4, 1), background-color 160ms ease;
+  -webkit-tap-highlight-color: transparent;}
+
+.rct-btn:hover { background: color-mix(in srgb, var(--fill-on) 10%, var(--fill-slab)); }
+
+.rct-btn:active { scale: 0.9; transition-duration: 110ms; }
+
+.rct-btn:focus-visible, .rct-num:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fill-slab), 0 0 0 4px var(--signal);}
+
+/* the number hugs its digits and the buttons hug the number:
+   a column arriving or leaving animates its own width, so the
+   pill grows and shrinks with the count rather than keeping
+   room for five digits it is not showing */
+.rct-num {
+  display: flex;
+  justify-content: center;
+  padding: 0 14px;
+  height: var(--rct-cell);
+  font-size: 30px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: var(--rct-cell);
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  border-radius: 8px;
+  /* rolling digits fade at the window's top and bottom edge */
+  mask-image: linear-gradient(transparent, var(--fg) 20%, var(--fg) 80%, transparent);}
+
+.rct-pair { display: flex; }
+
+.rct-col {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  height: var(--rct-cell);
+  transition: width 320ms cubic-bezier(0.3, 1.2, 0.4, 1), opacity 220ms ease;}
+
+.rct-col[data-on] { width: 0.64em; opacity: 1; }
+
+.rct-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  will-change: transform;}
+
+.rct-strip > span { height: var(--rct-cell); }
+
+.rct-sep {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: width 320ms cubic-bezier(0.3, 1.2, 0.4, 1), opacity 220ms ease;}
+
+.rct-sep[data-on] { width: 0.26em; opacity: 1; }

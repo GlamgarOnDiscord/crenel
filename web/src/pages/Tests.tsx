@@ -1,32 +1,66 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { FileCode2, GitPullRequest, ShieldCheck } from "lucide-react";
+import { GitPullRequest } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
-import { Button, GuardBadge, KpiTile } from "../components/ui.tsx";
-import { daily, guardedCount, tests } from "../data/mock.ts";
+import { Button, Card, GuardBadge } from "../components/ui.tsx";
+import { Badge } from "../components/arc/badge/badge.tsx";
+import { Gauge } from "../components/arc/gauge/gauge.tsx";
+import { LineChart } from "../components/arc/line-chart/line-chart.tsx";
+import { SortableDataTable, type DataColumn } from "../components/arc/sortable-data-table/sortable-data-table.tsx";
+import { useToast } from "../components/toast.tsx";
+import { daily, findings, guardedCount, tests } from "../data/mock.ts";
+
+type Row = { name: string; check: string; status: string; when: string; finding: string; order: number };
+const DAY = 86400000;
+const LAST = Date.UTC(2026, 10, 7);
+const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
 
 export function Tests() {
+  const toast = useToast();
   const drafts = tests.length - guardedCount;
+  const provenEver = findings.filter((f) => f.state === "proven" || (f.state === "fixed" && f.proof)).length;
+  const provenGuarded = findings.filter((f) => (f.state === "proven" || (f.state === "fixed" && f.proof)) && f.guarded).length;
+
+  const series = useMemo(() => {
+    let g = 0, p = 0;
+    return daily.guarded.slice(-30).map((v, i) => {
+      g += v; p += daily.proven.slice(-30)[i]!;
+      const t = LAST - (29 - i) * DAY;
+      return { key: String(t), label: dayFmt.format(t), axisLabel: i % 7 === 0 ? dayFmt.format(t) : undefined, values: { guarded: g, proven: p } };
+    });
+  }, []);
+
+  const rows: Row[] = tests.map((t, i) => ({ ...t, order: i }));
+  const columns: DataColumn<Row>[] = [
+    { key: "name", label: "Test", sortable: true, render: (_, r) => <Link to={`/app/findings/${r.finding}`} className="tbl-link">{r.name}</Link> },
+    { key: "check", label: "Check", sortable: true, width: 170, render: (v) => <span className="mono faint">{String(v)}</span> },
+    { key: "status", label: "Statut", sortable: true, width: 120, render: (v) => v === "ci" ? <GuardBadge label="en CI" /> : <Badge size="sm" tone="neutral">brouillon</Badge> },
+    { key: "when", label: "Généré", sortable: false, width: 120, render: (v) => <span className="faint">{String(v)}</span> },
+  ];
+
   return (
     <>
-      <Topbar scoped title="Tests gardés" insight={<><b>{guardedCount} failles</b> ne peuvent plus revenir sans casser le build.</>} actions={<Button size="sm"><GitPullRequest size={14} /> Ouvrir la PR des brouillons</Button>} />
-      <div className="content mid">
-        <div className="kpis three">
-          <KpiTile label="Gardés en CI" icon={<ShieldCheck size={14} />} value={guardedCount} delta={2} comparison="vs 30 j" data={daily.guarded.slice(-30)} tone="brand" />
-          <KpiTile label="Brouillons" icon={<FileCode2 size={14} />} value={drafts} comparison="à fusionner" />
-          <KpiTile label="Régressions bloquées" icon={<GitPullRequest size={14} />} value={3} delta={1} comparison="vs 30 j" data={daily.fixed.slice(-30)} />
+      <Topbar scoped title="Tests gardés" insight={<><b>{guardedCount} failles</b> ne peuvent plus revenir sans casser le build.</>}
+        actions={<Button size="sm" onClick={() => toast({ type: "success", title: "PR ouverte", description: `${drafts} brouillon prêt pour la revue.` })}><GitPullRequest size={14} /> Ouvrir la PR des brouillons</Button>} />
+      <div className="content">
+        <div className="cols rev">
+          <Card title="Couverture des failles prouvées">
+            <div className="pad gauge-wrap">
+              <Gauge value={Math.round((provenGuarded / provenEver) * 100)} label="Failles prouvées gardées en CI" detail={`${provenGuarded} sur ${provenEver} prouvées`}
+                thresholds={[{ from: 0, tone: "danger", label: "à risque" }, { from: 50, tone: "warning", label: "partiel" }, { from: 80, tone: "success", label: "gardé" }]} />
+            </div>
+          </Card>
+          <Card title="Gardés et prouvés, cumulés" meta="30 derniers jours">
+            <div className="pad">
+              <LineChart data={series} label="Tests gardés et failles prouvées cumulés" height={200}
+                series={[{ key: "guarded", label: "Gardés en CI", color: "var(--brand)", area: true }, { key: "proven", label: "Prouvés", color: "var(--fg-faint)", dashed: true, area: false }]} />
+            </div>
+          </Card>
         </div>
-        <ul className="tlist">
-          {tests.map((t) => (
-            <li key={t.name} className="tcase">
-              <span className={t.status === "ci" ? "ichip brand" : "ichip"} aria-hidden="true"><FileCode2 size={15} /></span>
-              <div className="tcase-main">
-                <Link to={`/app/findings/${t.finding}`} className="tcase-t stretched">{t.name}</Link>
-                <div className="mono faint tcase-m"><span>{t.check}</span><span>{t.when}</span></div>
-              </div>
-              {t.status === "ci" ? <GuardBadge label="en CI" /> : <span className="draft">brouillon</span>}
-            </li>
-          ))}
-        </ul>
+        <section className="card flat table-card">
+          <SortableDataTable rows={rows} columns={columns} rowKey="name" caption="Tests de régression générés"
+            defaultSort={{ key: "status", direction: "asc" }} itemName={{ one: "test", other: "tests" }} />
+        </section>
       </div>
     </>
   );

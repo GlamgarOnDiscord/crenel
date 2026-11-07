@@ -1,0 +1,9 @@
+The components in this folder are adapted from Vercel AI Elements
+(https://github.com/vercel/ai-elements, packages/elements/src), Copyright 2023 Vercel, Inc.,
+licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
+
+Changes made for Crenel: shadcn/ui primitives replaced by Radix primitives and small local
+equivalents, the AI SDK types replaced by local types, Streamdown/shiki/tokenlens removed,
+French labels, status colours mapped to Crenel's palette (grey, amber, red), and the
+ModelSelector rendered in a popover with an effort control instead of a dialog.
+Each file carries a header naming the original component it comes from.

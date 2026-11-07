@@ -51,8 +51,8 @@
   --shadow-pop: 0 0 0 1px var(--line-strong), 0 24px 60px -12px rgba(0, 0, 0, 0.75);
   --scrim: rgba(0, 0, 0, 0.6);
 
-  --f-display: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
-  --f-ui: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --f-display: "Chubbo", ui-sans-serif, system-ui, sans-serif;
+  --f-ui: "Switzer", ui-sans-serif, system-ui, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --t-meta: 12px; --t-label: 13px; --t-body: 14px; --t-title: 15px;
@@ -61,4 +61,97 @@
   --r-card: 16px; --r-inner: 12px; --r-control: 10px; --r-pill: 9999px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
+}
+
+/*
+ * Arc UI foundation, mapped onto Crenel. Non-colour scales (space, type, easing,
+ * durations) are adapted from Arc UI foundation.css (https://uiarc.dev, MIT,
+ * Copyright (c) 2026 Elia Kuratli). Colours point at Crenel tokens only, so
+ * the ported components stay grey + amber + red. "success" is Crenel's amber
+ * (guarded), "warning" the amber ink, "danger" the red, "info" a grey.
+ */
+:root {
+  --background: var(--bg);
+  --surface: var(--panel);
+  --surface-raised: var(--panel-raised);
+  --surface-muted: var(--active);
+  --foreground: var(--fg);
+  --text-secondary: var(--fg-muted);
+  --text-muted: var(--fg-faint);
+  --border: var(--line);
+  --border-subtle: var(--line-soft);
+  --border-strong: var(--line-strong);
+  --accent: var(--brand);
+  --accent-strong: var(--brand-ink);
+  --accent-subtle: var(--brand-soft);
+  --accent-foreground: var(--on-brand);
+  --control-on: var(--brand);
+  --control-glyph: var(--on-brand);
+  --control-track: var(--line-strong);
+  --control-track-hover: var(--fg-ghost);
+  --control-thumb: var(--fg);
+  --control-thumb-on: var(--on-brand);
+  --control-fill: var(--brand);
+  --control-thumb-shadow: 0 1px 2px var(--scrim);
+  --control-on-subtle: var(--brand-soft);
+  --focus-ring: transparent;
+  --focus-outline: var(--brand-ring);
+  --success: var(--brand);
+  --warning: var(--brand-ink);
+  --info: var(--fg-muted);
+  --shadow-resting: none;
+  --shadow-raised: 0 0 0 1px var(--line);
+  --shadow-floating: var(--shadow-pop);
+  --series-1: var(--fg-muted);
+  --series-2: var(--brand);
+  --series-3: var(--danger);
+  --series-4: var(--fg-ghost);
+  --level-0: var(--panel-raised);
+  --level-1: var(--data-4);
+  --level-2: var(--data-3);
+  --level-3: var(--data-2);
+  --level-4: var(--brand);
+
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
+  --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem;
+  --space-12: 3rem; --space-16: 4rem;
+  --radius-control: var(--r-control); --radius-panel: var(--r-card); --radius-surface: 20px; --radius-pill: 9999px;
+  --control-height-sm: 2rem; --control-height-md: 2.5rem; --control-height-lg: 2.875rem;
+  --font-display: var(--f-display);
+  --font-body: var(--f-ui);
+  --text-xs: .75rem; --text-sm: .8125rem; --text-base: .875rem; --text-lg: 1rem;
+  --text-xl: 1.25rem; --text-2xl: 1.5rem; --text-3xl: 2.25rem; --text-4xl: 3rem; --text-5xl: 4rem;
+  --tracking-display: -.03em; --tracking-body: -.005em;
+  --leading-display: 1.1; --leading-body: 1.45;
+  --ease-enter: cubic-bezier(.16,1,.3,1);
+  --ease-standard: cubic-bezier(.22,1,.36,1);
+  --ease-exit: cubic-bezier(.7,0,.84,0);
+  --ease-in-out: cubic-bezier(.65,0,.35,1);
+  --ease-spring: linear(0, 0.0213, 0.0739, 0.1443, 0.2235, 0.305, 0.3849, 0.4606, 0.5305, 0.594, 0.6508, 0.7011, 0.7452, 0.7836, 0.8168, 0.8454, 0.8699, 0.8907, 0.9084, 0.9234, 0.9361, 0.9467, 0.9557, 0.9632, 0.9694, 0.9747, 0.979, 0.9826, 0.9857, 0.9882, 0.9902, 0.992, 0.9934, 0.9946, 0.9955, 0.9963, 1);
+  --duration-instant: 120ms; --duration-fast: 160ms; --duration-standard: 240ms; --duration-considered: 480ms; --duration-spring: 580ms;
+}
+
+/*
+ * Bencho blocks (https://bencho.dev, MIT) read their own token names. They
+ * are mapped onto Crenel here, scoped to .bencho so they never leak into the
+ * app (Bencho's --bg/--surface would clash with ours).
+ */
+.bencho {
+  --font-ui: var(--f-ui);
+  --card: var(--panel);
+  --fill-slab: var(--panel);
+  --fill-on: var(--fg);
+  --fill-on-rgb: 237, 237, 239;
+  --ink: var(--fg);
+  --ink-rgb: 237, 237, 239;
+  --pane-edge: var(--line);
+  --signal: var(--brand);
+  --stb-alert: var(--danger);
+}
+
+/* Chart variables read by bklit-ui charts. */
+:root {
+  --chart-1: var(--fg-muted);
+  --chart-grid: var(--line);
+  --muted-foreground: var(--fg-faint);
 }

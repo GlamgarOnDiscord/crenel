@@ -2,6 +2,8 @@ import { useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button, Card, CopyButton } from "../components/ui.tsx";
+import { MetricCard } from "../components/arc/metric-card/metric-card.tsx";
+import { Tooltip } from "../components/arc/tooltip/tooltip.tsx";
 import { authzActors, authzResources } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -20,6 +22,11 @@ export function Authorization() {
     <>
       <Topbar scoped title="Autorisation" insight={<>Le compte A <b>lit les projets du compte B</b>. Les 10 autres requêtes sont refusées.</>} actions={<Button size="sm" to="/app/agent" state={{ prompt: "/authz" }}><TerminalSquare size={14} /> Rejouer la matrice</Button>} />
       <div className="content mid">
+        <div className="metrics">
+          <MetricCard label="Requêtes rejouées" value={total} context="compte A, admin et anonyme" />
+          <MetricCard label="Fuites prouvées" value={fails} context="réponse 200 sur une ressource de B" />
+          <MetricCard label="Refusées" value={total - fails} context="401, 403 ou 404, comme attendu" />
+        </div>
         <Card title="Matrice inter-tenant" meta={<><b className="crit-ink">{fails} fuites</b>&nbsp;sur {total} requêtes</>}>
           <div className="matrix-wrap">
             <table className="matrix">
@@ -41,11 +48,11 @@ export function Authorization() {
                       const on = sel.a === a.id && sel.r === r.id;
                       return (
                         <td key={r.id}>
-                          <button type="button" className={cn("cell", leak(c) ? "leak" : "denied", on && "on")} aria-pressed={on}
+                          <Tooltip content={`${r.route} → ${c}`}><button type="button" className={cn("cell", leak(c) ? "leak" : "denied", on && "on")} aria-pressed={on}
                             aria-label={`${a.label} ${a.role}, ${r.label}: ${c}, ${leak(c) ? "fuite" : "refusé"}`}
                             onClick={() => setSel({ a: a.id, r: r.id })}>
                             <span className="mono">{c}</span><span className="cell-v">{leak(c) ? "fuite" : "refusé"}</span>
-                          </button>
+                          </button></Tooltip>
                         </td>
                       );
                     })}

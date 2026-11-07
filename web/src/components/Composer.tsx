@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Eye, FolderGit2, Globe, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Eye, FolderGit2, Globe, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { targets } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
-import { EFFORTS, MODELS, MODES, effortOf, modelOf, useWorkspace, type ModeId } from "../lib/workspace.tsx";
+import { MODELS, MODES, effortOf, modelOf, useWorkspace, type ModeId } from "../lib/workspace.tsx";
+import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
+import { EffortControl, EffortGauge } from "./EffortControl.tsx";
+import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 import { Picker } from "./ui.tsx";
 
 export const SLASH = [
@@ -20,103 +23,49 @@ export const SLASH = [
 
 const MODE_ICON: Record<ModeId, typeof Eye> = { ask: Hand, readonly: Eye, probes: Radar };
 
-/* Model + effort in one compact trigger (after the Codex composer): an effort
-   slider "Plus rapide / Plus fin" on top, then a model row with a sub-list. */
+/* Model + effort in one compact trigger, as in the Codex composer: the AI
+   Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
+   the EffortControl on top. */
+const VENDORS = ["Anthropic", "OpenAI", "Google", "Mistral AI"] as const;
 function ModelMenu({ placement }: { placement: "up" | "down" }) {
   const ws = useWorkspace();
-  const id = useId();
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"main" | "models">("main");
-  const [active, setActive] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const sliderRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const model = modelOf(ws.model);
   const effort = effortOf(ws.effort);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) { if (!wrapRef.current?.contains(e.target as Node)) setOpen(false); }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-  useEffect(() => {
-    if (!open) { setView("main"); return; }
-    if (view === "main") sliderRef.current?.focus({ preventScroll: true });
-    else { setActive(Math.max(0, MODELS.findIndex((m) => m.id === ws.model))); listRef.current?.focus({ preventScroll: true }); }
-  }, [open, view]);
-
-  function close() { setOpen(false); btnRef.current?.focus(); }
-  function setLevel(l: number) { const e = EFFORTS[Math.min(3, Math.max(0, l - 1))]!; ws.setEffort(e.id); }
-
-  function onPopKey(e: React.KeyboardEvent) {
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (view === "models") setView("main"); else close(); }
-  }
-  function onSliderKey(e: React.KeyboardEvent) {
-    if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); setLevel(effort.level + 1); }
-    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); setLevel(effort.level - 1); }
-    else if (e.key === "Home") { e.preventDefault(); setLevel(1); }
-    else if (e.key === "End") { e.preventDefault(); setLevel(4); }
-  }
-  function onListKey(e: React.KeyboardEvent) {
-    const n = MODELS.length;
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => (a + 1) % n); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => (a - 1 + n) % n); }
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ws.setModel(MODELS[active]!.id); setView("main"); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); setView("main"); }
-  }
-
   return (
-    <div className="picker" ref={wrapRef}>
-      <button ref={btnRef} type="button" className="tbtn modelbtn" aria-haspopup="dialog" aria-expanded={open}
-        aria-label={`Modèle ${model.label}, effort ${effort.label}`} onClick={() => setOpen((o) => !o)}>
-        <ModelLogo provider={model.provider} size={14} />
-        <span className="tlabel">{model.label}</span>
-        <span className="faint tlabel">{effort.label}</span>
-        <ChevronDown size={13} className="faint" aria-hidden="true" />
-      </button>
-      {open && (
-        <div className={cn("pop right mm", placement === "up" && "up")} role="dialog" aria-label="Modèle et effort" onKeyDown={onPopKey}>
-          {view === "main" ? (
-            <>
-              <div className="mm-effort">
-                <div className="mm-ends"><span>Plus rapide</span><span>Plus fin</span></div>
-                <div ref={sliderRef} className="mm-track" role="slider" tabIndex={0} aria-label="Effort"
-                  aria-valuemin={1} aria-valuemax={4} aria-valuenow={effort.level} aria-valuetext={effort.label} onKeyDown={onSliderKey}>
-                  <span className="mm-fill" style={{ width: `calc((100% - 22px) * ${(effort.level - 1) / 3} + 22px)` }} />
-                  {EFFORTS.map((e) => (
-                    <button key={e.id} type="button" tabIndex={-1} className={cn("mm-notch", e.level <= effort.level && "on")}
-                      style={{ left: `calc(11px + (100% - 22px) * ${(e.level - 1) / 3})` }} aria-label={e.label} onClick={() => setLevel(e.level)} />
-                  ))}
-                </div>
-                <div className="mm-cur">Effort <b>{effort.label}</b></div>
-              </div>
-              <button type="button" className="mm-row" onClick={() => setView("models")} aria-haspopup="listbox">
-                <ModelLogo provider={model.provider} size={15} /><span className="mm-row-l">{model.label}</span>
-                <span className="faint mm-row-v">{model.vendor}</span><ChevronRight size={14} className="faint" aria-hidden="true" />
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="mm-back" onClick={() => setView("main")}><ChevronLeft size={14} aria-hidden="true" /> Modèle</button>
-              <div ref={listRef} role="listbox" tabIndex={-1} aria-label="Modèle" className="pop-list" onKeyDown={onListKey}
-                aria-activedescendant={`${id}-m-${active}`}>
-                {MODELS.map((m, i) => (
-                  <div key={m.id} id={`${id}-m-${i}`} role="option" aria-selected={m.id === ws.model}
-                    className={cn("pop-opt", i === active && "on")} onMouseEnter={() => setActive(i)}
-                    onClick={() => { ws.setModel(m.id); setView("main"); }}>
-                    <span className="pop-ic"><ModelLogo provider={m.provider} size={15} title /></span>
-                    <span className="pop-tx"><span className="pop-l">{m.label}</span><span className="pop-d">{m.vendor} · {m.desc}</span></span>
-                    <span className="pop-check" aria-hidden="true">✓</span>
-                  </div>
+    <ModelSelector open={open} onOpenChange={setOpen}>
+      <ModelSelectorTrigger asChild>
+        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${model.label}, effort ${effort.label}`}>
+          <ModelLogo provider={model.provider} size={14} />
+          <span className="tlabel mb-name">{model.label}</span>
+          <span className="mb-sep" aria-hidden="true" />
+          <EffortGauge level={effort.level} size={15} tone="muted" />
+          <span className="tlabel mb-eff">{effort.label}</span>
+          <ChevronDown size={13} className="mb-chev" aria-hidden="true" />
+        </button>
+      </ModelSelectorTrigger>
+      <ModelSelectorContent side={placement === "up" ? "top" : "bottom"} align="end">
+        <EffortControl value={ws.effort} onChange={ws.setEffort} />
+        <ModelSelectorCommand value={ws.model} label="Modèle">
+          <ModelSelectorInput placeholder="Rechercher un modèle" />
+          <ModelSelectorList>
+            <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
+            {VENDORS.map((v) => (
+              <ModelSelectorGroup key={v} heading={v}>
+                {MODELS.filter((m) => m.vendor === v).map((m) => (
+                  <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); setOpen(false); }} data-checked={m.id === ws.model || undefined}>
+                    <ModelSelectorLogo provider={m.provider} />
+                    <ModelSelectorName desc={m.desc}>{m.label}</ModelSelectorName>
+                    <Check size={14} className="msel-check" aria-hidden="true" />
+                  </ModelSelectorItem>
                 ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+              </ModelSelectorGroup>
+            ))}
+          </ModelSelectorList>
+        </ModelSelectorCommand>
+        <div className="msel-foot"><kbd>↑</kbd><kbd>↓</kbd> naviguer <kbd>⏎</kbd> choisir <kbd>Échap</kbd> fermer</div>
+      </ModelSelectorContent>
+    </ModelSelector>
   );
 }
 
@@ -140,9 +89,11 @@ function MicButton({ onText }: { onText: (t: string) => void }) {
   }
   const label = !Ctor ? "Dictée indisponible dans ce navigateur" : on ? "Arrêter la dictée" : "Dicter";
   return (
-    <button type="button" className={cn("tbtn icon", on && "rec")} aria-label={label} title={label} aria-pressed={on} disabled={!Ctor} onClick={toggle}>
-      <Mic size={15} />
-    </button>
+    <Tooltip content={label}>
+      <button type="button" className={cn("tbtn icon", on && "rec")} aria-label={label} aria-pressed={on} aria-disabled={!Ctor} onClick={toggle}>
+        <Mic size={15} />
+      </button>
+    </Tooltip>
   );
 }
 
@@ -234,9 +185,11 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
             setFiles((l) => [...l, ...names.filter((n) => !l.includes(n))]);
             e.target.value = "";
           }} />
-          <button type="button" className="tbtn icon" aria-label="Joindre un fichier" title="Joindre un fichier" onClick={() => fileRef.current?.click()}>
-            <Plus size={16} />
-          </button>
+          <Tooltip content="Joindre un fichier">
+            <button type="button" className="tbtn icon" aria-label="Joindre un fichier" onClick={() => fileRef.current?.click()}>
+              <Plus size={16} />
+            </button>
+          </Tooltip>
           <Picker
             label="Permissions" value={ws.mode} onChange={ws.setMode} placement={placement}
             buttonClassName={cn("tbtn", ws.mode === "probes" && "warn")}
@@ -250,9 +203,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
           <ModelMenu placement={placement} />
           <MicButton onText={(t) => onChange((value ? value + " " : "") + t)} />
           {busy && onStop ? (
-            <button type="button" className="sendbtn stop" aria-label="Interrompre (Échap)" title="Interrompre (Échap)" onClick={onStop}><Square size={12} fill="currentColor" /></button>
+            <Tooltip content="Interrompre · Échap"><button type="button" className="sendbtn stop" aria-label="Interrompre (Échap)" onClick={onStop}><Square size={12} fill="currentColor" /></button></Tooltip>
           ) : (
-            <button type="button" className="sendbtn" aria-label="Envoyer (Entrée)" title="Envoyer (Entrée)" disabled={!value.trim()} onClick={() => submit()}><ArrowUp size={16} strokeWidth={2.5} /></button>
+            <Tooltip content="Envoyer · ⏎"><button type="button" className="sendbtn" aria-label="Envoyer (Entrée)" aria-disabled={!value.trim()} data-empty={!value.trim() || undefined} onClick={() => submit()}><ArrowUp size={16} strokeWidth={2.5} /></button></Tooltip>
           )}
         </div>
       </div>

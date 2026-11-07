@@ -11,6 +11,9 @@ import { WorkspaceProvider, useWorkspace } from "../lib/workspace.tsx";
 import { findings, guardedCount, secrets, targets, tasks } from "../data/mock.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Picker } from "./ui.tsx";
+import { ToastProvider } from "./toast.tsx";
+import { AnimatedBackground } from "./kit/animated-background.tsx";
+import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 
 const proven = findings.filter((f) => f.state === "proven").length;
 const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
@@ -66,15 +69,21 @@ function NavGroup({ g }: { g: (typeof nav)[number] }) {
           {g.group}<ChevronDown size={13} className={cn("navchev", !shown && "closed")} aria-hidden="true" />
         </button>
       )}
-      {shown && g.items.map((it) => (
-        <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
-          <it.icon size={16} aria-hidden="true" /> {it.label}
-          {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
-          {"count" in it && it.count !== undefined && (
-            <span className={cn("count", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
-          )}
-        </NavLink>
-      ))}
+      {shown && (
+        <AnimatedBackground enableHover className="navhover" transition={{ type: "spring", bounce: 0, duration: 0.3 }}>
+          {g.items.map((it) => (
+            <div key={it.to} data-id={it.to} className="navwrap">
+              <NavLink to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
+                <it.icon size={16} aria-hidden="true" /> {it.label}
+                {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
+                {"count" in it && it.count !== undefined && (
+                  <span className={cn("count t-badge", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
+                )}
+              </NavLink>
+            </div>
+          ))}
+        </AnimatedBackground>
+      )}
     </div>
   );
 }
@@ -83,7 +92,7 @@ function SideContent({ onSearch }: { onSearch: () => void }) {
   return (
     <>
       <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>
-      <button type="button" className="search" onClick={onSearch}><Search size={15} aria-hidden="true" /><span>Rechercher</span><span className="kbd">⌘K</span></button>
+      <Tooltip content="Pages, cibles et actions" side="right"><button type="button" className="search" onClick={onSearch}><Search size={15} aria-hidden="true" /><span>Rechercher</span><span className="kbd">⌘K</span></button></Tooltip>
       <TargetSwitcher />
       <Link to="/app/overview" state={{ fresh: Date.now() }} className="nav newtask"><SquarePen size={16} aria-hidden="true" /> Nouvelle tâche</Link>
       {nav.map((g, gi) => <NavGroup key={gi} g={g} />)}
@@ -126,7 +135,7 @@ function Drawer({ open, onClose, onSearch }: { open: boolean; onClose: () => voi
 }
 
 export function Shell() {
-  return <WorkspaceProvider><ShellInner /></WorkspaceProvider>;
+  return <WorkspaceProvider><ToastProvider><ShellInner /></ToastProvider></WorkspaceProvider>;
 }
 
 function ShellInner() {
@@ -154,7 +163,7 @@ function ShellInner() {
         <button type="button" className="iconbtn" aria-label="Ouvrir le menu" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu size={19} /></button>
       </header>
       <Drawer open={drawer} onClose={() => setDrawer(false)} onSearch={() => setPalette(true)} />
-      <main className="main" ref={mainRef} id="main"><Outlet /></main>
+      <main className="main" ref={mainRef} id="main"><div key={pathname} className="t-page">{<Outlet />}</div></main>
     </div>
   );
 }
