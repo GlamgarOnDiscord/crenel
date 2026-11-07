@@ -263,6 +263,12 @@ skipped; up to 150 files, 40 MB, 2 MB per response). The `exposed-secrets`
 detectors then run on those files, Supabase public keys become RLS leads, and a
 source map that answers 200 is reported.
 
+
+It also reads the Next.js version the site serves (`window.next = { version }`)
+and, when `dependency-risk.osv` is on and `api.osv.dev` declared, reports that
+version's OSV advisories as leads, so a deployed site gets checked even without
+its lockfile.
+
 ## bundle-review (`crenel review-bundle`, needs `claude -p`)
 
 Not a check: a command. It hands the model every chunk `live-bundle` collects,

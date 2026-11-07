@@ -17,6 +17,7 @@ import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
 import { exposedSecrets } from "./exposed-secrets.js";
 import { extractBaas } from "./baas-exposure.js";
+import { osvAdvisories } from "./dependency-risk.js";
 
 const MAX_FILES = 150;
 const MAX_TOTAL_BYTES = 40 * 1024 * 1024;
@@ -210,6 +211,16 @@ export const liveBundle: Check = {
           regressionHint: `CI: after deploy, expect ${new URL(f.url).pathname} to return 403 or 404.`,
         });
       }
+      // Next.js version served (window.next = { version: "15.1.0" }): with OSV on,
+      // its advisories come back as leads, the same way the lockfile's do.
+      const nextVersion = fetched.map((f) => /\bwindow\.next\s*=\s*\{\s*version\s*:\s*"(\d+\.\d+\.\d+[\w.-]*)"/.exec(f.body)?.[1] ?? /next\/dist[^"]{0,200}?"(1[2-9]\.\d+\.\d+[\w.-]*)"/.exec(f.body)?.[1]).find(Boolean);
+      if (nextVersion) {
+        const osvOn = !!((ctx.options["dependency-risk"] ?? {}) as { osv?: boolean }).osv && ctx.scope.isHostAllowed("https://api.osv.dev/");
+        const adv = osvOn ? await osvAdvisories(new Set([`next@${nextVersion}`]), ctx, ctx.stagingUrl) : [];
+        findings.push(...adv.map((f) => ({ ...f, id: f.id.replace("dependency-risk:advisory:", "live-bundle:next-advisory:"), check: "live-bundle", description: `${f.description} The version was read from the JavaScript the site serves.` })));
+        if (!adv.length) ctx.log(`live-bundle: Next.js ${nextVersion} served${osvOn ? ", no OSV advisory" : " (turn on dependency-risk.osv to check its advisories)"}`);
+      }
+
       // API routes the client code calls: object routes are matrix candidates.
       const routes = [...new Set(fetched.filter((f) => f.kind !== "html").flatMap((f) => extractEndpoints(f.body)))];
       const objectRoutes = routes.filter((r) => r.endsWith(":id") || r.includes(":id/"));
