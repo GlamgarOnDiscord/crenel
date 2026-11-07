@@ -58,7 +58,7 @@ const TOOL_CHECKS: Record<string, string[]> = {
   "scan.secrets": ["exposed-secrets", "public-env", "sourcemaps", "committed-credentials", "committed-env", "git-history", "storage-buckets"],
   "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit", "webhook-signature", "ssrf"],
   "scan.deps": ["dependency-risk"],
-  "scan.baas": ["baas-exposure"],
+  "scan.baas": ["baas-exposure", "supabase-rpc"],
   "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns", "dev-server", "ai-infra", "vercel-preview", "cache-deception", "auth-config", "auth-variants", "next-image", "api-docs"],
 };
 const LABEL: Record<string, string> = {
@@ -456,6 +456,7 @@ export class AgentRun {
         const reqs: PlannedRequest[] = [
           { method: "GET", url }, { method: "GET", url: `${base}/assets/*.js (chunks)` }, { method: "GET", url: `${base}/.env, /.git/config…` },
           { method: "GET", url: `${base}/graphql?query={__schema…}` }, { method: "GET", url: `${base}/login?next=https://crenel-redirect-check.invalid` },
+          { method: "GET", url: `${base}/_next/image?url=https://example.com/ (the site fetches it, not Crenel)` }, { method: "GET", url: `${base}/openapi.json, /v3/api-docs…` },
           ...this.scope.allowedHosts.filter((h) => /[a-z]/i.test(h) && hostOf(url) !== h).map((h) => ({ method: "GET", url: `https://${h}/` })),
         ];
         if (await this.gated(tool, reqs)) scope = this.scope; else skip = true;
@@ -464,7 +465,7 @@ export class AgentRun {
     if (tool === "scan.baas") {
       const reqs = scanBaas(this.projectDir).filter((h) => h.kind === "supabase" && this.scope.isHostAllowed(h.url))
         .map((h) => ({ method: "GET", url: `${(h as { url: string }).url}/rest/v1/` }));
-      if (reqs.length && this.scope.allowActiveTesting && (await this.gated(tool, [...reqs, ...reqs.map((r) => ({ method: "GET", url: r.url + "<table>?select=*&limit=1" }))]))) scope = this.scope;
+      if (reqs.length && this.scope.allowActiveTesting && (await this.gated(tool, [...reqs, ...reqs.map((r) => ({ method: "GET", url: r.url + "<table>?select=*&limit=1" })), ...reqs.map((r) => ({ method: "GET", url: r.url + "rpc/<function> (read-only transaction)" }))]))) scope = this.scope;
     }
     const uid = this.ui({ kind: "tool", tool, args, input, lines: ["…"], dur: "" });
     const findings: Finding[] = [];

@@ -1,0 +1,12 @@
+{
+  "title": "Supabase functions called from the client: a SECURITY DEFINER search open to anon, an owner-scoped one, one that writes",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "search-open", "check": "supabase-rpc", "text": "search_members", "state": "proven", "minSeverity": "high", "why": "The function returns every member's email to anyone with the public key." }
+  ],
+  "mustNotFlag": [
+    { "id": "owner-scoped", "check": "supabase-rpc", "text": "my_invoices", "forbid": "any", "why": "It filters on auth.uid(): anon gets an empty list." },
+    { "id": "writer-not-proven", "check": "supabase-rpc", "text": "track_view", "forbid": "proven", "why": "A 405 from a read-only transaction proves nothing about access." }
+  ]
+}

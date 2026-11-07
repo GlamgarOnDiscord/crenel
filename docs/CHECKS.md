@@ -44,6 +44,7 @@ empty list runs every read-only check.
 | auth-variants | Protected route served through another spelling (.rsc, ?_rsc=, /_next/data, //, case) | yes (canonical refused, variant served) | GETs |
 | next-image | Next.js image optimizer fetching any host (remotePatterns `**`) | yes (Next's own answer to a control URL) | GETs on the declared host; the target fetches one control URL |
 | api-docs | OpenAPI or Swagger definition served by the deployed API | yes (the body parses as a spec) | GETs on declared bases |
+| supabase-rpc | Postgres functions the client calls (`.rpc("x")`) returning data to the anon role | yes (GET with the public key, refused without it) | static; GETs on the Supabase host + active gate |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -147,7 +148,7 @@ With `allowActiveTesting: true` **and** the BaaS host in `allowedHosts`, it
 proves it, through the scoped HTTP client: it reads the PostgREST OpenAPI
 schema (`GET /rest/v1/`) with the public key, then asks each table for one row
 (`GET /rest/v1/<table>?select=*&limit=1`). GET only, never more than one row,
-never an RPC call, and the row is dropped at once: the finding keeps the table
+never an RPC call here (functions are `supabase-rpc`), and the row is dropped at once: the finding keeps the table
 name, the column count and "rows are readable without signing in". A table
 that answers is **proven**, critical when its column names look personal or
 secret (email, phone, token, password...), high otherwise. Firebase Realtime
@@ -443,6 +444,28 @@ finding per base: low, medium when the spec lists admin, internal or debug
 routes. A public API may publish its spec on purpose; the finding then mainly
 says which object routes belong in the authorization matrix
 (`options.authz-matrix.openapi` imports the same file).
+
+## supabase-rpc
+
+Lists the Postgres functions the client code calls through PostgREST
+(`supabase.rpc("name")`). A `SECURITY DEFINER` function runs with its owner's
+rights, so RLS on the tables it reads does not apply: a search or stats helper
+can hand every user's rows to a visitor. Offline, the list is a lead.
+
+With `allowActiveTesting` and the Supabase host in `allowedHosts` (the same
+opt-ins as the table reads), each function is called once with
+`GET /rest/v1/rpc/<name>` and the bundle's public key, no arguments. PostgREST
+runs every GET and HEAD in a **read-only transaction** whatever the function's
+volatility, so the call cannot modify the database; a function that tries is
+refused with 405 (SQLSTATE 25006), reported as *undetermined* (the anon role
+reaches a function that writes; Crenel never sends the POST that would run it).
+Function names that announce a side effect outside the database (`send`,
+`delete`, `pay`, `invite`, `http`...) are never called. Data coming back is
+**proven** only when the same GET without the key is refused (401/403), so the
+data came through the anon role. Critical when the fields look personal or
+secret, medium for other rows (it may be a public listing by design: confirm),
+low for a single value. A 404 or 400 (function missing or needing arguments)
+and an empty answer conclude nothing. The response is never kept.
 
 ## What goes out
 
