@@ -201,7 +201,7 @@
       <use href="#large-sparkle" fill="#fff75a"/>
       <path d="M959 56 C955 98 951 103 918 109 C952 114 955 123 959 157 C963 120 968 114 998 109 C966 104 962 98 959 56 Z" fill="#fff764"/>
     </g>
-    <g id="small-yellow-star">
+    <g id="small-yellow-star" transform="translate(-62 74)">
       <path d="M859 152 C855 175 854 178 830 183 C854 187 855 191 859 213 C863 191 864 187 887 183 C864 179 863 175 859 152 Z" fill="#fff56c" opacity=".6" filter="url(#small-glow)"/>
       <path d="M859 152 C855 175 854 178 830 183 C854 187 855 191 859 213 C863 191 864 187 887 183 C864 179 863 175 859 152 Z" fill="#fff76c"/>
     </g>
