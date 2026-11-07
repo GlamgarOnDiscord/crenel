@@ -38,3 +38,13 @@ test("clean code is not flagged", async () => {
     assert.equal((await tlsVerification.run(ctx(dir))).length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("a pattern mentioned in a comment is NOT flagged (noise reduction)", async () => {
+  const dir = project({
+    "notes.ts": "// never set rejectUnauthorized: false in production\nconst ok = { rejectUnauthorized: true };\n",
+    "doc.ts": "/* avoid NODE_TLS_REJECT_UNAUTHORIZED=0 */\nconst x = 1;\n",
+  });
+  try {
+    assert.equal((await tlsVerification.run(ctx(dir))).length, 0, "comments must not trip the check");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

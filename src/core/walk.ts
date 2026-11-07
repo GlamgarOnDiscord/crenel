@@ -46,3 +46,21 @@ export function extOf(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot >= 0 ? name.slice(dot) : "";
 }
+
+/**
+ * True if the match at `index` sits inside a line comment. A pattern-matching
+ * check should skip these: a warning or doc comment that *names* a bad pattern is
+ * not the bad pattern, and flagging it is exactly the noise the tool avoids.
+ * Handles the common cases: a line whose first non-space is // # or * (JSDoc), or
+ * a // earlier on the same line. Not a full parser; block comments can slip by.
+ */
+export function isCommentedAt(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const before = text.slice(lineStart, index);
+  const trimmed = before.trimStart();
+  if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return true;
+  // an inline // that is not inside a string (cheap heuristic: no quote after it)
+  const sl = before.indexOf("//");
+  if (sl >= 0) return true;
+  return false;
+}

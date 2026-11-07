@@ -49,3 +49,15 @@ test("extOf returns the extension or empty", () => {
   assert.equal(extOf(".env"), ".env");
   assert.equal(extOf("Dockerfile"), "");
 });
+
+test("isCommentedAt detects line comments", async () => {
+  const { isCommentedAt } = await import("./walk.js");
+  const t1 = "  // rejectUnauthorized: false\n";
+  assert.equal(isCommentedAt(t1, t1.indexOf("reject")), true);
+  const t2 = "const x = 1; // trailing rejectUnauthorized: false\n";
+  assert.equal(isCommentedAt(t2, t2.indexOf("reject")), true);
+  const t3 = "const a = { rejectUnauthorized: false };\n";
+  assert.equal(isCommentedAt(t3, t3.indexOf("reject")), false);
+  const t4 = " * jsdoc rejectUnauthorized: false\n";
+  assert.equal(isCommentedAt(t4, t4.indexOf("reject")), true);
+});

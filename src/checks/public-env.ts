@@ -9,7 +9,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, isCommentedAt } from "../core/walk.js";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const SCAN_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".env", ".sh", ".yml", ".yaml"]);
@@ -41,6 +41,7 @@ export const publicEnv: Check = {
       RE.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = RE.exec(text)) !== null) {
+        if (isCommentedAt(text, m.index)) continue;
         const name = m[1]!;
         const line = text.slice(0, m.index).split("\n").length;
         const key = `${name}:${rel}:${line}`;

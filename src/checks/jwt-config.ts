@@ -6,7 +6,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, isCommentedAt } from "../core/walk.js";
 
 const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const SCAN = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".yml", ".yaml"]);
@@ -37,6 +37,7 @@ export const jwtConfig: Check = {
         const g = new RegExp(re, "gi");
         let m: RegExpExecArray | null;
         while ((m = g.exec(text)) !== null) {
+          if (isCommentedAt(text, m.index)) continue;
           findings.push({
             id: `jwt-config:${id}:${rel}:${lineOf(text, m.index)}`,
             check: "jwt-config",

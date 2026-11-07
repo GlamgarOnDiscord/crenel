@@ -7,7 +7,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { relative } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, isCommentedAt } from "../core/walk.js";
 
 const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const SCAN = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".env", ".sh", ".yml", ".yaml"]);
@@ -54,6 +54,7 @@ export const tlsVerification: Check = {
         const re = new RegExp(r.re, "g");
         let m: RegExpExecArray | null;
         while ((m = re.exec(text)) !== null) {
+          if (isCommentedAt(text, m.index)) continue;
           const line = lineOf(text, m.index);
           findings.push({
             id: `tls-verification:${r.id}:${rel}:${line}`,
