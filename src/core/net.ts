@@ -23,8 +23,12 @@ export function isPrivateIp(ip: string): boolean {
   const a = ip.toLowerCase();
   // IPv6
   if (a === "::1" || a === "::") return true;
-  if (a.startsWith("fe80:")) return true; // link-local
-  if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique local
+  if (/^fe[89ab]/.test(a)) return true; // link-local fe80::/10
+  if (/^fe[cdef]/.test(a)) return true; // deprecated site-local fec0::/10
+  if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique local fc00::/7
+  if (a.startsWith("ff")) return true; // multicast ff00::/8
+  if (a.startsWith("2002:")) return true; // 6to4
+  if (a.startsWith("64:ff9b:")) return true; // NAT64 (embeds IPv4)
   if (a.startsWith("::ffff:")) {
     const rest = a.slice(7);
     if (rest.includes(".")) return isPrivateIp(rest); // v4-mapped, dotted form
@@ -40,10 +44,13 @@ export function isPrivateIp(ip: string): boolean {
     }
     return false;
   }
+  // Any other ::-prefixed form (v4-compatible ::a.b.c.d, reserved ::x) is not a
+  // global-unicast address, so it must never be a scan target.
+  if (a.startsWith("::")) return true;
   // IPv4
   const m = a.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
-  const [p0, p1] = [Number(m[1]), Number(m[2])];
+  const [p0, p1, p2] = [Number(m[1]), Number(m[2]), Number(m[3])];
   if (p0 === 10) return true;
   if (p0 === 127) return true; // loopback
   if (p0 === 0) return true;
@@ -51,6 +58,10 @@ export function isPrivateIp(ip: string): boolean {
   if (p0 === 172 && p1 >= 16 && p1 <= 31) return true;
   if (p0 === 192 && p1 === 168) return true;
   if (p0 === 100 && p1 >= 64 && p1 <= 127) return true; // CGNAT
+  if (p0 === 192 && p1 === 0 && p2 === 0) return true; // 192.0.0.0/24 IETF
+  if (p0 === 198 && (p1 === 18 || p1 === 19)) return true; // 198.18.0.0/15 benchmark
+  if (p0 === 192 && p1 === 88 && p2 === 99) return true; // 6to4 relay anycast
+  if (p0 >= 224) return true; // 224/4 multicast, 240/4 reserved, 255 broadcast
   return false;
 }
 

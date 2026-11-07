@@ -12,16 +12,18 @@ export const ConfigSchema = z.object({
   /** Path to the code to scan, relative to the config file. */
   projectDir: z.string().default("."),
   scope: z.object({
-    allowedHosts: z.array(z.string()).default([]),
+    // Reject empty host strings: an empty entry would match any URL with an
+    // empty hostname (file:, data:), silently widening scope.
+    allowedHosts: z.array(z.string().trim().min(1, "un hôte ne peut pas être vide")).default([]),
     allowActiveTesting: z.boolean().default(false),
     allowPrivate: z.boolean().default(false),
     stagingUrl: z.string().url().optional(),
-  }),
+  }).strict(),
   /** Which checks to run. Empty means "all read-only checks". */
   checks: z.array(z.string()).default([]),
   /** Per-check options, keyed by check name. */
   options: z.record(z.unknown()).default({}),
-});
+}).strict();
 
 export type Config = z.infer<typeof ConfigSchema>;
 

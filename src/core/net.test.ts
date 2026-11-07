@@ -23,8 +23,18 @@ test("cloud metadata endpoints are refused, in every form", () => {
   }
 });
 
+test("special IPv6 and reserved IPv4 ranges are refused", () => {
+  for (const ip of [
+    "2002::1", "64:ff9b::808:808", "fec0::1", "febf::1", "ff02::1", // 6to4, NAT64, site-local, link-local, multicast
+    "::7f00:1", "::192.168.1.1", // v4-compatible
+    "192.0.0.1", "198.18.5.5", "192.88.99.1", "224.0.0.1", "240.0.0.1", "255.255.255.255",
+  ]) {
+    assert.equal(isPrivateIp(ip), true, `${ip} must be refused`);
+  }
+});
+
 test("public addresses are allowed", () => {
-  for (const ip of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700:4700::1111"]) {
+  for (const ip of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
     assert.equal(isPrivateIp(ip), false, `${ip} should be public`);
   }
 });
