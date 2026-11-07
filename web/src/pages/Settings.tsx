@@ -1,11 +1,18 @@
+import { useState } from "react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
 
-function Toggle({ on }: { on: boolean }) {
+function Toggle({ on: initial }: { on: boolean }) {
+  const [on, setOn] = useState(initial);
   return (
-    <span style={{ width: 38, height: 22, borderRadius: 999, background: on ? "var(--brand)" : "var(--line-strong)", position: "relative", display: "inline-block", flex: "none" }}>
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={() => setOn((v) => !v)}
+      style={{ width: 38, height: 22, borderRadius: 999, background: on ? "var(--brand)" : "var(--line-strong)", position: "relative", border: 0, padding: 0, flex: "none", cursor: "pointer" }}
+    >
       <span style={{ position: "absolute", top: 3, left: on ? 19 : 3, width: 16, height: 16, borderRadius: "50%", background: on ? "#1A1204" : "var(--fg-faint)", transition: "left .15s" }} />
-    </span>
+    </button>
   );
 }
 
