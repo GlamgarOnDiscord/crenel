@@ -170,7 +170,8 @@ input, textarea { font-family: inherit; color: inherit; }
 .modelchip .glyph { width: 14px; height: 14px; }
 .send { width: 34px; height: 34px; border-radius: var(--r-control); background: var(--brand); color: #1A1204; display: grid; place-items: center; border: 0; }
 .slash { display: flex; gap: 6px; flex-wrap: wrap; }
-.slash .s { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint); background: var(--well); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
+.slash .s { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint); background: var(--well); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+.slash .s:hover { color: var(--fg-muted); border-color: var(--line-strong); }
 
 /* ---- Empty state / loaders ---- */
 .empty { display: grid; place-items: center; gap: 12px; text-align: center; padding: 56px 20px; color: var(--fg-faint); }
