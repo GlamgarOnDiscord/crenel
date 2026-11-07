@@ -109,8 +109,16 @@ export function trufflehogArgv(verify: boolean): string[] {
   return ["trufflehog", "filesystem", "/project", "--json", "--no-update", ...(verify ? [] : ["--no-verification"])];
 }
 
-/** Run one tool. Never throws for a missing Docker: returns ran=false with the reason. */
+/** Run one tool. Never throws: a missing Docker or a failed container setup returns ran=false with the reason. */
 export async function runTool(i: ToolRunInput): Promise<ToolRunOutput> {
+  try {
+    return await runToolInner(i);
+  } catch (err) {
+    return { tool: i.tool, ran: false, reason: `toolbox error: ${(err as Error).message}`, findings: [], verdicts: [], suggestions: [], routes: [] };
+  }
+}
+
+async function runToolInner(i: ToolRunInput): Promise<ToolRunOutput> {
   const base: ToolRunOutput = { tool: i.tool, ran: false, findings: [], verdicts: [], suggestions: [], routes: [] };
   let o: ToolboxOptions;
   try { o = toolboxOptions(i.config); } catch (err) { return { ...base, reason: (err as Error).message }; }

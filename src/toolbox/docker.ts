@@ -157,6 +157,9 @@ export async function runConfined(o: ConfinedOptions): Promise<ConfinedResult> {
   const limits = { ...DEFAULT_LIMITS, ...(o.limits ?? {}) };
   const id = randomBytes(4).toString("hex");
   const ep = o.entrypoint ? ["--entrypoint", o.entrypoint] : [];
+  // --mount is a comma-separated list: a comma or quote in the path could add
+  // options (e.g. drop readonly), so such a path is refused outright.
+  if (o.projectDir && /[,"'\n]/.test(o.projectDir)) throw new Error(`project path ${JSON.stringify(o.projectDir)} contains a comma or quote: rename it to mount it in the toolbox`);
   const mount = o.projectDir ? ["--mount", `type=bind,source=${o.projectDir},target=/project,readonly`] : [];
   const toolName = `crenel-tool-${id}`;
 
