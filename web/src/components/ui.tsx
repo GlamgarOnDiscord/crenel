@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Check, Copy, Hand, Loader2, ShieldCheck, Square } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, Copy, FileCode2, Hand, Loader2, ShieldCheck, Square } from "lucide-react";
+import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { cn } from "../lib/cn.ts";
 import { SEV_LABEL, SEV_NAME, type FindingState, type Severity, type Task } from "../lib/types.ts";
+import { modelOf, type ModelId } from "../lib/workspace.tsx";
 
 // A button, or (when `to` is given) a react-router Link styled as one, so we
 // never nest a <button> inside an <a>.
@@ -15,13 +17,14 @@ export function Button({ children, variant = "primary", size, to, state, href, c
   return <button type="button" className={cls} {...rest}>{children}</button>;
 }
 
-export function Card({ title, meta, actions, children, className }: {
-  title?: ReactNode; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string;
+export function Card({ title, icon, meta, actions, children, className }: {
+  title?: ReactNode; icon?: ReactNode; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string;
 }) {
   return (
     <section className={cn("card", className)}>
       {(title || actions) && (
         <div className="hd">
+          {icon && <span className="ichip sm" aria-hidden="true">{icon}</span>}
           {title && <h2>{title}</h2>}
           {meta && <span className="meta">{meta}</span>}
           <span className="sp" />
@@ -33,12 +36,27 @@ export function Card({ title, meta, actions, children, className }: {
   );
 }
 
+// Severity: one red (critical) and greys. A Linear-like 4-bar meter plus a
+// text label, so the level never relies on colour alone.
+const SEV_LEVEL: Record<Severity, number> = { crit: 4, high: 3, med: 2, low: 1, info: 0 };
+export function SevMeter({ sev }: { sev: Severity }) {
+  const n = SEV_LEVEL[sev];
+  return (
+    <span className={cn("sevmeter", sev)} aria-hidden="true">
+      {[1, 2, 3, 4].map((i) => <i key={i} className={i <= n ? "on" : ""} />)}
+    </span>
+  );
+}
 export function SeverityChip({ sev }: { sev: Severity }) {
-  return <span className={cn("chip", sev)} title={`Sévérité ${SEV_NAME[sev]}`}><span className="sr-only">Sévérité </span>{SEV_LABEL[sev]}</span>;
+  return (
+    <span className={cn("chip", sev)} title={`Sévérité ${SEV_NAME[sev]}`}>
+      <SevMeter sev={sev} />
+      <span className="sr-only">Sévérité </span>{SEV_LABEL[sev]}
+    </span>
+  );
 }
 
-// proven = danger red (a proven flaw is bad news), lead = hollow slate ring,
-// fixed = slate check. "Gardé" (test in CI) is the amber GuardBadge.
+// proven = red (danger), lead = hollow grey ring, fixed = grey check.
 export function StateBadge({ state }: { state: FindingState }) {
   const label = state === "proven" ? "prouvé" : state === "fixed" ? "corrigé" : "piste";
   return (
@@ -53,8 +71,18 @@ export function GuardBadge({ label = "gardé" }: { label?: string }) {
   return <span className="guard"><ShieldCheck size={12} aria-hidden="true" />{label}</span>;
 }
 
+export function Pill({ children, tone = "neutral", dot }: { children: ReactNode; tone?: "neutral" | "brand" | "danger"; dot?: boolean }) {
+  return <span className={cn("pill", tone)}>{dot && <i className="pill-dot" aria-hidden="true" />}{children}</span>;
+}
+
 export function Dots() {
   return <span className="dots" aria-hidden="true"><i /><i /><i /></span>;
+}
+
+// Text shimmer for work in progress (after prompt-kit TextShimmer / AI Elements
+// Shimmer, re-implemented in CSS; reduced motion shows plain text).
+export function Shimmer({ children }: { children: ReactNode }) {
+  return <span className="shimmer">{children}</span>;
 }
 
 export function EmptyState({ icon, title, children, action }: {
@@ -70,20 +98,15 @@ export function EmptyState({ icon, title, children, action }: {
   );
 }
 
-// Neutral model pill: no provider logo, a plain glyph.
-export function ModelChip({ name }: { name: string }) {
-  return (
-    <span className="modelchip">
-      <span className="glyph" aria-hidden="true" />
-      {name}
-    </span>
-  );
+export function ModelChip({ id }: { id: ModelId }) {
+  const m = modelOf(id);
+  return <span className="modelchip"><ModelLogo provider={m.provider} size={13} />{m.label}</span>;
 }
 
 export function EffortBars({ level }: { level: number }) {
   return (
     <span className="ebars" aria-hidden="true">
-      {[1, 2, 3, 4].map((n) => <i key={n} className={n <= level ? "on" : ""} style={{ height: 4 + n * 2.5 }} />)}
+      {[1, 2, 3, 4].map((n) => <i key={n} className={n <= level ? "on" : ""} style={{ height: 4 + n * 2 }} />)}
     </span>
   );
 }
@@ -96,39 +119,148 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
   );
 }
 
-export function CopyButton({ text, label = "Copier" }: { text: string; label?: string }) {
+async function writeClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } finally { ta.remove(); }
+  }
+}
+
+export function CopyButton({ text, label = "Copier", what = "la commande", iconOnly }: { text: string; label?: string; what?: string; iconOnly?: boolean }) {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
     const t = setTimeout(() => setDone(false), 1600);
     return () => clearTimeout(t);
   }, [done]);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); } finally { ta.remove(); }
-    }
-    setDone(true);
-  }
   return (
-    <button type="button" className={cn("copybtn", done && "done")} onClick={copy} aria-label={done ? "Copié" : `${label} la commande`}>
+    <button type="button" className={cn("copybtn", done && "done", iconOnly && "icon")} onClick={async () => { await writeClipboard(text); setDone(true); }}
+      aria-label={done ? "Copié" : `${label} ${what}`} title={`${label} ${what}`}>
       {done ? <Check size={13} /> : <Copy size={13} />}
-      <span>{done ? "Copié" : label}</span>
-      <span className="sr-only" aria-live="polite">{done ? "Commande copiée dans le presse-papiers" : ""}</span>
+      {!iconOnly && <span>{done ? "Copié" : label}</span>}
+      <span className="sr-only" aria-live="polite">{done ? "Copié dans le presse-papiers" : ""}</span>
     </button>
   );
 }
 
-export function Cmd({ children, copy }: { children: string; copy?: boolean }) {
+export function Cmd({ children }: { children: string }) {
   return (
     <div className="cmd">
       <code><span className="k" aria-hidden="true">$</span> {children}</code>
-      {copy && <CopyButton text={children} />}
+      <CopyButton text={children} iconOnly />
     </div>
+  );
+}
+
+// Code block with a file header and copy (after AI Elements CodeBlock).
+export function CodeBlock({ file, code }: { file: string; code: string }) {
+  return (
+    <div className="codeblock">
+      <div className="cb-hd"><FileCode2 size={13} aria-hidden="true" /><span className="mono">{file}</span><span className="sp" /><CopyButton text={code} what="le code" iconOnly /></div>
+      <pre><code>{code}</code></pre>
+    </div>
+  );
+}
+
+/* ---------- Period segment, delta, block bars, KPI tile ---------- */
+
+export function Segmented<T extends string>({ items, value, onChange, label }: {
+  items: { id: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void; label: string;
+}) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {items.map((it) => (
+        <button type="button" key={it.id} aria-pressed={value === it.id} className={value === it.id ? "on" : ""} onClick={() => onChange(it.id)}>
+          {it.label}{it.count !== undefined && <span className="seg-n">{it.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export type Period = "7" | "30" | "90";
+export const PERIODS: { id: Period; label: string }[] = [{ id: "7", label: "7 j" }, { id: "30", label: "30 j" }, { id: "90", label: "90 j" }];
+
+// Delta pill. `bad` says whether a rise is bad news (more proven flaws): only
+// bad news is red; everything else stays grey.
+export function Delta({ value, bad, unit = "" }: { value: number; bad?: "up" | "down"; unit?: string }) {
+  if (value === 0) return <span className="delta">stable</span>;
+  const up = value > 0;
+  const isBad = bad === "up" ? up : bad === "down" ? !up : false;
+  return (
+    <span className={cn("delta", isBad && "bad")}>
+      {up ? <ArrowUpRight size={12} aria-hidden="true" /> : <ArrowDownRight size={12} aria-hidden="true" />}
+      {up ? "+" : "−"}{Math.abs(value)}{unit}
+    </span>
+  );
+}
+
+// "Pixel" bars: each column is a stack of small blocks, unlit blocks drawn in
+// the faintest grey. The last column is lit in the tile's tone.
+export function BlockBars({ data, tone = "neutral", columns = 24 }: { data: number[]; tone?: "neutral" | "danger" | "brand"; columns?: number }) {
+  const n = Math.min(columns, data.length);
+  const per = data.length / n;
+  const cols = Array.from({ length: n }, (_, i) => {
+    let s = 0;
+    for (let j = Math.floor(i * per); j < Math.floor((i + 1) * per); j++) s += data[j] ?? 0;
+    return s;
+  });
+  const max = Math.max(1, ...cols);
+  const rows = 7, bw = 4, gap = 2, bh = 3, vgap = 1.5;
+  const W = n * (bw + gap) - gap, H = rows * (bh + vgap) - vgap;
+  return (
+    <svg className={cn("blockbars", tone)} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      {cols.map((v, i) => {
+        const lit = v > 0 ? Math.max(1, Math.round((v / max) * rows)) : 0;
+        return Array.from({ length: rows }, (_, r) => {
+          const on = r < lit;
+          return <rect key={`${i}-${r}`} x={i * (bw + gap)} y={H - (r + 1) * bh - r * vgap} width={bw} height={bh} rx={0.8}
+            className={on ? (i === n - 1 ? "hi" : "on") : "off"} />;
+        });
+      })}
+    </svg>
+  );
+}
+
+export function KpiTile({ label, icon, value, unit, delta, deltaUnit, bad, comparison, data, tone, to }: {
+  label: string; icon: ReactNode; value: ReactNode; unit?: string; delta?: number; deltaUnit?: string; bad?: "up" | "down";
+  comparison?: string; data?: number[]; tone?: "neutral" | "danger" | "brand"; to?: string;
+}) {
+  return (
+    <section className="kpi">
+      <div className="kpi-hd">
+        <span className="ichip sm" aria-hidden="true">{icon}</span>
+        {to ? <Link to={to} className="kpi-l stretched">{label}</Link> : <span className="kpi-l">{label}</span>}
+      </div>
+      <div className="kpi-in">
+        <div className="kpi-v">
+          <span className="kpi-n">{value}{unit && <small>{unit}</small>}</span>
+          <span className="kpi-d">{delta !== undefined && <Delta value={delta} bad={bad} unit={deltaUnit} />}{comparison && <span className="kpi-c">{comparison}</span>}</span>
+        </div>
+        {data && <div className="kpi-g"><BlockBars data={data} tone={tone} /></div>}
+      </div>
+    </section>
+  );
+}
+
+// Token gauge (after AI Elements Context): ring + percentage, detail in title.
+export function ContextGauge({ used, total }: { used: number; total: number }) {
+  const pct = Math.min(1, used / total);
+  const r = 7, c = 2 * Math.PI * r;
+  const k = (n: number) => `${(n / 1000).toLocaleString("fr-FR", { maximumFractionDigits: n < 10000 ? 1 : 0 })} k`;
+  return (
+    <span className="ctxgauge" title={`${k(used)} sur ${k(total)} tokens de contexte`}>
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <circle cx="9" cy="9" r={r} className="cg-track" />
+        <circle cx="9" cy="9" r={r} className="cg-fill" strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 9 9)" />
+      </svg>
+      <span className="mono">{(Math.round(pct * 1000) / 10).toLocaleString("fr-FR")} %</span>
+      <span className="sr-only">du contexte utilisé, {k(used)} sur {k(total)} tokens</span>
+    </span>
   );
 }
 
@@ -150,7 +282,7 @@ export function Picker<T extends string>({ label, value, options, onChange, chil
   useEffect(() => {
     if (!open) return;
     setActive(Math.max(0, options.findIndex((o) => o.value === value)));
-    listRef.current?.focus();
+    listRef.current?.focus({ preventScroll: true });
     function onDown(e: MouseEvent) {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     }
@@ -216,6 +348,21 @@ export function Picker<T extends string>({ label, value, options, onChange, chil
   );
 }
 
+/* ---------- Activity list (icon chip, one sentence, grey meta) ---------- */
+
+export function ActivityList({ items }: { items: { icon: ReactNode; title: string; meta: string; tone?: "danger" | "brand" }[] }) {
+  return (
+    <ul className="alist">
+      {items.map((a, i) => (
+        <li key={i}>
+          <span className={cn("ichip", a.tone)} aria-hidden="true">{a.icon}</span>
+          <div className="alist-tx"><span className="alist-t">{a.title}</span><span className="alist-m">{a.meta}</span></div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /* ---------- Tasks (agent runs), Codex-style list ---------- */
 
 const STATUS_LABEL: Record<Task["status"], string> = {
@@ -247,10 +394,10 @@ export function TaskRow({ t }: { t: Task }) {
       </div>
       <div className="task-stats">
         {!!t.proven && <span className="st proven">+{t.proven} prouvé{t.proven > 1 ? "s" : ""}</span>}
-        {!!t.fixed && <span className="st fixed">{t.fixed} corrigé{t.fixed > 1 ? "s" : ""}</span>}
+        {!!t.fixed && <span className="st">{t.fixed} corrigé{t.fixed > 1 ? "s" : ""}</span>}
         {!!t.guarded && <span className="st guarded">{t.guarded} gardé{t.guarded > 1 ? "s" : ""}</span>}
-        {!!t.leads && <span className="st lead hide-sm">{t.leads} piste{t.leads > 1 ? "s" : ""}</span>}
-        {!t.proven && !t.fixed && !t.guarded && !t.leads && <span className="st lead">rien de neuf</span>}
+        {!!t.leads && <span className="st hide-sm">{t.leads} piste{t.leads > 1 ? "s" : ""}</span>}
+        {!t.proven && !t.fixed && !t.guarded && !t.leads && <span className="st">rien de neuf</span>}
       </div>
     </li>
   );

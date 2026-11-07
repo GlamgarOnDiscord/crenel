@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   House, ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
-  Plug, ShieldCheck, BookOpen, Settings, Search, Menu, X, ChevronsUpDown, Globe, FolderGit2, SquarePen, TerminalSquare,
+  Plug, ShieldCheck, BookOpen, Settings, Search, Menu, X, ChevronsUpDown, Globe, FolderGit2, SquarePen, TerminalSquare, ChevronDown,
 } from "lucide-react";
 import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
@@ -54,33 +54,43 @@ function TargetSwitcher() {
   );
 }
 
+function NavGroup({ g }: { g: (typeof nav)[number] }) {
+  const { pathname } = useLocation();
+  const holds = g.items.some((it) => pathname.startsWith(it.to));
+  const [open, setOpen] = useState(true);
+  const shown = open || holds;
+  return (
+    <div className="navgroup">
+      {g.group && (
+        <button type="button" className="navlabel" aria-expanded={shown} onClick={() => setOpen((o) => !o)} disabled={holds} title={holds ? "Contient la page ouverte" : undefined}>
+          {g.group}<ChevronDown size={13} className={cn("navchev", !shown && "closed")} aria-hidden="true" />
+        </button>
+      )}
+      {shown && g.items.map((it) => (
+        <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
+          <it.icon size={16} aria-hidden="true" /> {it.label}
+          {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
+          {"count" in it && it.count !== undefined && (
+            <span className={cn("count", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
+          )}
+        </NavLink>
+      ))}
+    </div>
+  );
+}
+
 function SideContent({ onSearch }: { onSearch: () => void }) {
   return (
     <>
-      <Link to="/" className="brand"><Mark /><Wordmark /></Link>
+      <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>
+      <button type="button" className="search" onClick={onSearch}><Search size={15} aria-hidden="true" /><span>Rechercher</span><span className="kbd">⌘K</span></button>
       <TargetSwitcher />
-      <div className="side-actions">
-        <Link to="/app/overview" state={{ fresh: Date.now() }} className="newtask"><SquarePen size={15} /> Nouvelle tâche</Link>
-        <button type="button" className="search" onClick={onSearch} aria-label="Rechercher (Ctrl K)"><Search size={15} /><span className="kbd">⌘K</span></button>
-      </div>
-      {nav.map((g, gi) => (
-        <div key={gi} className="navgroup">
-          {g.group && <div className="navlabel">{g.group}</div>}
-          {g.items.map((it) => (
-            <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
-              <it.icon size={16} aria-hidden="true" /> {it.label}
-              {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
-              {"count" in it && it.count !== undefined && (
-                <span className={cn("count", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      ))}
+      <Link to="/app/overview" state={{ fresh: Date.now() }} className="nav newtask"><SquarePen size={16} aria-hidden="true" /> Nouvelle tâche</Link>
+      {nav.map((g, gi) => <NavGroup key={gi} g={g} />)}
       <div className="spacer" />
       <div className="foot">
         <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden="true" /> Documentation</a>
-        <div className="me"><span className="av">T</span><span>Tom</span><span className="faint mono me-r">propriétaire</span></div>
+        <div className="me"><span className="av">T</span><span className="me-tx"><span>Tom</span><span className="me-r">propriétaire</span></span></div>
       </div>
     </>
   );
@@ -149,21 +159,34 @@ function ShellInner() {
   );
 }
 
-// Page header. `scoped` prefixes the crumb with the active target, so the
-// target picker visibly drives every scoped page.
-export function Topbar({ crumb, title, actions, scoped, compact }: {
-  crumb?: string; title: string; actions?: React.ReactNode; scoped?: boolean; compact?: boolean;
+// Page header, two parts like the admin references: a thin sticky crumb bar
+// (target, page, optional controls such as the period) and the page head
+// (30 px title, one sentence that says the one thing that matters, actions).
+// `scoped` prefixes the crumb with the active target.
+export function Topbar({ crumb, title, insight, actions, bar, scoped, compact }: {
+  crumb?: string; title: string; insight?: React.ReactNode; actions?: React.ReactNode; bar?: React.ReactNode; scoped?: boolean; compact?: boolean;
 }) {
   const { target } = useWorkspace();
   useEffect(() => { document.title = `${title} · Crenel`; }, [title]);
-  const parts = [scoped ? `${target.name} · ${target.env}` : null, crumb].filter(Boolean);
+  const parts = [scoped ? target.name : null, crumb].filter(Boolean) as string[];
   return (
-    <header className={cn("topbar", compact && "compact")}>
-      <div className="tb-l">
-        {parts.length > 0 && <div className="crumb">{parts.join("  /  ")}</div>}
-        <h1>{title}</h1>
+    <>
+      <div className="crumbbar">
+        <nav className="crumbs" aria-label="Fil d'Ariane">
+          {parts.map((p, i) => <span key={i} className="crumb">{p}</span>)}
+          <span className={cn("crumb", "cur", compact && "clip")} aria-current="page">{title}</span>
+        </nav>
+        {(bar || (compact && actions)) && <div className="right">{bar}{compact && actions}</div>}
       </div>
-      {actions && <div className="right">{actions}</div>}
-    </header>
+      {!compact && (
+        <header className="pagehead">
+          <div className="ph-l">
+            <h1>{title}</h1>
+            {insight && <p className="insight">{insight}</p>}
+          </div>
+          {actions && <div className="right">{actions}</div>}
+        </header>
+      )}
+    </>
   );
 }

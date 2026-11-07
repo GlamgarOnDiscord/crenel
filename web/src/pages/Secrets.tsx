@@ -12,19 +12,15 @@ export function Secrets() {
   const [announce, setAnnounce] = useState("");
   return (
     <>
-      <Topbar scoped title="Secrets" />
+      <Topbar scoped title="Secrets" insight={<><b>2 secrets actifs</b> sont lisibles par n'importe qui. Révoquez d'abord, déplacez ensuite.</>} />
       <div className="content mid">
-        <div className="callout">
-          <span className="sq red" aria-hidden="true"><KeyRound size={18} /></span>
-          <p>Un secret trouvé est un secret compromis. <b>Révoquez d'abord</b>, déplacez-le côté serveur ensuite, puis laissez Crenel garder le test qui empêche son retour.</p>
-        </div>
         <ul className="secrets">
           {secrets.map((s) => {
             const done = revoked.includes(s.finding);
             const asking = confirm === s.finding;
             return (
               <li key={s.finding} className={cn("secret", done && "revoked")}>
-                <span className={cn("sq", s.sev === "crit" ? "red" : "orange")} aria-hidden="true"><KeyRound size={17} /></span>
+                <span className={cn("ichip", s.sev === "crit" && "danger")} aria-hidden="true"><KeyRound size={16} /></span>
                 <div className="secret-main">
                   <div className="secret-top"><SeverityChip sev={s.sev} /><Link to={`/app/findings/${s.finding}`} className="secret-t">{s.kind}</Link></div>
                   <div className="mono secret-v">{s.masked}</div>

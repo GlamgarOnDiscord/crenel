@@ -158,18 +158,29 @@ export const CHECKS = [
 ];
 
 // The scripted run the Agent console replays. The permission step pauses it.
+export const PLAN_STEPS = [
+  { tool: "scan.secrets", label: "Chercher des secrets dans le bundle" },
+  { tool: "scan.repo", label: "Fouiller le dépôt" },
+  { tool: "scan.deps", label: "Auditer les dépendances" },
+  { tool: "authz.matrix", label: "Prouver l'isolation entre comptes" },
+  { tool: "tests.generate", label: "Générer les tests de régression" },
+];
+
 export const agentScript: AgentEvent[] = [
-  { kind: "say", text: "Je commence par la surface statique (bundle, dépôt, dépendances), puis je teste l'isolation entre comptes sur staging. Je reste en lecture seule." },
+  { kind: "think", dur: "2 s", text: "La cible est un site en staging avec un dépôt lié. Le plus rentable d'abord: ce qui est lisible sans envoyer de requête (bundle, dépôt, lockfile). Ensuite seulement l'autorisation entre comptes, qui demande des requêtes réelles: il faudra l'accord de l'utilisateur." },
+  { kind: "plan", steps: PLAN_STEPS },
   {
     kind: "tool", tool: "scan.secrets", args: "dist/ · 12 motifs", dur: "1,1 s",
-    lines: ["3 fichiers lus, 1,2 Mo"],
+    input: '{\n  "dir": "dist/",\n  "patterns": ["sk_live_", "AIza", "BEGIN PRIVATE KEY", "+9"]\n}',
+    lines: ["3 fichiers lus, 1,2 Mo", "2 correspondances"],
     findings: [
       { sev: "crit", text: "sk_live_ dans dist/app.js:5", state: "proven", id: "f-stripe" },
       { sev: "high", text: "AIza… dans dist/app.js:7, restriction inconnue", state: "lead", id: "f-google" },
     ],
   },
   {
-    kind: "tool", tool: "scan.repo", args: "committed-credentials, committed-env, sourcemaps", dur: "0,7 s",
+    kind: "tool", tool: "scan.repo", args: "credentials, env, sourcemaps", dur: "0,7 s",
+    input: '{\n  "checks": ["committed-credentials", "committed-env", "sourcemaps"]\n}',
     lines: ["412 fichiers suivis par git"],
     findings: [
       { sev: "crit", text: "Clé privée PEM dans infra/key.pem:1", state: "proven", id: "f-pem" },
@@ -178,7 +189,8 @@ export const agentScript: AgentEvent[] = [
   },
   {
     kind: "tool", tool: "scan.deps", args: "pnpm-lock.yaml · 842 paquets", dur: "0,8 s",
-    lines: ["denylist à jour (il y a 2 h)"],
+    input: '{\n  "lockfile": "pnpm-lock.yaml",\n  "denylist": "à jour (il y a 2 h)"\n}',
+    lines: ["842 paquets comparés à la denylist"],
     findings: [{ sev: "crit", text: "@tanstack/react-router@1.169.5 (GHSA-g7cv-rxg3-hmpx)", state: "proven", id: "f-tanstack" }],
   },
   { kind: "say", text: "Pour prouver l'isolation entre comptes, je dois rejouer quatre requêtes avec le jeton du compte A sur les ressources du compte B." },
@@ -190,20 +202,68 @@ export const agentScript: AgentEvent[] = [
 
 export const agentAfterAllow: AgentEvent[] = [
   {
-    kind: "tool", tool: "authz.matrix", args: "compte A → ressources de B · 4 requêtes", dur: "0,6 s",
+    kind: "tool", tool: "authz.matrix", args: "compte A → ressources de B", dur: "0,6 s",
+    input: '{\n  "as": "compte A (membre)",\n  "target": "ressources du compte B",\n  "requests": 4\n}',
     lines: ["GET  /api/projects/proj_b_1  → 200", "GET  /api/renders/rnd_b_7   → 403", "GET  /api/assets/ast_b_3    → 404", "POST /api/credits            → 403"],
     findings: [{ sev: "high", text: "A lit le projet de B: GET /api/projects/:id → 200", state: "proven", id: "f-authz" }],
   },
   {
     kind: "tool", tool: "tests.generate", args: "4 failles prouvées", dur: "0,4 s",
-    lines: ["tests/crenel/authz.projects.test.ts (brouillon)", "2 tests déjà gardés en CI"],
+    input: '{\n  "findings": ["f-stripe", "f-pem", "f-tanstack", "f-authz"]\n}',
+    lines: ["1 nouveau test en brouillon, 2 déjà gardés en CI"],
+    code: {
+      file: "tests/crenel/authz.projects.test.ts",
+      body: "import { as } from './harness';\n\ntest('A ne peut pas lire le projet de B', async () => {\n  const res = await as('A').get('/api/projects/proj_b_1');\n  expect([401, 403, 404]).toContain(res.status);\n});",
+    },
   },
-  { kind: "say", text: "4 failles prouvées, 5 pistes. À faire maintenant: révoquer la clé Stripe et la clé PEM, sortir @tanstack/react-router@1.169.5 du lockfile, filtrer /api/projects/:id par compte. Les tests sont prêts: une fois en CI, ces failles ne reviennent plus sans casser le build." },
+  {
+    kind: "say",
+    text: "4 failles prouvées, 5 pistes. À faire maintenant: révoquer la clé Stripe et la clé PEM, sortir @tanstack/react-router@1.169.5 du lockfile, filtrer /api/projects/:id par compte. Le test est prêt: une fois en CI, la faille ne revient plus sans casser le build.",
+    sources: [
+      { label: "GHSA-g7cv-rxg3-hmpx", kind: "Avis de sécurité", href: "https://github.com/advisories" },
+      { label: "API1:2023 Broken Object Level Authorization", kind: "OWASP", href: "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/" },
+      { label: "Clés API et rotation", kind: "Docs Stripe", href: "https://docs.stripe.com/keys" },
+    ],
+  },
 ];
 
 export const agentAfterDeny: AgentEvent[] = [
   { kind: "note", text: "Requêtes refusées. Rien n'a été envoyé à staging.acme.app.", tone: "muted" },
   { kind: "say", text: "Compris. L'autorisation entre comptes reste une piste, non prouvée. Bilan statique: 3 failles prouvées (clé Stripe, clé PEM, paquet malveillant) et 4 pistes. Tapez /authz quand vous voulez lancer la matrice." },
+];
+
+// Daily series over 90 days (oldest first), deterministic, for the KPI blocks.
+function series(seed: number, base: number, amp: number, trend = 0): number[] {
+  let x = seed;
+  return Array.from({ length: 90 }, (_, i) => {
+    x = (x * 9301 + 49297) % 233280;
+    const noise = x / 233280;
+    return Math.max(0, Math.round(base + trend * i + (noise - 0.5) * amp));
+  });
+}
+export const daily = {
+  detected: series(7, 6, 8, 0.03),
+  proven: series(11, 0.6, 2.2, 0.01),
+  guarded: series(13, 0.4, 1.6, 0.012),
+  leads: series(17, 4, 6, 0.02),
+  fixed: series(19, 0.3, 1.2, 0.006),
+  tasks: series(23, 3, 4, 0.03),
+  minutes: series(29, 70, 40, -0.2),
+};
+
+export const activity = [
+  { kind: "proven" as const, title: "Clé Stripe prouvée dans le bundle", meta: "il y a 12 min · acme-app" },
+  { kind: "guard" as const, title: "Test « aucune source map » passé en CI", meta: "il y a 40 min · acme-app" },
+  { kind: "task" as const, title: "Scan sur push terminé sur inboxly", meta: "il y a 3 h · main@4f2c1a" },
+  { kind: "fixed" as const, title: "CORS corrigé, le test reste gardé", meta: "il y a 2 j · acme-app" },
+  { kind: "lead" as const, title: "Nouvelle piste: CSP absente", meta: "il y a 1 h · staging.acme.app" },
+];
+
+export const onboarding = [
+  { id: "target", title: "Ajouter une cible", desc: "Un site ou un dépôt à vous", done: true, to: "/app/onboarding" },
+  { id: "github", title: "Connecter GitHub", desc: "Scanner chaque pull request", done: true, to: "/app/integrations" },
+  { id: "ci", title: "Brancher la CI", desc: "Garder les failles prouvées", done: false, to: "/app/integrations" },
+  { id: "slack", title: "Alertes Slack", desc: "Prévenir sur un critique prouvé", done: false, to: "/app/integrations" },
 ];
 
 export const provenCount = findings.filter((f) => f.state === "proven").length;

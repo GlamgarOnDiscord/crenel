@@ -11,9 +11,8 @@ export function Targets() {
   const navigate = useNavigate();
   return (
     <>
-      <Topbar crumb="Espace" title="Cibles" actions={<Button to="/app/onboarding"><Plus size={15} /> Ajouter une cible</Button>} />
+      <Topbar crumb="Espace" title="Cibles" insight={<>Crenel ne parle qu'aux hôtes déclarés ici.</>} actions={<Button to="/app/onboarding"><Plus size={15} /> Ajouter une cible</Button>} />
       <div className="content">
-        <p className="lede">Un site ou un dépôt que vous possédez. Chaque cible a ses tâches, findings et tests. Crenel ne parle qu'aux hôtes déclarés.</p>
         <section className="folders">
           {targets.map((t) => {
             const Icon = t.kind === "repo" ? FolderGit2 : Globe;
@@ -21,7 +20,7 @@ export function Targets() {
             return (
               <div key={t.id} className={cn("folder", active && "active")}>
                 <div className="fh">
-                  <span className={cn("sq", active ? "amber" : "slate")} aria-hidden="true"><Icon size={18} /></span>
+                  <span className={cn("ichip", active && "brand")} aria-hidden="true"><Icon size={16} /></span>
                   <div>
                     <button type="button" className="nm stretched" onClick={() => { ws.setTargetId(t.id); navigate("/app/overview"); }}>
                       {t.name}<span className="sr-only">, ouvrir cette cible</span>

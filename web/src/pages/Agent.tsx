@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ShieldQuestion, SquarePen } from "lucide-react";
+import { ArrowDown, Brain, Check, ChevronDown, CircleDashed, ExternalLink, Loader2, Minus, ShieldQuestion, SquarePen, Wrench, X } from "lucide-react";
 import { Mark } from "../brand/Logo.tsx";
+import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { Button, Dots, SeverityChip, StateBadge, EffortBars } from "../components/ui.tsx";
+import { Button, CodeBlock, ContextGauge, Dots, EffortBars, SeverityChip, Shimmer, StateBadge } from "../components/ui.tsx";
 import { agentAfterAllow, agentAfterDeny, agentScript, tasks } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
-import type { AgentEvent } from "../lib/types.ts";
-import { effortOf, modeLabel, modelLabel, useWorkspace } from "../lib/workspace.tsx";
+import type { AgentEvent, Source } from "../lib/types.ts";
+import { CONTEXT_WINDOW, effortOf, modeLabel, modelOf, useWorkspace } from "../lib/workspace.tsx";
 
 type Phase = "running" | "waiting" | "idle" | "interrupted";
 type Decision = "once" | "always" | "deny";
@@ -23,7 +24,7 @@ function reply(q: string, target: string, url: string): string {
   if (s.startsWith("/fix") || s.includes("corrig")) return "Je prépare un diff par faille prouvée et le test qui va avec. Rien n'est poussé sans vous: je vous montre la PR en brouillon d'abord.";
   if (s.startsWith("/test") || s.includes("test")) return "1 test en brouillon (A ne peut pas lire le projet de B) et 6 déjà gardés en CI. Une fois le brouillon fusionné, la faille d'autorisation ne pourra plus revenir sans casser le build.";
   if (s.startsWith("/secrets") || s.includes("secret") || s.includes("clé")) return "3 secrets trouvés: clé Stripe (active, prouvée), clé PEM (prouvée), clé Google (piste: restriction par domaine à vérifier). Les deux premières sont à révoquer maintenant.";
-  return `Compris. Je reste en lecture seule sur ${target}. Dites-moi quoi attaquer, ou tapez / pour voir les commandes.`;
+  return `Compris. Je reste sur ${target}, dans le périmètre déclaré. Dites-moi quoi attaquer, ou tapez / pour voir les commandes.`;
 }
 
 function initial(state: unknown, targetName: string): { events: AgentEvent[]; queue: AgentEvent[]; phase: Phase; title: string; decisions: Record<number, Decision> } {
@@ -39,8 +40,112 @@ function initial(state: unknown, targetName: string): { events: AgentEvent[]; qu
   return { events: [{ kind: "user", text: prompt }], queue: [...agentScript], phase: "running", title: task?.title ?? prompt, decisions: {} };
 }
 
-function fmtTokens(n: number) {
-  return `${(n / 1000).toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} k`;
+
+
+/* ---------- AI building blocks, re-implemented in Crenel's own CSS after the
+   patterns of Vercel AI Elements (Apache-2.0) and prompt-kit (MIT). No code
+   copied from either. ---------- */
+
+function Reasoning({ text, dur, live }: { text: string; dur: string; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => { if (!live) setOpen(false); }, [live]);
+  return (
+    <div className="reason">
+      <button type="button" className="reason-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Brain size={14} aria-hidden="true" />
+        {live ? <Shimmer>Réflexion…</Shimmer> : <span>Réflexion · {dur}</span>}
+        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
+      </button>
+      {open && <p className="reason-b">{text}</p>}
+    </div>
+  );
+}
+
+type StepState = "done" | "run" | "todo" | "skip";
+function Plan({ steps, state }: { steps: { tool: string; label: string }[]; state: (tool: string) => StepState }) {
+  const [open, setOpen] = useState(true);
+  const done = steps.filter((s) => state(s.tool) === "done").length;
+  return (
+    <div className="plan">
+      <button type="button" className="plan-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span>Plan</span><span className="mono faint">{done}/{steps.length}</span>
+        <span className="plan-bar" aria-hidden="true"><i style={{ width: `${(done / steps.length) * 100}%` }} /></span>
+        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
+      </button>
+      {open && (
+        <ol className="plan-list">
+          {steps.map((s) => {
+            const st = state(s.tool);
+            return (
+              <li key={s.tool} className={cn("pstep", st)}>
+                <span className="pstep-ic" aria-hidden="true">
+                  {st === "done" ? <Check size={11} strokeWidth={3} /> : st === "run" ? <Loader2 size={11} className="spin" /> : st === "skip" ? <Minus size={11} /> : <CircleDashed size={11} />}
+                </span>
+                {st === "run" ? <Shimmer>{s.label}</Shimmer> : <span>{s.label}</span>}
+                <span className="sr-only">{st === "done" ? " (fait)" : st === "run" ? " (en cours)" : st === "skip" ? " (ignoré)" : " (à faire)"}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function ToolCall({ ev, running }: { ev: Extract<AgentEvent, { kind: "tool" }>; running: boolean }) {
+  const [open, setOpen] = useState(false);
+  const proven = ev.findings?.some((f) => f.state === "proven");
+  return (
+    <div className="tool">
+      <button type="button" className="tool-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Wrench size={14} aria-hidden="true" />
+        <span className="mono tool-n">{running ? <Shimmer>{ev.tool}</Shimmer> : ev.tool}</span>
+        <span className="mono faint tool-a">{ev.args}</span>
+        <span className="sp" />
+        {running ? <span className="tpill run"><Loader2 size={11} className="spin" aria-hidden="true" />en cours</span>
+          : <span className={cn("tpill", proven && "bad")}>{proven ? "faille prouvée" : "terminé"}</span>}
+        {!running && <span className="mono faint tool-d">{ev.dur}</span>}
+        <ChevronDown size={13} className={cn("chev", open && "up")} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="tool-b">
+          <div className="tool-sec"><span className="tool-lab">Entrée</span><pre>{ev.input}</pre></div>
+          <div className="tool-sec"><span className="tool-lab">Sortie</span><pre>{running ? "…" : ev.lines.join("\n")}</pre></div>
+        </div>
+      )}
+      {!running && ev.findings && ev.findings.length > 0 && (
+        <div className="tool-f">
+          {ev.findings.map((f, j) => (
+            <div key={j} className={cn("ev-find", f.state)}>
+              <SeverityChip sev={f.sev} />
+              <span className="ev-find-t">{f.text}</span>
+              <StateBadge state={f.state} />
+              {f.id && <Link to={`/app/findings/${f.id}`} className="linkish ev-find-l">voir</Link>}
+            </div>
+          ))}
+        </div>
+      )}
+      {!running && ev.code && <div className="tool-code"><CodeBlock file={ev.code.file} code={ev.code.body} /></div>}
+    </div>
+  );
+}
+
+function Sources({ items }: { items: Source[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="sources">
+      <button type="button" className="sources-hd" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {items.length} sources <ChevronDown size={12} className={cn("chev", open && "up")} aria-hidden="true" />
+      </button>
+      {open && (
+        <ul className="sources-l">
+          {items.map((s) => (
+            <li key={s.label}><a href={s.href} target="_blank" rel="noopener noreferrer"><span className="faint">{s.kind}</span>{s.label}<ExternalLink size={11} aria-hidden="true" /></a></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function Agent() {
@@ -70,6 +175,11 @@ export function Agent() {
     const t = setTimeout(() => {
       const [next, ...rest] = queue;
       if (!next) return;
+      if (next.kind === "permission" && ws.mode === "readonly") {
+        setEvents((e) => [...e, { kind: "note", text: `${next.tool}: aucune requête envoyée à ${next.host}, le mode est « Lecture seule ».`, tone: "muted" }]);
+        setQueue([...agentAfterDeny.slice(1)]);
+        return;
+      }
       if (next.kind === "permission" && (ws.mode === "probes" || allowed.includes(next.host))) {
         setEvents((e) => [...e, { kind: "note", text: `${next.tool}: requêtes vers ${next.host} autorisées par le mode « ${modeLabel(ws.mode)} ».`, tone: "muted" }]);
         setQueue([...agentAfterAllow]);
@@ -94,12 +204,25 @@ export function Agent() {
     return () => clearTimeout(t);
   }, [stream]);
 
-  // Keep the latest event in view: scroll the shell's scroll container to its
-  // bottom (the dock is in flow, so the transcript ends just above it).
+  // Stick to the bottom while the user is near it; otherwise show a
+  // "Revenir en bas" button (after prompt-kit ScrollButton).
+  const [away, setAway] = useState(false);
+  const awayRef = useRef(false);
   useEffect(() => {
-    const scroller = endRef.current?.closest(".main");
+    const scroller = endRef.current?.closest(".main") as HTMLElement | null;
+    if (!scroller) return;
+    function onScroll() {
+      const a = scroller!.scrollHeight - scroller!.scrollTop - scroller!.clientHeight > 160;
+      awayRef.current = a; setAway(a);
+    }
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, []);
+  function toBottom() {
+    const scroller = endRef.current?.closest(".main") as HTMLElement | null;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
-  }, [events.length, stream?.len, phase]);
+  }
+  useEffect(() => { if (!awayRef.current) toBottom(); }, [events.length, stream?.len, phase]);
   useEffect(() => { if (phase === "waiting") permRef.current?.focus(); }, [phase]);
 
   const decide = useCallback((d: Decision) => {
@@ -164,7 +287,22 @@ export function Agent() {
   const busy = phase === "running" || phase === "waiting" || !!stream;
   const tokens = 1800 + events.reduce((n, e) => n + (e.kind === "tool" ? 2300 : e.kind === "permission" ? 600 : 420 + ("text" in e ? e.text.length * 3 : 0)), 0);
   const effort = effortOf(ws.effort);
+  const model = modelOf(ws.model);
   const phaseLabel = phase === "running" || stream ? "travaille" : phase === "waiting" ? "attend votre accord" : phase === "interrupted" ? "interrompu" : "prêt";
+
+  // Plan step state, derived from the events shown so far.
+  const lastIdx = events.length - 1;
+  function stepState(tool: string): StepState {
+    const i = events.findIndex((e) => e.kind === "tool" && e.tool === tool);
+    if (i >= 0) return i === lastIdx && phase === "running" ? "run" : "done";
+    const permIdx = events.findIndex((e) => e.kind === "permission" && e.tool === tool);
+    if (permIdx >= 0) return decisions[permIdx] === "deny" ? "skip" : "run";
+    if (tool === "authz.matrix" && events.some((e) => e.kind === "note" && e.text.includes("Lecture seule"))) return "skip";
+    if (tool === "tests.generate" && (phase === "idle" || phase === "interrupted") && events.some((e) => e.kind === "plan")) {
+      return events.some((e) => e.kind === "tool" && e.tool === "scan.deps") ? "skip" : "todo";
+    }
+    return "todo";
+  }
 
   return (
     <div className="agent">
@@ -176,92 +314,70 @@ export function Agent() {
           <div className="tr-empty"><Mark size={28} /><p>Conversation effacée. Tapez <span className="mono">/scan</span> pour relancer.</p></div>
         )}
         {events.map((ev, i) => {
-          const isLast = i === events.length - 1;
+          const isLast = i === lastIdx;
           if (ev.kind === "user") return (
-            <div key={i} className="ev ev-user fade-up"><span className="ev-caret" aria-hidden="true">›</span><p>{ev.text}</p></div>
+            <div key={i} className="msg-user fade-up"><p>{ev.text}</p></div>
           );
+          if (ev.kind === "think") return <div key={i} className="fade-up"><Reasoning text={ev.text} dur={ev.dur} live={isLast && phase === "running"} /></div>;
+          if (ev.kind === "plan") return <div key={i} className="fade-up"><Plan steps={ev.steps} state={stepState} /></div>;
           if (ev.kind === "say") return (
-            <div key={i} className="ev ev-say fade-up">
-              <span className="ev-av" aria-label="Crenel"><Mark size={18} /></span>
-              <p>{ev.text}{stream?.idx === i && <span className="cursor cursor-blink" aria-hidden="true" />}</p>
+            <div key={i} className="msg-ai fade-up">
+              <span className="ev-av" aria-label="Crenel"><Mark size={20} /></span>
+              <div className="msg-ai-b">
+                <p>{ev.text}{stream?.idx === i && <span className="cursor cursor-blink" aria-hidden="true" />}</p>
+                {ev.sources && <Sources items={ev.sources} />}
+              </div>
             </div>
           );
           if (ev.kind === "note") return (
-            <div key={i} className={cn("ev ev-note fade-up", ev.tone)}><span className="elbow" aria-hidden="true" />{ev.text}</div>
+            <div key={i} className={cn("ev-note fade-up", ev.tone)}><span className="elbow" aria-hidden="true" />{ev.text}</div>
           );
-          if (ev.kind === "tool") {
-            const running = isLast && phase === "running";
-            const hasProven = ev.findings?.some((f) => f.state === "proven");
-            return (
-              <div key={i} className="ev ev-tool fade-up">
-                <div className="ev-head">
-                  <span className={cn("bullet", running ? "run" : hasProven ? "bad" : "ok")} aria-hidden="true" />
-                  <span className="mono"><b>{ev.tool}</b><span className="faint">({ev.args})</span></span>
-                  {!running && <span className="ev-dur mono">{ev.dur}</span>}
-                </div>
-                <div className="ev-res">
-                  <span className="elbow" aria-hidden="true" />
-                  {running ? (
-                    <span className="loader-row"><Dots /> exécution…</span>
-                  ) : (
-                    <div className="ev-res-body">
-                      {ev.lines.map((l, j) => <div key={j} className="mono faint ev-line">{l}</div>)}
-                      {ev.findings?.map((f, j) => (
-                        <div key={`f${j}`} className={cn("ev-find", f.sev)}>
-                          <SeverityChip sev={f.sev} />
-                          <span className="ev-find-t">{f.text}</span>
-                          <StateBadge state={f.state} />
-                          {f.id && <Link to={`/app/findings/${f.id}`} className="linkish ev-find-l">voir</Link>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          }
-          // permission
+          if (ev.kind === "tool") return <div key={i} className="fade-up"><ToolCall ev={ev} running={isLast && phase === "running"} /></div>;
+          // permission = Confirmation
           const d = decisions[i];
           return (
-            <div key={i} className="ev ev-tool fade-up">
-              <div className="ev-head">
-                <span className={cn("bullet", d ? "ok" : "wait")} aria-hidden="true" />
-                <span className="mono"><b>{ev.tool}</b><span className="faint">(compte A → compte B)</span></span>
-              </div>
+            <div key={i} className="fade-up">
               {d ? (
-                <div className="ev-res"><span className="elbow" aria-hidden="true" />
-                  <span className={cn("perm-done", d === "deny" && "deny")}>
-                    {d === "once" ? `Autorisé une fois · ${ev.requests.length} requêtes vers ${ev.host}` : d === "always" ? `Toujours autorisé pour ${ev.host}` : "Refusé, rien n'a été envoyé"}
-                  </span>
+                <div className="tool">
+                  <div className="tool-hd static">
+                    <ShieldQuestion size={14} aria-hidden="true" />
+                    <span className="mono tool-n">{ev.tool}</span><span className="mono faint tool-a">{ev.requests.length} requêtes vers {ev.host}</span>
+                    <span className="sp" />
+                    <span className={cn("tpill", d !== "deny" && "brand")}>{d === "once" ? "autorisé une fois" : d === "always" ? "toujours autorisé" : "refusé"}</span>
+                  </div>
                 </div>
               ) : (
                 <div className="perm" role="group" aria-labelledby={`perm-${i}`}>
                   <div className="perm-hd" id={`perm-${i}`}>
-                    <ShieldQuestion size={16} aria-hidden="true" />
+                    <span className="ichip brand" aria-hidden="true"><ShieldQuestion size={15} /></span>
                     <span><b className="mono">{ev.tool}</b> veut envoyer {ev.requests.length} requêtes à <b className="mono">{ev.host}</b></span>
                   </div>
                   <pre className="perm-req">{ev.requests.join("\n")}</pre>
-                  <p className="perm-q">Le run est en pause. Autoriser ces requêtes en lecture, avec le jeton du compte A&nbsp;?</p>
+                  <p className="perm-q">Le run est en pause. Lecture seule, avec le jeton du compte A.</p>
                   <div className="perm-opts">
                     <button ref={permRef} type="button" className="perm-b primary" onClick={() => decide("once")}><span className="kn">1</span>Autoriser une fois</button>
                     <button type="button" className="perm-b" onClick={() => decide("always")}><span className="kn">2</span>Toujours pour cet hôte</button>
-                    <button type="button" className="perm-b" onClick={() => decide("deny")}><span className="kn">3</span>Refuser <span className="faint">Échap</span></button>
+                    <button type="button" className="perm-b" onClick={() => decide("deny")}><X size={13} aria-hidden="true" />Refuser <span className="kn">Échap</span></button>
                   </div>
                 </div>
               )}
             </div>
           );
         })}
-        {phase === "running" && events[events.length - 1]?.kind !== "tool" && (
-          <div className="ev ev-thinking"><span className="bullet run" aria-hidden="true" /><span className="loader-row">Crenel réfléchit <Dots /></span></div>
+        {phase === "running" && events[lastIdx]?.kind !== "tool" && events[lastIdx]?.kind !== "think" && (
+          <div className="ev-thinking"><Dots /><Shimmer>Crenel réfléchit</Shimmer></div>
         )}
         <div ref={endRef} />
       </div>
 
       <div className="dock">
+        {away && (
+          <button type="button" className="tobottom" onClick={toBottom}><ArrowDown size={14} aria-hidden="true" /> Revenir en bas</button>
+        )}
         <Composer
           variant="dock" value={input} onChange={setInput} onSubmit={send} busy={busy} onStop={interrupt}
-          placeholder={phase === "waiting" ? "Répondez à la demande ci-dessus, ou écrivez pour la refuser" : "Demandez une suite, ou tapez / pour les commandes"}
+          placeholder={phase === "waiting" ? "Répondez à la demande, ou écrivez pour la refuser" : "Demandez une suite, ou tapez /"}
+          extra={<ContextGauge used={tokens} total={CONTEXT_WINDOW[ws.model]} />}
         />
         <div className="statusline">
           <span className="sl-l">
@@ -269,9 +385,8 @@ export function Agent() {
             <span className="sl-phase">{phaseLabel}</span>
             <span className="mono">{ws.target.name}</span>
             <span className="hide-sm">{modeLabel(ws.mode)}</span>
-            <span className="hide-sm">{modelLabel(ws.model)}</span>
+            <span className="sl-model hide-sm"><ModelLogo provider={model.provider} size={12} />{model.label}</span>
             <span className="sl-eff hide-sm"><EffortBars level={effort.level} />{effort.label}</span>
-            <span className="mono">{fmtTokens(tokens)} tokens</span>
             {allowed.length > 0 && <span className="mono hide-sm">{allowed.join(", ")} autorisé</span>}
           </span>
           <span className="sl-r hide-sm"><kbd>/</kbd> commandes <kbd>Échap</kbd> interrompre</span>

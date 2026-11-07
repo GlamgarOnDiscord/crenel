@@ -1,65 +1,64 @@
 /*
- * Crenel design tokens. Amber-gold accent (the jackdaw's stolen key) on a
- * blue-black ink. Deliberately no green and no cyan anywhere: amber means
- * "guarded" (Crenel's colour = protected), red means "proven" (danger),
- * slate means "lead" or "fixed". Single dark theme by design.
+ * Crenel design tokens, v4. Neutral near-black surfaces, greys for text and
+ * structure, ONE accent (amber: the primary action, what is selected, what is
+ * "gardé") and ONE danger colour (red: "prouvé" and critical only). Severity
+ * high/med/low, "piste" and "corrigé" are greys. Every colour literal of the
+ * app lives in this file; base.css only references these tokens.
  */
 :root {
-  /* Depth, blue-black ink */
-  --bg: #090B11;
-  --panel: #10131B;
-  --panel-raised: #171B26;
-  --panel-top: #1A1F2C;
-  --well: #0B0D13;
-  --hover: #181C28;
-  --active: #212635;
+  /* Surfaces: three layers, never more */
+  --bg: #08090B;
+  --panel: #0E0F12;
+  --panel-raised: #15161A;
+  --well: #0A0B0D;
+  --hover: #16171B;
+  --active: #1C1D22;
 
   /* Hairlines */
-  --line: #1D2130;
-  --line-soft: #161925;
-  --line-strong: #2E3447;
+  --line: #1C1D22;
+  --line-soft: #17181C;
+  --line-strong: #2A2B31;
 
-  /* Text, four steps (AA on --panel down to --fg-faint) */
-  --fg: #EEEFF4;
-  --fg-muted: #A4A9B8;
-  --fg-faint: #8C92A4;
-  --fg-ghost: #737A8E;
+  /* Text, four steps (contrast on --panel: 16.9 / 7.9 / 4.7 / decoration) */
+  --fg: #EDEDEF;
+  --fg-muted: #A2A3AA;
+  --fg-faint: #7E7F88;
+  --fg-ghost: #4E4F57;
 
-  /* Brand: amber-gold. Fill for what is selected, alive or guarded. */
+  /* The one accent: amber */
   --brand: #F2B01E;
-  --brand-ink: #F7C84E;
-  --brand-deep: #B5810C;
-  --brand-soft: color-mix(in oklab, var(--brand) 14%, transparent);
-  --brand-ring: color-mix(in oklab, var(--brand) 55%, transparent);
-  --brand-wash: color-mix(in oklab, var(--brand) 8%, transparent);
-  --grad-amber: linear-gradient(180deg, #FFD866 0%, #F6A821 52%, #E9770E 100%);
-  --on-amber: #1A1204;
+  --brand-ink: #F7C64B;
+  --brand-soft: rgba(242, 176, 30, 0.12);
+  --brand-line: rgba(242, 176, 30, 0.32);
+  --brand-ring: rgba(242, 176, 30, 0.5);
+  --on-brand: #17110A;
 
-  /* Slate: neutral states (lead, fixed, draft) */
-  --slate: #8E97AD;
-  --slate-ink: #B4BBCC;
+  /* The one danger colour: red, for "prouvé" and critical */
+  --danger: #EF4444;
+  --danger-ink: #FF7B7B;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --danger-line: rgba(239, 68, 68, 0.3);
+  --on-danger: #1C0606;
 
-  /* Severity, no green, no cyan. Always paired with a text label. */
-  --crit: #F2555A; --crit-ink: #FF8287;
-  --high: #FF8A3D; --high-ink: #FFAA6E;
-  --med:  #D2B07A; --med-ink:  #E6CC9F;
-  --low:  #8A98FF; --low-ink:  #B0BAFF;
-  --info: #7D8497; --info-ink: #AEB3C2;
+  /* Greys used as data (severity bars, neutral chart blocks) */
+  --data-1: #EDEDEF;
+  --data-2: #A2A3AA;
+  --data-3: #6A6B73;
+  --data-4: #2A2B31;
 
-  /* Surfaces: soft gradient, top sheen, soft shadow */
-  --sheen: inset 0 1px 0 rgba(255,255,255,.05);
-  --surface: linear-gradient(180deg, #141824 0%, #10131B 100%);
-  --shadow-soft: 0 1px 2px rgba(0,0,0,.35), 0 12px 32px -14px rgba(0,0,0,.65);
-  --shadow-pop: 0 0 0 1px var(--line-strong), 0 24px 60px -10px rgba(0,0,0,.7);
+  /* Effects */
+  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --shadow-pop: 0 0 0 1px var(--line-strong), 0 24px 60px -12px rgba(0, 0, 0, 0.75);
+  --scrim: rgba(0, 0, 0, 0.6);
 
-  --f-display: "Mona Sans", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --f-display: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
   --f-ui: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --t-meta: 12px; --t-label: 13px; --t-body: 14px; --t-title: 16px;
-  --t-h2: 20px; --t-h1: 28px;
+  --t-meta: 12px; --t-label: 13px; --t-body: 14px; --t-title: 15px;
+  --t-h2: 20px; --t-h1: 30px; --t-kpi: 38px;
 
-  --r-card: 18px; --r-inner: 12px; --r-control: 10px; --r-pill: 9999px;
+  --r-card: 16px; --r-inner: 12px; --r-control: 10px; --r-pill: 9999px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
 }

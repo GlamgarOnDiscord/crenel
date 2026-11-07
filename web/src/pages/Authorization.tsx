@@ -18,10 +18,8 @@ export function Authorization() {
 
   return (
     <>
-      <Topbar scoped title="Autorisation" actions={<Button size="sm" to="/app/agent" state={{ prompt: "/authz" }}><TerminalSquare size={14} /> Rejouer la matrice</Button>} />
+      <Topbar scoped title="Autorisation" insight={<>Le compte A <b>lit les projets du compte B</b>. Les 10 autres requêtes sont refusées.</>} actions={<Button size="sm" to="/app/agent" state={{ prompt: "/authz" }}><TerminalSquare size={14} /> Rejouer la matrice</Button>} />
       <div className="content mid">
-        <p className="lede">Chaque case est une vraie requête: l'acteur à gauche tente d'atteindre une ressource du <b>compte B</b>. Tout ce qui n'est pas refusé (401, 403, 404) est une faille prouvée. Verdict déterministe, sans LLM.</p>
-
         <Card title="Matrice inter-tenant" meta={<><b className="crit-ink">{fails} fuites</b>&nbsp;sur {total} requêtes</>}>
           <div className="matrix-wrap">
             <table className="matrix">

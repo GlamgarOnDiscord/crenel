@@ -17,14 +17,13 @@ export function Integrations() {
   const [on, setOn] = useState<Record<string, boolean>>(Object.fromEntries(items.map((i) => [i.name, i.on])));
   return (
     <>
-      <Topbar crumb="Espace" title="Intégrations" />
+      <Topbar crumb="Espace" title="Intégrations" insight={<>Elles ne reçoivent que des failles prouvées, jamais des pistes.</>} />
       <div className="content">
-        <p className="lede">Branchez Crenel là où vous travaillez déjà. Les intégrations ne reçoivent que des failles prouvées, jamais des pistes.</p>
         <section className="folders">
           {items.map((it) => (
             <div key={it.name} className={cn("folder", on[it.name] && "active")}>
               <div className="fh">
-                <span className={cn("sq", on[it.name] ? "amber" : "slate")} aria-hidden="true"><it.icon size={18} /></span>
+                <span className={cn("ichip", on[it.name] && "brand")} aria-hidden="true"><it.icon size={16} /></span>
                 <div><div className="nm">{it.name}</div><div className="url">{on[it.name] ? "connecté" : "non connecté"}</div></div>
                 <span className="sp" />
                 <Toggle on={!!on[it.name]} label={`${it.name}: ${on[it.name] ? "connecté" : "non connecté"}`} onChange={(v) => setOn((m) => ({ ...m, [it.name]: v }))} />

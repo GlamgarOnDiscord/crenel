@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Check, FileCheck2, GitPullRequest, TerminalSquare } from "lucide-react";
 import { Mascot } from "../brand/Logo.tsx";
 import { Topbar } from "../components/Shell.tsx";
-import { Button, Card, CopyButton, EmptyState, GuardBadge, SeverityChip, StateBadge } from "../components/ui.tsx";
+import { Button, Card, CodeBlock, CopyButton, EmptyState, GuardBadge, SeverityChip, StateBadge } from "../components/ui.tsx";
 import { findings } from "../data/mock.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -21,9 +21,9 @@ export function FindingDetail() {
   const proven = f.state === "proven" || (f.state === "fixed" && !!f.proof);
   const steps = [
     { label: "Trouvé", sub: `il y a ${f.seen}`, done: true, tone: "" },
-    { label: "Prouvé", sub: proven ? "requête rejouable" : "pas encore", done: proven, tone: "bad" },
+    { label: "Prouvé", sub: proven ? "requête rejouable" : "pas encore", done: proven, tone: "t-bad" },
     { label: "Test généré", sub: f.regression ? "régression prête" : "à générer", done: !!f.regression, tone: "" },
-    { label: "En CI", sub: f.guarded ? "gardé" : "pas encore", done: !!f.guarded, tone: "guard" },
+    { label: "En CI", sub: f.guarded ? "gardé" : "pas encore", done: !!f.guarded, tone: "t-guard" },
   ];
 
   return (
@@ -72,7 +72,7 @@ export function FindingDetail() {
         <Card title="Test de régression" meta={f.guarded ? <GuardBadge label="en CI" /> : "pour qu'il ne revienne pas"}>
           <div className="pad">
             {f.regression
-              ? <pre className="codeblock">{f.regression}</pre>
+              ? <CodeBlock file={`tests/crenel/${f.check}.test.ts`} code={f.regression} />
               : <div className="muted">Pas encore de test. <Link to="/app/agent" state={{ prompt: `/test ${f.id}` }} className="linkish">Demander à l'agent de le générer</Link></div>}
           </div>
         </Card>

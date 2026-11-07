@@ -47,10 +47,17 @@ export interface Task {
 
 export interface InlineFinding { sev: Severity; text: string; state: FindingState; id?: string }
 
+export interface Source { label: string; href: string; kind: string }
+
 export type AgentEvent =
   | { kind: "user"; text: string }
-  | { kind: "say"; text: string }
-  | { kind: "tool"; tool: string; args: string; lines: string[]; findings?: InlineFinding[]; dur: string }
+  | { kind: "say"; text: string; sources?: Source[] }
+  | { kind: "think"; text: string; dur: string }
+  | { kind: "plan"; steps: { tool: string; label: string }[] }
+  | {
+      kind: "tool"; tool: string; args: string; input: string; lines: string[]; findings?: InlineFinding[]; dur: string;
+      code?: { file: string; body: string };
+    }
   | { kind: "permission"; tool: string; host: string; requests: string[] }
   | { kind: "note"; text: string; tone?: "warn" | "muted" };
 
