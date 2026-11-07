@@ -56,6 +56,6 @@ test("a .docker/config.json with an auth field IS flagged", async () => {
   try {
     const found = await committedCredentials.run(ctx(dir));
     assert.equal(found.length, 1);
-    assert.equal(found[0]!.location, join(".docker", "config.json"));
+    assert.equal(found[0]!.location, ".docker/config.json"); // finding paths are always POSIX
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
