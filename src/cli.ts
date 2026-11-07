@@ -12,6 +12,7 @@ import { run } from "./core/runner.js";
 import { REGISTRY } from "./core/registry.js";
 import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
 import { toSarif } from "./report/sarif.js";
+import { appendAudit } from "./core/audit.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 
@@ -105,6 +106,9 @@ async function main(): Promise<number> {
     if (flags.sarif && typeof flags.sarif === "string") {
       writeFileSync(flags.sarif, toSarif(result));
     }
+    if (flags.audit && typeof flags.audit === "string") {
+      appendAudit(flags.audit, result);
+    }
 
     // Baseline: diff against a saved snapshot, and/or update it.
     const baselinePath = typeof flags.baseline === "string" ? flags.baseline : undefined;
@@ -158,7 +162,7 @@ async function main(): Promise<number> {
       "Usage:",
       "  bastion init   [--config path] [--force]   write a starter config",
       "  bastion scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--verbose]",
-      "                 [--baseline file.json] [--update-baseline]",
+      "                 [--baseline file.json] [--update-baseline] [--audit log.jsonl]",
       "  bastion triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  bastion list                                show available checks",
       "",
