@@ -72,6 +72,13 @@ of the registry (lead); and no lockfile at all (lead). Refresh the denylist with
 `pnpm sync-denylist`.
 
 
+**Known advisories from OSV (opt-in, network).** With
+`options.dependency-risk.osv: true` and `api.osv.dev` in `scope.allowedHosts`,
+every locked npm package and version is sent to OSV (the database behind
+osv-scanner and GitHub's advisories), and each advisory whose range covers the
+locked version is a lead with the advisory's severity: affected, exploitability
+not proven. Only package names and versions leave the machine.
+
 **Registry signals (opt-in, network).** With `options.dependency-risk.registry:
 true` (or a registry URL) and its host in `scope.allowedHosts`, each direct
 dependency is looked up: a package first published less than 30 days ago

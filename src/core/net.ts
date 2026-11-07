@@ -98,7 +98,7 @@ export interface SafeResponse {
 export async function safeFetch(
   url: string,
   scope: Scope,
-  init: { method?: string; headers?: Record<string, string>; maxBytes?: number; followRedirects?: boolean } = {},
+  init: { method?: string; headers?: Record<string, string>; maxBytes?: number; followRedirects?: boolean; body?: string } = {},
 ): Promise<SafeResponse> {
   // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
   const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
@@ -118,7 +118,8 @@ export async function safeFetch(
     const signal = scope.signal ? AbortSignal.any([scope.signal, timeout]) : timeout;
     let res: Response;
     try {
-      res = await fetch(current, { method, headers: init.headers, redirect: "manual", signal });
+      // A body is only ever sent to a third-party metadata API the user declared (OSV), never to a target.
+      res = await fetch(current, { method, headers: init.headers, body: init.body, redirect: "manual", signal });
     } catch (err) {
       scope.onRequest?.({ method, url: current, error: (err as Error).message });
       throw err;

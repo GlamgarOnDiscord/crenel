@@ -133,3 +133,13 @@ test("registry signals (opt-in): a days-old package, a fresh locked version, a n
     assert.ok(found.every((f) => f.state === "unproven"));
   } finally { srv.close(); }
 });
+
+test("OSV advisories are skipped, with a hint, when api.osv.dev is not declared", async () => {
+  const { osvAdvisories } = await import("./dependency-risk.js");
+  const logs: string[] = [];
+  const { dependencyRisk } = await import("./dependency-risk.js");
+  const found = await dependencyRisk.run({ scope: new Scope({ allowedHosts: [] }), projectDir: process.cwd(), options: { "dependency-risk": { osv: true } }, log: (m) => logs.push(m) });
+  assert.ok(logs.some((l) => l.includes("add api.osv.dev")));
+  assert.ok(!found.some((f) => f.id.includes(":advisory:")));
+  assert.equal(typeof osvAdvisories, "function");
+});

@@ -175,7 +175,11 @@ export const dependencyRisk: Check = {
     }
 
     // --- optional registry signals (opt-in, network) ---
-    const opts = (ctx.options["dependency-risk"] ?? {}) as { registry?: boolean | string };
+    const opts = (ctx.options["dependency-risk"] ?? {}) as { registry?: boolean | string; osv?: boolean };
+    if (opts.osv) {
+      if (!ctx.scope.isHostAllowed("https://api.osv.dev/")) ctx.log("dependency-risk: OSV advisories skipped, add api.osv.dev to scope.allowedHosts to enable them");
+      else findings.push(...await osvAdvisories(locked, ctx, rel(lockPath)));
+    }
     if (opts.registry) {
       const registry = (typeof opts.registry === "string" ? opts.registry : "https://registry.npmjs.org").replace(/\/+$/, "");
       if (!ctx.scope.isHostAllowed(registry)) {
@@ -254,5 +258,47 @@ export async function registrySignals(direct: string[], locked: Set<string>, reg
       }
     }
   }
+  return out;
+}
+
+const OSV = "https://api.osv.dev/v1";
+const OSV_SEVERITY: Record<string, Finding["severity"]> = { CRITICAL: "critical", HIGH: "high", MODERATE: "medium", MEDIUM: "medium", LOW: "low" };
+
+/**
+ * Known advisories for every locked npm package, from OSV (the database behind
+ * osv-scanner and GitHub's advisories). Opt-in, network: the package names and
+ * versions go to api.osv.dev, nothing else. A locked version inside an
+ * advisory's range is reported as a lead: affected, exploitability not proven.
+ */
+export async function osvAdvisories(locked: Set<string>, ctx: CheckContext, lockRel: string): Promise<Finding[]> {
+  const pkgs = [...locked].map((x) => { const i = x.lastIndexOf("@"); return { name: x.slice(0, i), version: x.slice(i + 1) }; }).filter((p) => p.name && p.version);
+  const hits: { name: string; version: string; id: string }[] = [];
+  for (let i = 0; i < pkgs.length; i += 1000) {
+    const batch = pkgs.slice(i, i + 1000);
+    try {
+      const res = await safeFetch(`${OSV}/querybatch`, ctx.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queries: batch.map((p) => ({ package: { name: p.name, ecosystem: "npm" }, version: p.version })) }), maxBytes: 8 * 1024 * 1024 });
+      const results = (JSON.parse(res.body) as { results?: { vulns?: { id: string }[] }[] }).results ?? [];
+      results.forEach((r, k) => (r.vulns ?? []).forEach((v) => hits.push({ ...batch[k]!, id: v.id })));
+    } catch (err) { ctx.log(`dependency-risk: OSV query failed: ${(err as Error).message}`); return []; }
+  }
+  const out: Finding[] = [];
+  const details = new Map<string, { summary?: string; aliases?: string[]; database_specific?: { severity?: string } }>();
+  for (const id of [...new Set(hits.map((h) => h.id))].slice(0, 80)) {
+    try { details.set(id, JSON.parse((await safeFetch(`${OSV}/vulns/${encodeURIComponent(id)}`, ctx.scope)).body)); } catch { /* summary stays empty */ }
+  }
+  for (const h of hits) {
+    const d = details.get(h.id);
+    const sev = OSV_SEVERITY[(d?.database_specific?.severity ?? "").toUpperCase()] ?? "medium";
+    const cve = d?.aliases?.find((a) => a.startsWith("CVE-"));
+    out.push({
+      id: `dependency-risk:advisory:${h.name}@${h.version}:${h.id}`, check: "dependency-risk",
+      title: `${h.name}@${h.version} is affected by ${h.id}${cve ? ` (${cve})` : ""}${d?.summary ? `: ${d.summary.slice(0, 120)}` : ""}`,
+      severity: sev, state: "unproven", location: lockRel,
+      description: `The locked version ${h.name}@${h.version} falls in the affected range of ${h.id}. Whether your app reaches the vulnerable code is not proven.`,
+      remediation: `Upgrade ${h.name} past the fixed version listed in the advisory (https://osv.dev/vulnerability/${h.id}).`,
+      proof: { method: "OSV query for the exact locked version", replay: `curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"${h.name}","ecosystem":"npm"},"version":"${h.version}"}'`, evidence: h.id },
+    });
+  }
+  ctx.log(`dependency-risk: OSV, ${pkgs.length} package(s) queried, ${out.length} advisory match(es)`);
   return out;
 }
