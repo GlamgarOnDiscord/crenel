@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs twelve checks. Each is deterministic and read-only, and marks every
+Crenel runs thirteen checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -21,6 +21,7 @@ empty list runs every read-only check.
 | sourcemaps | Source maps shipped with the client bundle | no (leads) | no |
 | public-env | A secret behind a client-exposed env prefix | no (leads) | no |
 | tls-verification | Code/config disabling TLS cert verification | no (leads) | no |
+| jwt-config | JWT config that defeats signature verification | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -117,4 +118,11 @@ Flags code or config that turns off TLS certificate verification:
 `strictSSL: false`. Any of these accept a forged certificate, so a network
 attacker can read and alter "HTTPS" traffic. Leads. Fix: remove them and trust
 the proper CA.
+
+## jwt-config
+
+Flags JWT configuration that defeats signature verification: `algorithm: "none"`,
+`"none"` in an `algorithms` list, or verifying with a null/empty secret. Any of
+these accepts an unsigned token, a classic authentication bypass. Leads. Fix: pin
+a strong algorithm (RS256/ES256/HS256), never `none`, and verify with the real key.
 

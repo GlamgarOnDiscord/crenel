@@ -15,8 +15,9 @@ import { committedEnv } from "../checks/committed-env.js";
 import { sourcemaps } from "../checks/sourcemaps.js";
 import { publicEnv } from "../checks/public-env.js";
 import { tlsVerification } from "../checks/tls-verification.js";
+import { jwtConfig } from "../checks/jwt-config.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {
