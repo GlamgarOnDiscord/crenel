@@ -17,6 +17,10 @@ import { appendAudit } from "./core/audit.js";
 import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
+import { reviewBundle } from "./agent/bundle-review.js";
+import { claudeCli, detectClaude } from "./agent/llm.js";
+import { crawlLiveBundle } from "./checks/live-bundle.js";
+import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
 import { SEVERITIES } from "./report/render.js";
 import type { Severity } from "./core/types.js";
@@ -228,7 +232,6 @@ async function main(): Promise<number> {
       return 2;
     }
     const { startServer } = await import("./server/http.js");
-    const { detectClaude } = await import("./agent/llm.js");
     const host = typeof flags.host === "string" ? flags.host : "127.0.0.1";
     if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
       process.stderr.write(`Warning: listening on ${host}, reachable from other machines. The token is the only lock.\n`);
@@ -284,6 +287,46 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  if (cmd === "review-bundle") {
+    // Hand the whole JavaScript the deployed site serves to the model (claude -p)
+    // and list what it sees. Advice only: every item is a lead, quotes checked.
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    if (!config.scope.stagingUrl) {
+      process.stderr.write("review-bundle needs scope.stagingUrl: the page whose JavaScript is reviewed.\n");
+      return 2;
+    }
+    const model = typeof flags.model === "string" ? flags.model : "opus";
+    const llm = claudeCli(model);
+    if (!llm || !(await detectClaude())) {
+      process.stderr.write(`review-bundle needs the claude CLI (model ${model}).\n`);
+      return 2;
+    }
+    const scope = new Scope({
+      allowedHosts: config.scope.allowedHosts,
+      allowActiveTesting: config.scope.allowActiveTesting,
+      allowPrivate: config.scope.allowPrivate,
+      stagingUrl: config.scope.stagingUrl,
+    });
+    const log = (m: string) => process.stderr.write(`${m}\n`);
+    const { files, bytes } = await crawlLiveBundle({ scope, log }, config.scope.stagingUrl);
+    process.stdout.write(`Fetched ${files.length} file(s), ${Math.round(bytes / 1024)} KB, from ${config.scope.stagingUrl}. Reviewing with ${llm.label}...\n\n`);
+    const maxCalls = typeof flags.max === "string" ? Number(flags.max) : undefined;
+    const r = await reviewBundle(files, llm, { maxCalls, log });
+    for (const f of r.findings) process.stdout.write(`• ${f.severity.toUpperCase()} ${f.title}\n  ${f.location}\n  ${f.description}\n  quote: ${f.proof?.evidence}\n\n`);
+    if (r.endpoints.length) process.stdout.write(`Endpoints to add to authz-matrix:\n${r.endpoints.map((e) => `  ${e.method} ${e.path}`).join("\n")}\n\n`);
+    process.stdout.write(`${r.findings.length} lead(s), ${r.calls} model call(s), ${r.dropped} item(s) dropped (quote not found in the file)${r.unseenChars ? `, ${Math.round(r.unseenChars / 1024)} KB not reviewed (raise --max)` : ""}.\n`);
+    process.stdout.write("These are the model's readings, never proof. Only a deterministic validator marks a finding proven.\n");
+    if (typeof flags.out === "string") writeFileSync(flags.out, JSON.stringify(r, null, 2));
+    return 0;
+  }
+
   process.stdout.write(
     [
       "Crenel - a defensive security harness for SaaS",
@@ -296,6 +339,8 @@ async function main(): Promise<number> {
       "  crenel serve  [--config path] [--port 4100] [--open] [--llm]      local web console and API",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
+      "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
+      "                 the model reads every JS chunk the live site serves (leads only)",
       "  crenel list                                show available checks",
       "",
       "Crenel only tests hosts you declare you own. Active checks stay off until",

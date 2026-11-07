@@ -5,6 +5,7 @@
 //
 // What is wrong with it, on purpose:
 //   - GET /                 no CSP, no HSTS, a session cookie without flags
+//   - GET /*.js, /*.map     the client bundle, with a server key and its source map
 //   - GET /api/projects/:id any signed-in account reads any project (BOLA)
 //   - GET /api/renders/:id  correct: only the owner, 404 otherwise
 //   - /rest/v1/*            a fake Supabase PostgREST: `profiles` has no RLS
@@ -13,6 +14,7 @@
 // Test accounts: Bearer demo-token-a (tenant A), demo-token-b (tenant B).
 
 import { createServer } from "node:http";
+import { readFileSync, existsSync } from "node:fs";
 
 const PORT = Number(process.env.PORT ?? 4580);
 const ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlbW8iLCJyb2xlIjoiYW5vbiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoyMDAwMDAwMDAwfQ.ZGVtby1zaWduYXR1cmUtbm90LXJlYWw";
@@ -35,7 +37,15 @@ const server = createServer((req, res) => {
 
   if (p === "/") {
     res.writeHead(200, { "content-type": "text/html", "set-cookie": "session=demo; Path=/" });
-    return res.end("<!doctype html><title>demo app</title><h1>Demo vulnerable app</h1>");
+    return res.end('<!doctype html><title>demo app</title><h1>Demo vulnerable app</h1><script type="module" src="/app.js"></script><script type="module" src="/auth.js"></script><script type="module" src="/supabase.js"></script><script type="module" src="/http-client.js"></script>');
+  }
+  // The built client bundle, served like any static host would (maps included, on purpose).
+  const asset = p.match(/^\/([\w.-]+\.(?:js|map))$/);
+  if (asset) {
+    const file = new URL(`./dist/${asset[1]}`, import.meta.url);
+    if (!existsSync(file)) return json(res, 404, { error: "not found" });
+    res.writeHead(200, { "content-type": asset[1].endsWith(".map") ? "application/json" : "application/javascript" });
+    return res.end(readFileSync(file));
   }
   let m = p.match(/^\/api\/projects\/([^/]+)$/);
   if (m) {

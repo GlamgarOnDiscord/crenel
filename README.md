@@ -12,7 +12,7 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-17-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Checks](https://img.shields.io/badge/checks-18-1b1d2a?style=flat-square)](docs/CHECKS.md)
 [![Tests](https://img.shields.io/badge/tests-177%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
@@ -52,7 +52,7 @@ pnpm crenel generate-tests     # one regression test per finding
 
 | | Checks |
 | --- | --- |
-| **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
+| **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `live-bundle` the same on every JS chunk your live site serves · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
 | **Authorization** | `authz-matrix` account A reaching account B's objects, anonymous access, proven live on staging |
 | **BaaS** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) |
 | **Supply chain** | `dependency-risk` known-malware versions, install hooks · `ci-hardening` · `dockerfile` · `mcp-surface` |
@@ -60,6 +60,8 @@ pnpm crenel generate-tests     # one regression test per finding
 | **Config** | `headers` · `jwt-config` · `tls-verification` · `cloudflare-audit` |
 
 Details and fixes: [`docs/CHECKS.md`](docs/CHECKS.md).
+
+**Let a model read your chunks too.** `crenel review-bundle` hands every JS chunk the live site serves to `claude -p` and lists what no pattern catches: internal endpoints, browser-only role checks, hidden routes, debug code. Each item quotes the served file verbatim or is dropped, and stays a lead until a deterministic check replays it.
 
 ## Web console
 

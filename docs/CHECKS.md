@@ -26,6 +26,7 @@ empty list runs every read-only check.
 | baas-exposure | Supabase/Firebase public key in the bundle, tables readable without RLS | yes (one-row read, opt-in) | static no; live read yes + active gate |
 | webhook-signature | Webhook handler acting on an unverified payload | no (leads) | no |
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
+| live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -190,3 +191,24 @@ analysis.
 
 Fix: require https, allow an explicit list of hosts, resolve the host and refuse
 private, loopback and link-local addresses, do not follow cross-host redirects.
+
+## live-bundle
+
+Scans what the deployed site actually serves, without the repo. From
+`scope.stagingUrl` it follows `<script src>`, modulepreload links, inline
+scripts, `import()` and static imports, Next.js `static/chunks/` paths and
+`sourceMappingURL` comments, downloading each file with GET through the scoped
+client (declared hosts only: a chunk on an undeclared CDN is logged and
+skipped; up to 150 files, 40 MB, 2 MB per response). The `exposed-secrets`
+detectors then run on those files, Supabase public keys become RLS leads, and a
+source map that answers 200 is reported.
+
+## bundle-review (`crenel review-bundle`, needs `claude -p`)
+
+Not a check: a command. It hands the model every chunk `live-bundle` collects,
+whole, in windows of about 120 KB, fenced as untrusted data, and asks for what
+no regex sees: admin or internal endpoints, authorization done only in the
+browser, hidden routes and flags, debug code, keys of unknown formats, internal
+hosts. Each item must quote an excerpt that exists verbatim in the served file,
+or it is dropped. Everything it returns is a lead labelled *IA, non vérifié*;
+endpoints are listed so the authorization matrix can replay them.
