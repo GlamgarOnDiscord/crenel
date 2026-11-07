@@ -109,6 +109,19 @@ export const authzMatrix: Check = {
     ctx.scope.assertUrlAllowed(base);
     const accounts = cfg.accounts!;
     const markers = [accounts.b?.marker ?? ""].filter(Boolean);
+    // Distinct contexts (Teycir's guard): if A and B are the same account, every
+    // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
+    const same = sameIdentity(accounts.a?.token, accounts.b?.token);
+    if (same) {
+      ctx.log(`authz-matrix: accounts A and B are the same identity (${same}), live probe skipped`);
+      findings.push({
+        id: "authz-matrix:same-identity", check: "authz-matrix", title: "Test accounts A and B are the same identity: the matrix cannot prove anything",
+        severity: "medium", state: "unproven", location: "options.authz-matrix.accounts",
+        description: `The tokens for A and B ${same}. Use two accounts of two different tenants.`,
+        remediation: "Create a second test account in another organization and put its token under accounts.a.",
+      });
+      return findings;
+    }
     const get = (url: string, token?: string) =>
       safeFetch(url, ctx.scope, { method: "GET", headers: token ? { authorization: `Bearer ${token}` } : {} })
         .then((r) => ({ status: r.status, body: r.body }));
@@ -137,7 +150,9 @@ export const authzMatrix: Check = {
           const control = await get(controlUrl, actor.token);
           const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
           if (o.verdict === "denied") continue;
-          const proven = o.verdict === "leak";
+          // A leak must hold on two more replays: a flaky route (a cache, a race)
+          // is a lead, not a proof.
+          const proven = o.verdict === "leak" && await stableLeak(() => get(url, actor.token), owner, control, markers);
           const auth = actor.token ? ` -H 'authorization: Bearer <${actor.key.toUpperCase()}_TOKEN>'` : "";
           findings.push({
             id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}${actor.key === "a" ? "" : `:${actor.key}`}`,
@@ -193,7 +208,7 @@ export const authzMatrix: Check = {
             const attacker = await get(url, actor.token);
             const control = await get(controlUrl, actor.token);
             const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
-            if (o.verdict !== "leak") continue;
+            if (o.verdict !== "leak" || !(await stableLeak(() => get(url, actor.token), owner, control, markers))) continue;
             findings.push({
               id: `authz-matrix:${d.resource.name}:GET:${d.id}${actor.key === "a" ? "" : `:${actor.key}`}:discovered`,
               check: "authz-matrix",
@@ -224,6 +239,23 @@ export const authzMatrix: Check = {
 };
 
 const MAX_DISCOVERED = 25;
+
+/** Two more attacker replays must also be leaks for the finding to be proven. */
+async function stableLeak(replay: () => Promise<{ status: number; body: string }>, owner: { status: number; body: string } | undefined, control: { status: number; body: string }, markers: string[]): Promise<boolean> {
+  for (let i = 0; i < 2; i++) {
+    if (authzOracle({ attacker: await replay(), owner, control, ownerMarkers: markers }).verdict !== "leak") return false;
+  }
+  return true;
+}
+
+/** Why two bearer tokens are the same identity (same string, or JWTs with the same sub), or null. */
+export function sameIdentity(a?: string, b?: string): string | null {
+  if (!a || !b) return null;
+  if (a === b) return "are identical";
+  const sub = (t: string) => { try { return (JSON.parse(Buffer.from(t.split(".")[1] ?? "", "base64url").toString("utf8")) as { sub?: string }).sub ?? null; } catch { return null; } };
+  const sa = sub(a), sb = sub(b);
+  return sa && sa === sb ? `carry the same subject (sub=${sa})` : null;
+}
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 
 /**

@@ -16,6 +16,7 @@ import { safeFetch, type SafeResponse } from "../core/net.js";
 import type { Scope } from "../core/scope.js";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { scanBaas, readOneRow, type SupabasePair } from "../checks/baas-exposure.js";
+import { sameIdentity } from "../checks/authz-matrix.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
 
@@ -146,6 +147,8 @@ const authzValidator: Validator = {
     if (!(opts.accounts?.b?.owns?.[r.name] ?? []).includes(id)) return no(`id ${id} is not declared as owned by account B`);
     if (isPublicByDesign(opts, r)) return no(`${r.path} is public by design (trust boundary in the config)`);
     if (!env.scope.allowActiveTesting) return no("allowActiveTesting is off");
+    const same = sameIdentity(opts.accounts?.a?.token, opts.accounts?.b?.token);
+    if (same) return no(`accounts A and B ${same}: not two tenants`);
     const tokenA = actor === "anon" ? undefined : opts.accounts?.[actor]?.token;
     if (actor !== "anon" && !tokenA) return no(`no token for account ${actor.toUpperCase()}`);
     const url = authzUrl(env.stagingUrl, r, id);
