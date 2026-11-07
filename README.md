@@ -91,13 +91,24 @@ A React + Vite app lives in `web/` (the Crenel console): overview, agent run
 secrets, authorization matrix, generated tests, integrations, settings, and a
 landing page. Run it with `cd web && pnpm install && pnpm dev`.
 
+## Commands
+
+- `scan` — run checks; `--out` JSON, `--sarif` SARIF 2.1.0, `--audit` JSONL log, `--baseline`/`--update-baseline` for regressions.
+- `generate-tests` — emit one regression test per finding (`--out`), so a fixed issue cannot return.
+- `triage` — experimental LLM triage of leads via the local Claude CLI (advice only, never proves).
+- `list`, `init`.
+
 ## Roadmap
 
-- `dependency-risk`: sync the malware denylist from OSV / GitHub advisories in CI, and add optional online CVE enrichment behind a flag.
-- `cloudflare-audit`: wrap cloudflare/security-audit-skill and normalise its output into Bastion findings.
-- `mcp-surface`: checks for LLM and MCP features exposed to users (prompt-injection, tool scope).
-- `headers`: security headers and cookie flags on your own staging.
-- `validate`: re-run every past proven finding and mark the fixed ones.
+Needs the user's credentials or a product decision (not done autonomously):
+- Auto-PR of the generated tests and fixes to GitHub.
+- Hosted/continuous scanning and a trust page.
+- `cloudflare-audit`: wrap cloudflare/security-audit-skill and normalise its output.
+
+Self-contained next steps:
+- `headers` check (security headers and cookie flags on your own staging).
+- Sync the malware denylist from OSV / GitHub advisories in CI.
+- `mcp-surface`: checks for LLM and MCP features exposed to users.
 - A Tauri desktop app over the same core.
 
 ## License

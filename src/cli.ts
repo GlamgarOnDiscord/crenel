@@ -13,6 +13,7 @@ import { REGISTRY } from "./core/registry.js";
 import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
 import { toSarif } from "./report/sarif.js";
 import { appendAudit } from "./core/audit.js";
+import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 
@@ -132,6 +133,24 @@ async function main(): Promise<number> {
     return exitCode(result) || (regressed ? 1 : 0);
   }
 
+  if (cmd === "generate-tests") {
+    const configPath = (flags.config as string) ?? "bastion.config.yaml";
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const result = await run(config, configPath, { verbose: !!flags.verbose });
+    const content = generateRegressionFile(result.findings);
+    const out = typeof flags.out === "string" ? flags.out : "crenel.regression.test.ts";
+    writeFileSync(out, content);
+    const n = content.match(/\btest\(/g)?.length ?? 0;
+    process.stdout.write(`${n} test(s) de régression écrits dans ${out}.\n`);
+    return 0;
+  }
+
   if (cmd === "triage") {
     // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
     const configPath = (flags.config as string) ?? "bastion.config.yaml";
@@ -163,6 +182,7 @@ async function main(): Promise<number> {
       "  bastion init   [--config path] [--force]   write a starter config",
       "  bastion scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--verbose]",
       "                 [--baseline file.json] [--update-baseline] [--audit log.jsonl]",
+      "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  bastion triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  bastion list                                show available checks",
       "",
