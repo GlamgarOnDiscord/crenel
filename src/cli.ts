@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Crenel CLI. Three commands:
+// Crenel CLI:
 //   scan   run the checks against a config and report
+//   serve  local web console + JSON API (127.0.0.1, random token)
 //   list   show available checks
 //   init   write a starter config
 //
@@ -16,6 +17,10 @@ import { appendAudit } from "./core/audit.js";
 import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
+import { toJunit } from "./report/junit.js";
+import { SEVERITIES } from "./report/render.js";
+import type { Severity } from "./core/types.js";
+import { spawn } from "node:child_process";
 
 // Default config file. `crenel.config.yaml`, falling back to the pre-rename
 // `bastion.config.yaml` when only that one exists, so older setups keep working.
@@ -50,9 +55,9 @@ options:
 
 // Flags that never take a value, so they do not swallow the following token
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
-const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help"]);
+const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "no-llm"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
-const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max"]);
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host"]);
 
 function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
@@ -145,6 +150,9 @@ async function main(): Promise<number> {
     if (flags.sarif && typeof flags.sarif === "string") {
       writeFileSync(flags.sarif, toSarif(result));
     }
+    if (flags.junit && typeof flags.junit === "string") {
+      writeFileSync(flags.junit, toJunit(result));
+    }
     if (flags.audit && typeof flags.audit === "string") {
       appendAudit(flags.audit, result, {
         allowedHosts: config.scope.allowedHosts,
@@ -184,7 +192,12 @@ async function main(): Promise<number> {
     // Exit non-zero on a proven high/critical, on a regression vs baseline, when
     // a check failed, or when the baseline was unreadable (fail closed).
     const errExit = result.errors.length > 0 || baselineBroken ? 2 : 0;
-    return Math.max(exitCode(result), regressed ? 1 : 0, errExit);
+    const failOn = typeof flags["fail-on"] === "string" ? flags["fail-on"] : "high";
+    if (!SEVERITIES.includes(failOn as Severity)) {
+      process.stderr.write(`--fail-on expects one of ${SEVERITIES.join(", ")}\n`);
+      return 2;
+    }
+    return Math.max(exitCode(result, failOn as Severity), regressed ? 1 : 0, errExit);
   }
 
   if (cmd === "generate-tests") {
@@ -203,6 +216,44 @@ async function main(): Promise<number> {
     writeFileSync(out, content);
     const n = content.match(/\btest\(/g)?.length ?? 0;
     process.stdout.write(`${n} regression test(s) written to ${out}.\n`);
+    return 0;
+  }
+
+  if (cmd === "serve") {
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const { startServer } = await import("./server/http.js");
+    const { detectClaude } = await import("./agent/llm.js");
+    const host = typeof flags.host === "string" ? flags.host : "127.0.0.1";
+    if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
+      process.stderr.write(`Warning: listening on ${host}, reachable from other machines. The token is the only lock.\n`);
+    }
+    const noLlm = !!flags["no-llm"];
+    const claudeAvailable = noLlm ? false : await detectClaude();
+    const srv = await startServer({ configPath, host, port: typeof flags.port === "string" ? Number(flags.port) : 4100, llm: noLlm ? "off" : "auto", claudeAvailable });
+    const link = `${srv.url}/?token=${srv.token}`;
+    process.stdout.write([
+      "Crenel console",
+      `  ${link}`,
+      "",
+      `  config   ${configPath}`,
+      `  model    ${claudeAvailable ? "claude -p (local CLI), advice and prose only" : "none (deterministic only)"}`,
+      `  state    .crenel/ next to the config (journals, findings, audit)`,
+      "",
+      "Local only. Ctrl+C stops the server and every run.",
+      "",
+    ].join("\n"));
+    if (flags.open) openBrowser(link);
+    await new Promise<void>((ok) => {
+      const bye = () => { void srv.close().then(ok); };
+      process.once("SIGINT", bye);
+      process.once("SIGTERM", bye);
+    });
     return 0;
   }
 
@@ -236,8 +287,10 @@ async function main(): Promise<number> {
       "",
       "Usage:",
       "  crenel init   [--config path] [--force]   write a starter config",
-      "  crenel scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--verbose]",
-      "                 [--baseline file.json] [--update-baseline] [--audit log.jsonl]",
+      "  crenel scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--junit file.xml]",
+      "                 [--fail-on critical|high|medium|low] [--baseline file.json] [--update-baseline]",
+      "                 [--audit log.jsonl] [--verbose]",
+      "  crenel serve  [--config path] [--port 4100] [--open] [--no-llm]   local web console and API",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel list                                show available checks",
@@ -248,6 +301,19 @@ async function main(): Promise<number> {
     ].join("\n"),
   );
   return cmd === "help" ? 0 : 1;
+}
+
+// Open a URL in the default browser, portably: no shell string, no Unix-only tool.
+function openBrowser(url: string): void {
+  const [cmd, args] =
+    process.platform === "win32" ? ["cmd", ["/c", "start", "", url.replace(/&/g, "^&")]]
+    : process.platform === "darwin" ? ["open", [url]]
+    : ["xdg-open", [url]];
+  try {
+    spawn(cmd as string, args as string[], { stdio: "ignore", detached: true, windowsHide: true }).on("error", () => {}).unref();
+  } catch {
+    /* no browser: the link is printed */
+  }
 }
 
 main().then(

@@ -1,0 +1,33 @@
+# Live demo config. Probes ONLY the bundled demo app on 127.0.0.1:
+#   node examples/vulnerable-app/server.mjs
+#   pnpm crenel serve --config examples/crenel.live.config.yaml
+# allowPrivate is on because the demo target is loopback; never set it for a
+# public host. Active testing is on because the demo app is ours.
+project: demo vulnerable app (live)
+projectDir: ./vulnerable-app/dist
+
+scope:
+  allowedHosts:
+    - 127.0.0.1
+  allowActiveTesting: true
+  allowPrivate: true
+  stagingUrl: http://127.0.0.1:4580/
+
+checks: []
+
+options:
+  authz-matrix:
+    resources:
+      - name: project
+        path: /api/projects/:id
+        methods: [GET]
+      - name: render
+        path: /api/renders/:id
+        methods: [GET]
+    accounts:
+      a: { token: "demo-token-a" }                     # another tenant than B
+      b:
+        token: "demo-token-b"                           # owner baseline for the oracle
+        marker: "acct_b_demo"                           # appears only in B's objects
+        owns: { project: ["proj_b_1"], render: ["rnd_b_1"] }
+    publicByDesign: []                                  # routes public on purpose (trust boundary)

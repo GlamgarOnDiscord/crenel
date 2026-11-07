@@ -19,6 +19,24 @@ export interface ScopeConfig {
   stagingUrl?: string;
   /** Allow targets that resolve to private IPs (an internal staging box). Off by default. */
   allowPrivate?: boolean;
+  /**
+   * Kill switch for everything sent under this scope. When it aborts, the
+   * scoped client refuses new requests and cancels the one in flight, so
+   * stopping a run really stops it (not only the loop around it).
+   */
+  signal?: AbortSignal;
+  /** Observer called for every request the scoped client sends or refuses (journal, audit, budgets). */
+  onRequest?: (e: NetEvent) => void;
+}
+
+/** One request seen by the scoped client: sent (with a status or an error) or refused. */
+export interface NetEvent {
+  method: string;
+  url: string;
+  status?: number;
+  error?: string;
+  /** Set when the scope refused the request before anything left the machine. */
+  refused?: string;
 }
 
 export class ScopeError extends Error {
@@ -33,8 +51,12 @@ export class Scope {
   readonly allowActiveTesting: boolean;
   readonly allowPrivate: boolean;
   readonly stagingUrl?: string;
+  readonly signal?: AbortSignal;
+  readonly onRequest?: (e: NetEvent) => void;
 
   constructor(config: ScopeConfig) {
+    this.signal = config.signal;
+    this.onRequest = config.onRequest;
     this.allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase().trim()));
     this.allowActiveTesting = config.allowActiveTesting ?? false;
     this.allowPrivate = config.allowPrivate ?? false;
