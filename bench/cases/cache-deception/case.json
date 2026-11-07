@@ -1,0 +1,16 @@
+{
+  "title": "Web cache deception: B's private object cached under a .css URL",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [ { "name": "project", "path": "/api/projects/:id", "methods": ["GET"] } ],
+      "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "project": ["proj_b_1"] } } }
+    } }
+  },
+  "mustFind": [
+    { "id": "cached-private", "check": "cache-deception", "text": "project", "state": "proven", "minSeverity": "high", "why": "Anyone can read B's project from the cache." }
+  ],
+  "mustNotFlag": [
+    { "id": "no-authz-leak", "check": "authz", "text": "proj_b_1", "forbid": "proven", "why": "The app itself enforces ownership; only the cache leaks." }
+  ]
+}

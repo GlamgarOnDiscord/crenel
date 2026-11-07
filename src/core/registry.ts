@@ -30,8 +30,12 @@ import { emailDns } from "../checks/email-dns.js";
 import { transport } from "../checks/transport.js";
 import { gitHistory } from "../checks/git-history.js";
 import { storageBuckets } from "../checks/storage-buckets.js";
+import { devServer } from "../checks/dev-server.js";
+import { aiInfra } from "../checks/ai-infra.js";
+import { vercelPreview } from "../checks/vercel-preview.js";
+import { cacheDeception } from "../checks/cache-deception.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, devServer, aiInfra, vercelPreview, cacheDeception, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

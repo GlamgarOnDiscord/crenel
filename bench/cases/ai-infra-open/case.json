@@ -1,0 +1,11 @@
+{
+  "title": "An Ollama model server open to anyone, a vector database that asks for a key",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "ollama-open", "check": "ai-infra", "text": "Ollama", "state": "proven", "minSeverity": "high", "why": "Anyone can run models on this hardware." }
+  ],
+  "mustNotFlag": [
+    { "id": "chroma-protected", "check": "ai-infra", "text": "Chroma", "forbid": "any", "why": "It answers 401." }
+  ]
+}

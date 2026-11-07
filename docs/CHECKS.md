@@ -36,6 +36,10 @@ empty list runs every read-only check.
 | transport | Plain HTTP served instead of redirected, certificate close to expiry | yes | one GET over http://, one TLS handshake |
 | git-history | Keys removed from the code but still in past commits | yes (detector match on an added line) | no (local git log) |
 | storage-buckets | S3, R2, GCS buckets the app points at, listable by anyone | yes (anonymous listing, declared host) | static; one GET per declared bucket |
+| dev-server | Vite, webpack or Next.js dev server reachable on the deployed host | yes (dev runtime signature) | GETs on the declared host |
+| ai-infra | Ollama, OpenAI-compatible model APIs, Qdrant, Chroma, Weaviate, Flowise, Langflow open without auth | yes (anonymous inventory) | GETs on declared bases |
+| vercel-preview | Vercel deployments served without the Vercel login wall | yes (200 without the wall) | one GET per declared *.vercel.app |
+| cache-deception | Private responses cached under a static-looking URL | yes (anonymous GET returns B's object) | GETs, needs allowActiveTesting and B's token |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -325,3 +329,32 @@ Lists the S3, R2 and Google Cloud Storage bucket URLs found in the scanned code
 (leads). When a bucket's host is in `scope.allowedHosts`, one anonymous GET on
 its listing endpoint (first key only) proves whether anyone can enumerate its
 files.
+
+## dev-server
+
+`/@vite/client`, `/_next/webpack-hmr`, `/webpack-dev-server`, `/sockjs-node/info`
+on the staging host. A hit needs the dev runtime in the body (`createHotContext`,
+an HMR event stream…) and a body different from a random path's.
+
+## ai-infra
+
+Inventory endpoints of AI services, anonymous GETs only: Ollama `/api/tags`, an
+OpenAI-compatible `/v1/models`, Qdrant `/collections`, Chroma's collection list,
+Weaviate `/v1/schema`, Flowise `/api/v1/chatflows`, Langflow `/api/v1/flows/`.
+Bases: the staging URL plus `options.ai-infra.urls` (e.g. a model server on its
+own port), declared hosts only. Only counts and service names are reported.
+
+## vercel-preview
+
+Every `*.vercel.app` host declared in scope or found in the code: a declared one
+that serves the app to an anonymous visitor, without the Vercel login wall, is
+public (list your production alias in `options.vercel-preview.production`).
+Undeclared ones found in the code are listed as leads, never requested.
+
+## cache-deception
+
+With `allowActiveTesting` and account B's token: for each declared resource,
+B's object is requested at a static-looking URL (`/x/<nonce>.css`, `;<nonce>.css`,
+`.css?…`), then the same URL is requested anonymously. B's object coming back to
+the anonymous caller, while the canonical URL refuses it, proves the cache
+stores private pages. Each URL carries a unique nonce, so real users never get it.
