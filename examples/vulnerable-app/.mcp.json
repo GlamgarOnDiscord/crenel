@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "local-tool": { "command": "node", "args": ["tool.js"], "env": { "TOKEN": "demo" } }
+  }
+}

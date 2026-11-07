@@ -44,10 +44,11 @@ pnpm install
 pnpm demo          # scans the bundled vulnerable example, offline
 ```
 
-You should see proven `critical` findings (a Stripe secret key and a known-malicious
-package shipped in the example), plus `leads` from the authorization matrix and CI
-checks. The command exits non-zero on purpose: a proven high/critical finding is a
-CI gate, not a crash.
+The bundled example is intentionally vulnerable and exercises every check: you
+should see proven `critical` findings (a Stripe secret key, a known-malicious
+package) plus `leads` from the authorization matrix, CI, Dockerfile, committed
+`.env`, source map, agent/MCP config and client-exposed env checks. The command
+exits non-zero on purpose: a proven high/critical finding is a CI gate, not a crash.
 
 ## Use it on your project
 
