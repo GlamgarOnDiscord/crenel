@@ -4,7 +4,7 @@ import { ArrowUp, Check, ChevronDown, Eye, FolderGit2, Globe, Goal, Hand, Mic, P
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type ModeId } from "../lib/workspace.tsx";
+import { GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type GoalId, type ModeId } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -110,13 +110,24 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
   const [files, setFiles] = useState<string[]>([]);
   const [slashIdx, setSlashIdx] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  // "/goal" opens a second list with the goals instead of sending the command.
+  const [goalStage, setGoalStage] = useState(false);
   const placement = variant === "dock" ? "up" : "down";
 
   const slashQuery = /^\/\S*$/.test(value) ? value.toLowerCase() : null;
-  const slashItems = slashQuery !== null ? SLASH.filter((s) => s.cmd.startsWith(slashQuery)) : [];
+  const goalItems = GOALS.filter((g) => g.id !== "none").map((g) => ({ cmd: g.id, label: g.label, desc: g.desc }));
+  const slashItems = goalStage ? goalItems : slashQuery !== null ? SLASH.filter((s) => s.cmd.startsWith(slashQuery)).map((s) => ({ ...s, label: s.cmd })) : [];
   const slashOpen = slashItems.length > 0 && !slashDismissed;
 
-  useEffect(() => { setSlashIdx(0); setSlashDismissed(false); }, [slashQuery]);
+  useEffect(() => { setSlashIdx(0); setSlashDismissed(false); if (!/^\/goal$/i.test(value)) setGoalStage(false); }, [slashQuery]);
+
+  function pickSlash(i: number) {
+    const item = slashItems[i];
+    if (!item) return;
+    if (goalStage) { ws.setGoal(item.cmd as GoalId); setGoalStage(false); onChange(""); return; }
+    if (item.cmd === "/goal") { onChange("/goal"); setGoalStage(true); setSlashIdx(0); return; }
+    submit(item.cmd);
+  }
   useEffect(() => { if (autoFocus) taRef.current?.focus(); }, [autoFocus]);
   useEffect(() => {
     const ta = taRef.current;
@@ -137,9 +148,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
     if (slashOpen) {
       if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashItems.length); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashItems.length) % slashItems.length); return; }
-      if (e.key === "Tab") { e.preventDefault(); onChange(slashItems[slashIdx]!.cmd + " "); return; }
-      if (e.key === "Enter") { e.preventDefault(); submit(slashItems[slashIdx]!.cmd); return; }
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setSlashDismissed(true); return; }
+      if (e.key === "Tab" && !goalStage) { e.preventDefault(); onChange(slashItems[slashIdx]!.cmd + " "); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickSlash(slashIdx); return; }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (goalStage) setGoalStage(false); else setSlashDismissed(true); return; }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
   }
@@ -151,13 +162,15 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
     <div className={cn("composer-wrap", `is-${variant}`)}>
       <div className="composer">
         {slashOpen && (
-          <div className="slashmenu" role="listbox" id={`${id}-slash`} aria-label="Commandes">
+          <div className="slashmenu" role="listbox" id={`${id}-slash`} aria-label={goalStage ? "Objectifs" : "Commandes"}>
+            {goalStage && <div className="slash-head"><Goal size={13} aria-hidden="true" />Objectif: l'agent continue jusqu'à l'atteindre</div>}
             {slashItems.map((s, i) => (
               <div key={s.cmd} id={`${id}-slash-${i}`} role="option" aria-selected={i === slashIdx}
-                className={cn("slash-opt", i === slashIdx && "on")}
+                className={cn("slash-opt", goalStage && "goal", i === slashIdx && "on")}
                 onMouseEnter={() => setSlashIdx(i)}
-                onMouseDown={(e) => { e.preventDefault(); submit(s.cmd); }}>
-                <span className="mono">{s.cmd}</span><span className="slash-d">{s.desc}</span>
+                onMouseDown={(e) => { e.preventDefault(); pickSlash(i); }}>
+                <span className={goalStage ? "slash-g" : "mono"}>{s.label}</span><span className="slash-d">{s.desc}</span>
+                {goalStage && ws.goal === s.cmd && <Check size={14} className="slash-ck" aria-hidden="true" />}
               </div>
             ))}
           </div>
@@ -187,11 +200,17 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
             setFiles((l) => [...l, ...names.filter((n) => !l.includes(n))]);
             e.target.value = "";
           }} />
-          <Tooltip content="Joindre un fichier">
-            <button type="button" className="tbtn icon" aria-label="Joindre un fichier" onClick={() => fileRef.current?.click()}>
-              <Plus size={16} />
-            </button>
-          </Tooltip>
+          <Picker
+            label="Ajouter" value={ws.goal as string} placement={placement} buttonClassName="tbtn icon"
+            onChange={(v) => { if (v === "__file") fileRef.current?.click(); else ws.setGoal(v as GoalId); }}
+            options={[
+              { value: "__file", label: "Joindre un fichier", icon: <Paperclip size={15} /> },
+              ...GOALS.filter((g) => g.id !== "none").map((g) => ({ value: g.id as string, label: g.label, desc: g.desc, icon: <Goal size={15} /> })),
+              ...(ws.goal !== "none" ? [{ value: "none", label: "Retirer l'objectif", icon: <X size={15} /> }] : []),
+            ]}
+          >
+            <Plus size={16} aria-hidden="true" />
+          </Picker>
           <Picker
             label="Permissions" value={ws.mode} onChange={ws.setMode} placement={placement}
             buttonClassName={cn("tbtn", ws.mode === "bypass" && "warn")}
@@ -200,13 +219,13 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
             <ModeIcon size={14} aria-hidden="true" /><span className="tlabel">{ws.mode === "bypass" ? "Bypass" : MODES.find((m) => m.id === ws.mode)!.label}</span>
             <ChevronDown size={13} className="faint" aria-hidden="true" />
           </Picker>
-          <Picker
-            label="Objectif" value={ws.goal} onChange={ws.setGoal} placement={placement}
-            buttonClassName={cn("tbtn", ws.goal !== "none" && "on")}
-            options={GOALS.map((g) => ({ value: g.id, label: g.label, desc: g.desc, icon: <Goal size={15} /> }))}
-          >
-            <Goal size={14} aria-hidden="true" /><span className="tlabel">{goalOf(ws.goal).short}</span>
-          </Picker>
+          {ws.goal !== "none" && (
+            <Tooltip content={`Objectif: ${goalOf(ws.goal).label} · cliquer pour le retirer`}>
+              <button type="button" className="tbtn icon goal-on" aria-label={`Retirer l'objectif: ${goalOf(ws.goal).label}`} onClick={() => ws.setGoal("none")}>
+                <Goal size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
           <span className="sp" />
           {extra}
           <ModelMenu placement={placement} />
