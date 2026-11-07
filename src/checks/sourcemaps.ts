@@ -6,9 +6,9 @@
 // ship maps on purpose for error tracking.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative, basename } from "node:path";
+import { basename } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles } from "../core/walk.js";
+import { walkFiles, relative } from "../core/walk.js";
 
 const CODE_EXT = new Set([".js", ".mjs", ".cjs", ".css"]);
 

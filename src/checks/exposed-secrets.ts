@@ -8,9 +8,9 @@
 // dist/, where anyone can read it with view-source.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, relative } from "../core/walk.js";
 
 interface SecretPattern {
   id: string;

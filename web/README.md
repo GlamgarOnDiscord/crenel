@@ -32,7 +32,9 @@ src/
   pages/          Overview (home composer), Agent (transcript), Scans (tasks),
                   Findings, FindingDetail, Targets, Onboarding, Secrets,
                   Authorization, Tests, Integrations, Settings, Landing
-  data/mock.ts    demo data (no backend)
+  data/api.ts     live data from crenel serve, demo fallback
+  data/live-run.ts  Agent page: runs over SSE, approvals, stop, goals
+  data/mock.ts    demo data (fallback)
   lib/            types, cn, links, workspace (shared composer choices)
 ```
 
@@ -44,5 +46,8 @@ src/
 - Colors come from tokens, never literals. Keep a 16px side gutter and let rows
   stack at phone width.
 
-In production the console talks to a backend; in this repo it renders mock data
-and a scripted agent run, with a working prompt, command palette and filters.
+Served by `crenel serve` (see the root README), the console reads the local
+API through `src/data/api.ts` and the Agent page streams real runs
+(`src/data/live-run.ts`). Without that API (`pnpm dev` alone, a static build,
+the SSR tests) it falls back to the demo data in `src/data/mock.ts` and a
+scripted agent run.

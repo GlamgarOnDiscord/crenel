@@ -1,0 +1,62 @@
+# Crenel as a GitHub Action: scan, upload SARIF to code scanning, and fail the
+# job only on a PROVEN finding at or above `fail-on`. Leads never fail a build.
+#
+#   permissions: { contents: read, security-events: write }
+#   steps:
+#     - uses: actions/checkout@<sha>
+#     - uses: <owner>/crenel@<sha>
+#       with:
+#         config: crenel.config.yaml
+#
+# Offline and read-only unless your config turns on active testing for hosts
+# you declared. No account, no model, no token sent anywhere.
+name: Crenel scan
+description: Defensive security harness for SaaS. Proven findings only, with a replayable proof each.
+branding:
+  icon: shield
+  color: orange
+inputs:
+  config:
+    description: Path to crenel.config.yaml
+    default: crenel.config.yaml
+  fail-on:
+    description: Fail on a proven finding at or above this severity (critical, high, medium, low)
+    default: high
+  sarif:
+    description: Where to write the SARIF report
+    default: crenel.sarif
+  upload-sarif:
+    description: Upload the SARIF to GitHub code scanning (needs security-events write)
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      with:
+        version: 10
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: 22
+    # Build Crenel from the action's own checkout; never run install scripts.
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
+    - id: scan
+      shell: bash
+      env:
+        CRENEL_CONFIG: ${{ inputs.config }}
+        CRENEL_SARIF: ${{ inputs.sarif }}
+        CRENEL_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set +e
+        node "$GITHUB_ACTION_PATH/dist/cli.js" scan --config "$CRENEL_CONFIG" --sarif "$CRENEL_SARIF" --fail-on "$CRENEL_FAIL_ON"
+        echo "exit=$?" >> "$GITHUB_OUTPUT"
+    - if: ${{ inputs.upload-sarif == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@9418214df1f2c4b8128c770156c409013b07d6b9 # v3.39.3
+      with:
+        sarif_file: ${{ inputs.sarif }}
+        category: crenel
+    - shell: bash
+      env:
+        CRENEL_EXIT: ${{ steps.scan.outputs.exit }}
+      run: exit "${CRENEL_EXIT:-2}"

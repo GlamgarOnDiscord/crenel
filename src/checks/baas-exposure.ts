@@ -26,9 +26,9 @@
 // that a GET can prove, so they are leads that point at their permission model.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
-import { walkFiles, extOf } from "../core/walk.js";
+import { walkFiles, extOf, relative } from "../core/walk.js";
 import { safeFetch } from "../core/net.js";
 import type { Scope } from "../core/scope.js";
 import { jwtPayload } from "./exposed-secrets.js";

@@ -5,9 +5,9 @@
 // and offline.
 
 import { readFileSync, statSync } from "node:fs";
-import { relative, basename } from "node:path";
+import { basename } from "node:path";
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
-import { walkFiles } from "../core/walk.js";
+import { walkFiles, relative } from "../core/walk.js";
 
 const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 

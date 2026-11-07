@@ -3,7 +3,17 @@
 // wants to keep rather than re-implementing the traversal.
 
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative as nodeRelative, sep } from "node:path";
+
+/**
+ * path.relative with forward slashes on every OS. Finding ids and locations are
+ * built from it, so a finding keeps the same id on Windows and on Linux (and a
+ * baseline made on one still matches on the other).
+ */
+export function relative(from: string, to: string): string {
+  const r = nodeRelative(from, to);
+  return sep === "/" ? r : r.split(sep).join("/");
+}
 
 export interface WalkOptions {
   /** Directory names to never descend into. Defaults to node_modules and .git. */
