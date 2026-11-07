@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crenel motion</title>
+<style>
+  :root { --dark: #0B0C10; --light: #F4F5F8; --ink: #ECEDF2; --ink-dark: #1B1D26; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--dark); color: var(--ink); }
+  section { padding: 32px 24px; }
+  section.light { background: var(--light); color: var(--ink-dark); }
+  h2 { margin: 0 0 20px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+  .grid { display: flex; flex-wrap: wrap; gap: 28px; }
+  figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  figure img.big { width: 300px; height: 300px; border-radius: 22px; }
+  .small { display: flex; align-items: center; gap: 10px; }
+  .small img { width: 32px; height: 32px; border-radius: 7px; }
+  .small img.r { border-radius: 50%; }
+  figcaption { font-size: 12px; opacity: .7; }
+  @media (max-width: 680px) { figure img.big { width: 100%; height: auto; } figure { width: 100%; } }
+</style>
+</head>
+<body>
+<section>
+  <h2>Fond sombre #0B0C10</h2>
+  <div class="grid">
+    <figure><img class="big" src="crenel-idle.svg" alt=""><div class="small"><img src="crenel-idle.svg" alt=""><img class="r" src="crenel-loader.svg" alt=""><figcaption>idle</figcaption></div></figure>
+    <figure><img class="big" src="crenel-working.svg" alt=""><div class="small"><img src="crenel-working.svg" alt=""><figcaption>working</figcaption></div></figure>
+    <figure><img class="big" src="crenel-found.svg" alt=""><div class="small"><img src="crenel-found.svg" alt=""><figcaption>found (rejoue au rechargement)</figcaption></div></figure>
+    <figure><img class="big" src="crenel-loader.svg" alt=""><div class="small"><img src="crenel-loader.svg" alt=""><img class="r" src="crenel-loader.svg" alt="" style="width:24px;height:24px"><img src="crenel-loader.svg" alt="" style="width:40px;height:40px"><figcaption>loader 32 / 24 / 40</figcaption></div></figure>
+  </div>
+</section>
+<section class="light">
+  <h2>Fond clair</h2>
+  <div class="grid">
+    <figure><img class="big" src="crenel-idle.svg" alt=""><div class="small"><img src="crenel-idle.svg" alt=""><img class="r" src="crenel-loader.svg" alt=""><figcaption>idle</figcaption></div></figure>
+    <figure><img class="big" src="crenel-working.svg" alt=""><div class="small"><img src="crenel-working.svg" alt=""><figcaption>working</figcaption></div></figure>
+    <figure><img class="big" src="crenel-found.svg" alt=""><div class="small"><img src="crenel-found.svg" alt=""><figcaption>found</figcaption></div></figure>
+    <figure><img class="big" src="crenel-loader.svg" alt=""><div class="small"><img src="crenel-loader.svg" alt=""><img class="r" src="crenel-loader.svg" alt="" style="width:24px;height:24px"><img src="crenel-loader.svg" alt="" style="width:40px;height:40px"><figcaption>loader 32 / 24 / 40</figcaption></div></figure>
+  </div>
+</section>
+</body>
+</html>
