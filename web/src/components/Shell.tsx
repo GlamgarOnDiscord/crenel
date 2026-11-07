@@ -19,7 +19,7 @@ const nav = [
   { group: "Analyses", items: [
     { to: "/app/secrets", icon: KeyRound, label: "Secrets", count: 3 },
     { to: "/app/authz", icon: LockKeyhole, label: "Autorisation" },
-    { to: "/app/tests", icon: FileCheck2, label: "Tests générés", count: 4 },
+    { to: "/app/tests", icon: FileCheck2, label: "Tests générés", count: 7 },
   ]},
   { group: "Réglages", items: [
     { to: "/app/integrations", icon: Plug, label: "Intégrations" },
