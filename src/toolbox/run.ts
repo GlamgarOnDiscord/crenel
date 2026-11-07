@@ -146,11 +146,33 @@ async function runToolInner(i: ToolRunInput): Promise<ToolRunOutput> {
     return finish({ ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr) }, p.findings, verdicts);
   }
 
-  const r = await runConfined({ tool: "katana", scope: i.scope, argv: [], argvWithProxy: (px) => katanaArgv(target!, px, o), image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
+  // katana's own JSON output drops responses it deems duplicates (two 401s
+  // with the same body), so the routes also come from what the proxy actually
+  // forwarded for plain HTTP: deterministic, and observed by Crenel itself.
+  const seen: Route[] = [];
+  const onEvent = (e: ProxyEvent) => {
+    i.onEvent?.(e);
+    if (e.via === "http" && !e.refused && e.status !== undefined) {
+      try { const u = new URL(e.target); seen.push({ method: e.method, url: e.target, path: u.pathname, status: e.status }); } catch { /* ignore */ }
+    }
+  };
+  const r = await runConfined({ tool: "katana", scope: i.scope, argv: [], argvWithProxy: (px) => katanaArgv(target!, px, o), image: o.image, limits, proxy, onEvent, signal: i.signal });
   const p = parseKatana(r.stdout, i.scope);
+  const routes = mergeRoutes(p.routes, seen);
   const declared = ((i.config.options["authz-matrix"] ?? {}) as { resources?: { path: string }[] }).resources ?? [];
-  const suggestions = suggestResources(p.routes, declared);
-  return { ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr), routes: p.routes, suggestions, findings: katanaFindings(suggestions) };
+  const suggestions = suggestResources(routes, declared);
+  return { ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr), routes, suggestions, findings: katanaFindings(suggestions) };
+}
+
+/** Union of routes, one per method + origin + path. */
+export function mergeRoutes(a: Route[], b: Route[]): Route[] {
+  const out = new Map<string, Route>();
+  for (const r of [...a, ...b]) {
+    let key = `${r.method} ${r.url}`;
+    try { const u = new URL(r.url); key = `${r.method} ${u.origin}${u.pathname}`; } catch { /* keep */ }
+    if (!out.has(key)) out.set(key, r);
+  }
+  return [...out.values()];
 }
 
 const tail = (s: string) => s.trim().split("\n").slice(-5).join("\n").slice(-800);

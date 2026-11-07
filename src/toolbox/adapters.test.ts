@@ -7,7 +7,7 @@ import { Scope } from "../core/scope.js";
 import { REGISTRY } from "../core/registry.js";
 import { validateClaim } from "../agent/validators.js";
 import { fence } from "../agent/untrusted.js";
-import { applyVerdicts, katanaArgv, nucleiArgv, ToolboxOptions, trufflehogArgv } from "./run.js";
+import { applyVerdicts, katanaArgv, mergeRoutes, nucleiArgv, ToolboxOptions, trufflehogArgv } from "./run.js";
 import { katanaFindings, parseKatana, parseNuclei, parseTrufflehog, suggestResources } from "./adapters.js";
 
 // Sample outputs, shaped like the real tools' JSON lines (nuclei 3.11, katana
@@ -107,4 +107,15 @@ test("tool argv: filtered nuclei templates and tags, no interactsh, bounded kata
   // Options can narrow, never widen.
   assert.throws(() => ToolboxOptions.parse({ nuclei: { tags: ["intrusive"] } }));
   assert.equal(ToolboxOptions.parse({ nuclei: { tags: ["exposure"] } }).nuclei.tags[0], "exposure");
+});
+
+test("katana routes are merged with what the proxy forwarded (katana's output drops look-alike responses)", () => {
+  const fromKatana = [{ method: "GET", url: "http://127.0.0.1:4580/", path: "/" }];
+  const fromProxy = [
+    { method: "GET", url: "http://127.0.0.1:4580/", path: "/", status: 200 },
+    { method: "GET", url: "http://127.0.0.1:4580/api/invoices/inv_b_1", path: "/api/invoices/inv_b_1", status: 401 },
+  ];
+  const all = mergeRoutes(fromKatana, fromProxy);
+  assert.equal(all.length, 2);
+  assert.deepEqual(suggestResources(all).map((s) => s.path), ["/api/invoices/:id"]);
 });
