@@ -2,6 +2,10 @@
   "name": "demo-vulnerable-app",
   "version": "0.0.0",
   "private": true,
+  "description": "Deliberately vulnerable fixture for Crenel. Never install it: a dependency below is a known-malicious version.",
+  "engines": {
+    "node": "0.0.0-do-not-install"
+  },
   "scripts": {
     "postinstall": "node ./scripts/setup.js",
     "build": "vite build"
