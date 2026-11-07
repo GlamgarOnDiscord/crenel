@@ -8,10 +8,10 @@ A defensive security harness for SaaS. It helps you attack your own app before a
 
 Bastion exists because new SaaS, and especially apps built fast with AI, keep shipping the same few bugs: a secret in the client bundle, and one account able to read another account's data. Bastion checks for exactly those, proves them so you do not chase false alarms, and hands you a regression test so they cannot come back.
 
-> Status: early but real. The core, the scope guard and nine checks (secrets,
+> Status: early but real. The core, the scope guard and ten checks (secrets,
 > dependency-risk, ci-hardening, headers, authz-matrix, cloudflare-audit,
-> mcp-surface, dockerfile, committed-env) run today, with 56 tests. More depth is
-> planned (see the roadmap).
+> mcp-surface, dockerfile, committed-env, sourcemaps) run today, with 60 tests.
+> More depth is planned (see the roadmap).
 
 ## The console
 

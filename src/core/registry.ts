@@ -12,8 +12,9 @@ import { cloudflareAudit } from "../checks/cloudflare-audit.js";
 import { mcpSurface } from "../checks/mcp-surface.js";
 import { dockerfile } from "../checks/dockerfile.js";
 import { committedEnv } from "../checks/committed-env.js";
+import { sourcemaps } from "../checks/sourcemaps.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs nine checks. Each is deterministic and read-only, and marks every
+Crenel runs ten checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -18,6 +18,7 @@ empty list runs every read-only check.
 | mcp-surface | Committed agent/MCP config and the servers it declares | no (leads) | no |
 | dockerfile | Container hardening in your Dockerfile(s) | no (leads) | no |
 | committed-env | Committed `.env` files | no (leads) | no |
+| sourcemaps | Source maps shipped with the client bundle | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -88,3 +89,12 @@ test accounts; offline it emits a runnable isolation test matrix (a lead to wire
 into CI). With a `stagingUrl`, two tokens, and active testing enabled for an
 owned host, it replays each cross-tenant request and reports any that did not
 return 401/403/404 as a **proven** broken-authorization finding.
+
+## sourcemaps
+
+Looks under `projectDir` for `.map` files and for `sourceMappingURL` comments
+that point at an external (non-`data:`) map. A shipped source map hands anyone
+the original, unminified source. Leads (some teams ship maps for error tracking).
+Fix: upload maps to your error tracker at build time and strip them from the
+public bundle.
+
