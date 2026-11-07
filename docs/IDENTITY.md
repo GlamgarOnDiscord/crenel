@@ -1,4 +1,4 @@
-# Crenel — identité de marque
+# Crenel, identité de marque
 
 Document de travail, nuit du 07/11/2026. Fondé sur la recherche dans
 `/root/research_notes/Bastion identite et app/`.
@@ -23,6 +23,17 @@ veut dire quelque chose, au lieu d'un bouclier générique :
 Un seul personnage, muet, remixable (comme Octocat, le gopher, Ferris). Il tient
 une clé dans le bec. Jamais de cadenas, de capuche de hacker, de globe.
 
+### Icône (07/11, après-midi)
+
+Version retenue par défaut : choucas indigo à **nuque argentée** (le signe de
+l'espèce), **yeux et clé dorés**, qui surgit du coin bas-gauche sur un fond
+pervenche uni. Fichier maître `web/public/crenel-icon-1024.png`, exports 512, 180,
+64 et 32. Méthode : skill `s1dashu/ip-as-logo-skill` (MIT) : une silhouette ronde,
+peu de formes, pas de pointes, perso dominant, rendu graphique doux ; générée en
+GPT Image 2. Les dessins SVG codés à la main ont été écartés (jugés moches ou
+inquiétants). Alternative gardée : la même clé avec une houppe à la place de la
+nuque. Reste à faire : une version vectorielle propre.
+
 ## Couleur
 
 - Accent **or-ambre** `#F2B01E` (la clé volée, un trésor), encre `#F7C84E` pour le
@@ -36,7 +47,8 @@ une clé dans le bec. Jamais de cadenas, de capuche de hacker, de globe.
 
 ## Typographie
 
-- **Display / wordmark** : Mona Sans (OFL, GitHub).
+- **Display / wordmark** : Mona Sans (OFL, GitHub). Logotype en Mona Sans **Wide 900**
+  (axe `wdth` 125), minuscules, suivi d'un petit carré ambre.
 - **UI** : Instrument Sans (OFL).
 - **Mono** (code, chemins, preuves) : JetBrains Mono (OFL). Upgrade possible :
   Commit Mono (OFL), à auto-héberger.
