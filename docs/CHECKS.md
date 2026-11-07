@@ -40,6 +40,7 @@ empty list runs every read-only check.
 | ai-infra | Ollama, OpenAI-compatible model APIs, Qdrant, Chroma, Weaviate, Flowise, Langflow open without auth | yes (anonymous inventory) | GETs on declared bases |
 | vercel-preview | Vercel deployments served without the Vercel login wall | yes (200 without the wall) | one GET per declared *.vercel.app |
 | cache-deception | Private responses cached under a static-looking URL | yes (anonymous GET returns B's object) | GETs, needs allowActiveTesting and B's token |
+| auth-config | Supabase open sign-up without email confirmation, Better Auth OpenAPI published | yes (public settings) | GETs |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -355,7 +356,9 @@ an HMR event stream…) and a body different from a random path's.
 
 Inventory endpoints of AI services, anonymous GETs only: Ollama `/api/tags`, an
 OpenAI-compatible `/v1/models`, Qdrant `/collections`, Chroma's collection list,
-Weaviate `/v1/schema`, Flowise `/api/v1/chatflows`, Langflow `/api/v1/flows/`.
+Weaviate `/v1/schema`, Flowise `/api/v1/chatflows`, Langflow `/api/v1/flows/`, and MCP
+servers over SSE (`/sse` answering `event: endpoint` without credentials; only
+the first 32 bytes are read).
 Bases: the staging URL plus `options.ai-infra.urls` (e.g. a model server on its
 own port), declared hosts only. Only counts and service names are reported.
 
@@ -373,3 +376,11 @@ B's object is requested at a static-looking URL (`/x/<nonce>.css`, `;<nonce>.css
 `.css?…`), then the same URL is requested anonymously. B's object coming back to
 the anonymous caller, while the canonical URL refuses it, proves the cache
 stores private pages. Each URL carries a unique nonce, so real users never get it.
+
+## auth-config
+
+Supabase `/auth/v1/settings` read with the bundle's public key: open sign-up with
+email (or phone) auto-confirm means anyone can create a working account, which
+opens every RLS policy that only checks "signed in". Better Auth's OpenAPI
+reference (`/api/auth/reference`) answering in production publishes every auth
+route.

@@ -21,6 +21,21 @@ const PROBES: Probe[] = [
   { path: "/api/v1/flows/", what: "Langflow agent builder", severity: "critical", prove: (j) => (Array.isArray(j) ? `${j.length} flow(s) listed` : null) },
 ];
 
+/**
+ * An MCP server over SSE answers GET /sse with an `event: endpoint` frame that
+ * hands out a session URL: no auth in front means anyone can list and call its
+ * tools. Read only the first frame, then stop: the 32-byte cap ends the read on the first frame, the stream itself never ends.
+ */
+async function mcpOpen(base: string, ctx: CheckContext): Promise<string | null> {
+  for (const path of ["/sse", "/mcp/sse"]) {
+    try {
+      const res = await safeFetch(base + path, ctx.scope, { headers: { accept: "text/event-stream" }, maxBytes: 32 });
+      if (res.status === 200 && /event:\s*endpoint/.test(res.body)) return path;
+    } catch { /* a stream cut by the cap still yields its first frame; errors mean no server */ }
+  }
+  return null;
+}
+
 export const aiInfra: Check = {
   name: "ai-infra",
   title: "Model servers, vector databases and agent builders open without auth",
@@ -47,6 +62,18 @@ export const aiInfra: Check = {
           regressionHint: `${base}${p.path} must require credentials.`,
         });
       }
+    }
+    for (const base of bases) {
+      const path = await mcpOpen(base, ctx);
+      if (!path) continue;
+      out.push({
+        id: `ai-infra:${base}${path}`, check: "ai-infra", title: `MCP server open without auth at ${base}${path}`, severity: "critical", state: "proven",
+        location: base + path,
+        description: `${base}${path} opened an MCP session for an anonymous caller (event: endpoint). Anyone can list the server's tools and call them with its credentials.`,
+        remediation: "Require OAuth or a bearer token on the MCP endpoint (the MCP authorization spec), or keep the server on a private network.",
+        proof: { method: "anonymous GET of the SSE endpoint, first frame only", replay: `curl -sN -m 3 '${base}${path}' | head -3`, evidence: "HTTP 200, event: endpoint (session URL not kept)" },
+        regressionHint: `${base}${path} must answer 401 without credentials.`,
+      });
     }
     ctx.log(`ai-infra: ${bases.length} base(s), ${out.length} open service(s)`);
     return out;

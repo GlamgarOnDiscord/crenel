@@ -73,3 +73,23 @@ test("cache-deception: a cache keyed by extension serves B's object to anyone; n
     assert.equal(found[0]!.severity, "critical");
   } finally { srv.close(); }
 });
+
+test("ai-infra: an MCP server handing out an SSE session without auth is proven, without waiting for the stream to end", async () => {
+  const { srv, base } = await serve((req, res) => {
+    if (req.url === "/sse") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("event: endpoint\ndata: /messages?sessionId=abc123def456\n\n"); return; } // never ends
+    res.writeHead(404); res.end();
+  });
+  try {
+    const t0 = Date.now();
+    const found = await aiInfra.run(ctx(base));
+    assert.deepEqual(found.map((f) => f.id.replace(base, "")), ["ai-infra:/sse"]);
+    assert.ok(Date.now() - t0 < 5000);
+  } finally { srv.closeAllConnections(); srv.close(); }
+});
+
+test("auth-config: Better Auth's OpenAPI reference published is a low finding", async () => {
+  const { authConfig } = await import("./auth-config.js");
+  const { srv, base } = await serve((req, res) => { if (req.url === "/api/auth/reference") { res.writeHead(200); return res.end('<script id="api-reference" data-url="/api/auth/open-api/generate-schema"></script><!-- scalar -->'); } res.writeHead(404); res.end(); });
+  try { assert.deepEqual((await authConfig.run(ctx(base))).map((f) => f.id), ["auth-config:better-auth-openapi:/api/auth/reference"]); }
+  finally { srv.close(); }
+});
