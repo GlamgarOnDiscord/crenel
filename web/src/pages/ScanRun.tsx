@@ -28,6 +28,12 @@ export function ScanRun() {
     return () => clearTimeout(t);
   }, [shown, running]);
 
+  // Clear any in-flight stream interval on unmount, so leaving the page mid-reply
+  // does not keep firing setState on an unmounted component.
+  useEffect(() => () => {
+    if (streamRef.current !== null) window.clearInterval(streamRef.current);
+  }, []);
+
   function send() {
     const q = input.trim();
     if (!q || streamRef.current !== null) return;
