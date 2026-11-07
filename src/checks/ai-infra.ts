@@ -8,6 +8,7 @@
 
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
+import { osvAdvisories } from "./dependency-risk.js";
 
 interface Probe { path: string; what: string; severity: Severity; prove: (j: unknown) => string | null }
 const arr = (x: unknown, k: string): unknown[] | null => (x && typeof x === "object" && Array.isArray((x as Record<string, unknown>)[k]) ? (x as Record<string, unknown[]>)[k]! : null);
@@ -63,6 +64,38 @@ async function mcpHttpOpen(base: string, ctx: CheckContext): Promise<{ path: str
   return null;
 }
 
+/**
+ * The version a service announces on its public version endpoint, with the
+ * package OSV knows it by. Each service is identified by a second signature of
+ * its own (Flowise's ping, Chroma's heartbeat, Ollama's banner...), so a JSON
+ * {"version"} from anything else is never taken for it.
+ */
+export interface ServiceVersion { service: string; ecosystem: string; pkg: string; version: string; url: string }
+const SEMVER = /^v?(\d+\.\d+\.\d+[\w.+-]*)$/;
+async function getJson(url: string, ctx: CheckContext): Promise<unknown> {
+  try { const r = await safeFetch(url, ctx.scope, { headers: { accept: "application/json" }, maxBytes: 64 * 1024 }); return r.status === 200 ? JSON.parse(r.body) : undefined; } catch { return undefined; }
+}
+async function getText(url: string, ctx: CheckContext): Promise<string> {
+  try { const r = await safeFetch(url, ctx.scope, { maxBytes: 1024 }); return r.status === 200 ? r.body : ""; } catch { return ""; }
+}
+const ver = (v: unknown) => (typeof v === "string" ? SEMVER.exec(v.trim())?.[1] : undefined);
+
+export async function serviceVersions(base: string, ctx: CheckContext): Promise<ServiceVersion[]> {
+  const out: ServiceVersion[] = [];
+  const add = (service: string, ecosystem: string, pkg: string, version: string | undefined, url: string) => { if (version) out.push({ service, ecosystem, pkg, version, url }); };
+  const v1 = (await getJson(`${base}/api/v1/version`, ctx)) as { version?: unknown; package?: unknown } | undefined;
+  if (v1 && typeof v1.package === "string" && /langflow/i.test(v1.package)) add("Langflow", "PyPI", "langflow", ver(v1.version), `${base}/api/v1/version`);
+  else if (v1 && (await getText(`${base}/api/v1/ping`, ctx)).trim() === "pong") add("Flowise", "npm", "flowise", ver(v1.version), `${base}/api/v1/version`);
+  const hb = (await getJson(`${base}/api/v2/heartbeat`, ctx)) as Record<string, unknown> | undefined;
+  if (hb && typeof hb === "object" && "nanosecond heartbeat" in hb) add("Chroma", "PyPI", "chromadb", ver(await getJson(`${base}/api/v2/version`, ctx)), `${base}/api/v2/version`);
+  const ready = (await getJson(`${base}/health/readiness`, ctx)) as { litellm_version?: unknown } | undefined;
+  if (ready && typeof ready === "object") add("LiteLLM", "PyPI", "litellm", ver(ready.litellm_version), `${base}/health/readiness`);
+  const cfg = (await getJson(`${base}/api/config`, ctx)) as { name?: unknown; version?: unknown } | undefined;
+  if (cfg && typeof cfg.name === "string" && /open webui/i.test(cfg.name)) add("Open WebUI", "PyPI", "open-webui", ver(cfg.version), `${base}/api/config`);
+  if (/^Ollama is running/.test(await getText(`${base}/`, ctx))) add("Ollama", "Go", "github.com/ollama/ollama", ver(((await getJson(`${base}/api/version`, ctx)) as { version?: unknown } | undefined)?.version), `${base}/api/version`);
+  return out;
+}
+
 export const aiInfra: Check = {
   name: "ai-infra",
   title: "Model servers, vector databases and agent builders open without auth",
@@ -114,6 +147,15 @@ export const aiInfra: Check = {
         proof: { method: "anonymous MCP initialize and tools/list over POST (handshake and list only)", replay: `curl -s -X POST -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' --data '${INIT}' '${base}${open.path}'`, evidence: `HTTP 200, protocolVersion returned${count} (tool names not kept)` },
         regressionHint: `${base}${open.path} must answer 401 without credentials.`,
       });
+    }
+    // Versions announced publicly, checked against OSV when dependency-risk.osv is on and api.osv.dev declared.
+    const osvOn = !!((ctx.options["dependency-risk"] ?? {}) as { osv?: boolean }).osv && ctx.scope.isHostAllowed("https://api.osv.dev/");
+    for (const base of osvOn ? bases : []) {
+      for (const sv of await serviceVersions(base, ctx)) {
+        const adv = await osvAdvisories(new Set([`${sv.ecosystem}::${sv.pkg}@${sv.version}`]), ctx, sv.url);
+        out.push(...adv.map((f) => ({ ...f, id: f.id.replace("dependency-risk:advisory:", `ai-infra:advisory:${new URL(base).host}:`), check: "ai-infra", title: `${sv.service} at ${new URL(base).host}: ${f.title}`, description: `${f.description} The version was read from ${sv.url}, which answers anyone.` })));
+        if (!adv.length) ctx.log(`ai-infra: ${sv.service} ${sv.version} at ${base}, no OSV advisory`);
+      }
     }
     ctx.log(`ai-infra: ${bases.length} base(s), ${out.length} open service(s)`);
     return out;

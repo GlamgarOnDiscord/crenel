@@ -271,12 +271,19 @@ const OSV_SEVERITY: Record<string, Finding["severity"]> = { CRITICAL: "critical"
  * advisory's range is reported as a lead: affected, exploitability not proven.
  */
 export async function osvAdvisories(locked: Set<string>, ctx: CheckContext, lockRel: string): Promise<Finding[]> {
-  const pkgs = [...locked].map((x) => { const i = x.lastIndexOf("@"); return { name: x.slice(0, i), version: x.slice(i + 1) }; }).filter((p) => p.name && p.version);
-  const hits: { name: string; version: string; id: string }[] = [];
+  // Entries are name@version (npm) or Ecosystem::name@version (PyPI::langflow@1.8.0), as OSV names ecosystems.
+  const pkgs = [...locked].map((x) => {
+    const sep = x.indexOf("::");
+    const ecosystem = sep > 0 ? x.slice(0, sep) : "npm";
+    const rest = sep > 0 ? x.slice(sep + 2) : x;
+    const i = rest.lastIndexOf("@");
+    return { ecosystem, name: rest.slice(0, i), version: rest.slice(i + 1) };
+  }).filter((p) => p.name && p.version);
+  const hits: { ecosystem: string; name: string; version: string; id: string }[] = [];
   for (let i = 0; i < pkgs.length; i += 1000) {
     const batch = pkgs.slice(i, i + 1000);
     try {
-      const res = await safeFetch(`${OSV}/querybatch`, ctx.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queries: batch.map((p) => ({ package: { name: p.name, ecosystem: "npm" }, version: p.version })) }), maxBytes: 8 * 1024 * 1024 });
+      const res = await safeFetch(`${OSV}/querybatch`, ctx.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queries: batch.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }), maxBytes: 8 * 1024 * 1024 });
       const results = (JSON.parse(res.body) as { results?: { vulns?: { id: string }[] }[] }).results ?? [];
       results.forEach((r, k) => (r.vulns ?? []).forEach((v) => hits.push({ ...batch[k]!, id: v.id })));
     } catch (err) { ctx.log(`dependency-risk: OSV query failed: ${(err as Error).message}`); return []; }
@@ -296,7 +303,7 @@ export async function osvAdvisories(locked: Set<string>, ctx: CheckContext, lock
       severity: sev, state: "unproven", location: lockRel,
       description: `The locked version ${h.name}@${h.version} falls in the affected range of ${h.id}. Whether your app reaches the vulnerable code is not proven.`,
       remediation: `Upgrade ${h.name} past the fixed version listed in the advisory (https://osv.dev/vulnerability/${h.id}).`,
-      proof: { method: "OSV query for the exact locked version", replay: `curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"${h.name}","ecosystem":"npm"},"version":"${h.version}"}'`, evidence: h.id },
+      proof: { method: "OSV query for the exact locked version", replay: `curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"${h.name}","ecosystem":"${h.ecosystem}"},"version":"${h.version}"}'`, evidence: h.id },
     });
   }
   ctx.log(`dependency-risk: OSV, ${pkgs.length} package(s) queried, ${out.length} advisory match(es)`);

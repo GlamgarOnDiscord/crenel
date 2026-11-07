@@ -388,6 +388,15 @@ to count the tools; no tool is ever called).
 Bases: the staging URL plus `options.ai-infra.urls` (e.g. a model server on its
 own port), declared hosts only. Only counts and service names are reported.
 
+**Versions and advisories (opt-in, network).** With `dependency-risk.osv` on and
+`api.osv.dev` declared, the version each service announces on a public endpoint
+is checked against OSV: Langflow `/api/v1/version` (its `package` field),
+Flowise `/api/v1/version` (only when `/api/v1/ping` answers `pong`), Chroma
+`/api/v2/version` (after its heartbeat), LiteLLM `/health/readiness`, Open WebUI
+`/api/config`, Ollama `/api/version` (after its "Ollama is running" banner).
+Each advisory is a lead: affected version, exploitability not proven. Only the
+package name and version go to OSV.
+
 ## vercel-preview
 
 Every `*.vercel.app` host declared in scope or found in the code: a declared one

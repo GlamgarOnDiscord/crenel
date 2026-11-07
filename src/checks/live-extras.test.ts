@@ -139,3 +139,35 @@ test("ai-infra: an MCP server over Streamable HTTP that answers an anonymous ini
     assert.ok(seen.every((s) => /initialize|tools\/list/.test(s)), seen.join(", "));
   } finally { srv.close(); }
 });
+
+test("ai-infra: a Langflow version is checked against OSV (PyPI) when osv is on; a bare {version} JSON is never taken for Flowise", async () => {
+  const { aiInfra, serviceVersions } = await import("./ai-infra.js");
+  const real = globalThis.fetch;
+  const osvBodies: string[] = [];
+  let flowisePing = true;
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    const j = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
+    if (url === "https://api.osv.dev/v1/querybatch") { osvBodies.push(String(init?.body)); return j({ results: [{ vulns: [{ id: "GHSA-test-lf01" }] }] }); }
+    if (url.startsWith("https://api.osv.dev/v1/vulns/")) return j({ summary: "Unauthenticated code execution", aliases: ["CVE-0000-0001"], database_specific: { severity: "CRITICAL" } });
+    if (url === "https://lf.acme.test/api/v1/version") return j({ version: "1.8.0", main_version: "1.8.0", package: "Langflow" });
+    if (url === "https://fw.acme.test/api/v1/version") return j({ version: "3.0.4" });
+    if (url === "https://fw.acme.test/api/v1/ping") return new Response(flowisePing ? "pong" : "<html>", { status: 200 });
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  try {
+    const scope = new Scope({ allowedHosts: ["lf.acme.test", "fw.acme.test", "api.osv.dev"], allowPrivate: true });
+    const c = (u: string) => ({ scope, projectDir: ".", stagingUrl: u, options: { "dependency-risk": { osv: true } }, log: () => {} });
+    const f = (await aiInfra.run(c("https://lf.acme.test"))).filter((x) => x.id.startsWith("ai-infra:advisory:"));
+    assert.equal(f.length, 1);
+    assert.equal(f[0]!.state, "unproven");
+    assert.equal(f[0]!.severity, "critical");
+    assert.match(f[0]!.title, /^Langflow at lf\.acme\.test: langflow@1\.8\.0 is affected by GHSA-test-lf01/);
+    assert.match(osvBodies[0]!, /"ecosystem":"PyPI"/);
+    assert.deepEqual((await serviceVersions("https://fw.acme.test", c("https://fw.acme.test"))).map((s) => `${s.service}@${s.version}`), ["Flowise@3.0.4"]);
+    flowisePing = false;
+    assert.deepEqual(await serviceVersions("https://fw.acme.test", c("https://fw.acme.test")), []);
+    const off = await aiInfra.run({ ...c("https://lf.acme.test"), options: {} });
+    assert.equal(off.filter((x) => x.id.includes("advisory")).length, 0, "no OSV, no version probe");
+  } finally { globalThis.fetch = real; }
+});
