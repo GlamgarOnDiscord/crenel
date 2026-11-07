@@ -8,10 +8,10 @@ A defensive security harness for SaaS. It helps you attack your own app before a
 
 Bastion exists because new SaaS, and especially apps built fast with AI, keep shipping the same few bugs: a secret in the client bundle, and one account able to read another account's data. Bastion checks for exactly those, proves them so you do not chase false alarms, and hands you a regression test so they cannot come back.
 
-> Status: early but real. The core, the scope guard and eight checks (secrets,
+> Status: early but real. The core, the scope guard and nine checks (secrets,
 > dependency-risk, ci-hardening, headers, authz-matrix, cloudflare-audit,
-> mcp-surface, dockerfile) run today, with 52 tests. More depth is planned (see
-> the roadmap).
+> mcp-surface, dockerfile, committed-env) run today, with 56 tests. More depth is
+> planned (see the roadmap).
 
 ## The console
 
@@ -149,8 +149,9 @@ Self-contained next steps, in priority order from the Nov 2026 research
 
 Done since the first draft: the `mcp-surface` check (flags committed agent/MCP
 config, a 2026 attack surface) and the `dockerfile` check (container hardening:
-root user, unpinned base, baked secrets, ADD-from-URL, curl|sh); malware
-denylist synced from OSV in CI
+root user, unpinned base, baked secrets, ADD-from-URL, curl|sh) and the
+`committed-env` check (flags a committed .env, which holds secrets no key-shape
+scanner would catch); malware denylist synced from OSV in CI
 (`pnpm sync-denylist`, run weekly by `security.yml`); SARIF 2.1.0 output;
 JSONL audit log; regression-test generation.
 
