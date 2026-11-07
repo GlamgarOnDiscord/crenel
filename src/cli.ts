@@ -12,6 +12,7 @@ import { run } from "./core/runner.js";
 import { REGISTRY } from "./core/registry.js";
 import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
+import { triageLeads } from "./agent/triage.js";
 
 const STARTER = `# Bastion config. Declare only what you own.
 project: my-saas
@@ -123,6 +124,29 @@ async function main(): Promise<number> {
     return exitCode(result) || (regressed ? 1 : 0);
   }
 
+  if (cmd === "triage") {
+    // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
+    const configPath = (flags.config as string) ?? "bastion.config.yaml";
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const result = await run(config, configPath, { verbose: !!flags.verbose });
+    const model = typeof flags.model === "string" ? flags.model : "opus";
+    const max = typeof flags.max === "string" ? Number(flags.max) : 3;
+    process.stdout.write(`Triage de ${Math.min(max, result.findings.filter((f) => f.state === "unproven").length)} lead(s) via claude -p (${model})...\n\n`);
+    const advice = await triageLeads(result.findings, model, max);
+    for (const a of advice) {
+      const f = result.findings.find((x) => x.id === a.id);
+      process.stdout.write(`• ${f?.title ?? a.id}\n${a.advice}\n\n`);
+    }
+    process.stdout.write("Note: ceci est un avis du modèle, jamais une preuve. Seul un validateur déterministe marque 'prouvé'.\n");
+    return 0;
+  }
+
   process.stdout.write(
     [
       "Bastion - a defensive security harness for SaaS",
@@ -131,6 +155,7 @@ async function main(): Promise<number> {
       "  bastion init   [--config path] [--force]   write a starter config",
       "  bastion scan   [--config path] [--json] [--out file.json] [--verbose]",
       "                 [--baseline file.json] [--update-baseline]",
+      "  bastion triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  bastion list                                show available checks",
       "",
       "Bastion only tests hosts you declare you own. Active checks stay off until",

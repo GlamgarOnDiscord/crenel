@@ -8,4 +8,6 @@ export { REGISTRY, resolveChecks } from "./core/registry.js";
 export { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
 export { loadBaseline, saveBaseline, toBaseline, diff, hasRegression } from "./core/baseline.js";
 export type { Baseline, BaselineEntry, Diff } from "./core/baseline.js";
+export { triageFinding, triageLeads } from "./agent/triage.js";
+export type { TriageResult } from "./agent/triage.js";
 export type { Check, CheckContext, Finding, Severity } from "./core/types.js";
