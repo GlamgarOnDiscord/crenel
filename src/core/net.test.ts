@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isPrivateIp, safeFetch } from "./net.js";
+import { isGraphqlQueryOnly, isPrivateIp, readOnlyPost, safeFetch } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -76,4 +76,46 @@ test("safeFetch caps the body", async () => {
     assert.ok(res.truncated, "oversized body is truncated");
     assert.ok(res.body.length <= 2 * 1024 * 1024);
   } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
+test("isGraphqlQueryOnly: queries pass, mutations and subscriptions never do", () => {
+  assert.ok(isGraphqlQueryOnly("query{__schema{types{name}}}"));
+  assert.ok(isGraphqlQueryOnly("{ me { id } }"));
+  assert.ok(isGraphqlQueryOnly('query Q { search(q: "mutation") { id } }'), "the word inside a string is fine");
+  assert.ok(!isGraphqlQueryOnly("mutation { deleteUser(id: 1) }"));
+  assert.ok(!isGraphqlQueryOnly("query A { me { id } } mutation B { x }"), "a second operation counts");
+  assert.ok(!isGraphqlQueryOnly("subscription { ticks }"));
+  assert.ok(!isGraphqlQueryOnly("# comment\nmutation { x }"));
+  assert.ok(!isGraphqlQueryOnly("fragment F on User { id } query { me { ...F } }"), "anything not starting as a query is refused");
+});
+
+test("readOnlyPost: only GraphQL queries, MCP list calls and OSV lookups", () => {
+  const u = "https://app.example.com/graphql";
+  assert.equal(readOnlyPost(u, JSON.stringify({ query: "{ me { id } }" })), "graphql-query");
+  assert.equal(readOnlyPost(u, JSON.stringify({ query: "mutation { x }" })), null);
+  assert.equal(readOnlyPost(u, JSON.stringify([{ query: "{ a }" }])), null, "batches are refused");
+  assert.equal(readOnlyPost(u, JSON.stringify({ query: "{ a }", extensions: {} })), null, "unknown keys are refused");
+  assert.equal(readOnlyPost(u, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })), "mcp-list");
+  assert.equal(readOnlyPost(u, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "x" } })), null);
+  assert.equal(readOnlyPost("https://api.osv.dev/v1/querybatch", "{}"), "osv-lookup");
+  assert.equal(readOnlyPost(u, "a=b"), null);
+  assert.equal(readOnlyPost(u, undefined), null);
+});
+
+test("safeFetch refuses writes unless the body is a read or active testing is on", async () => {
+  const http = await import("node:http");
+  const seen: string[] = [];
+  const server = http.createServer((q, s) => { seen.push(q.method!); s.writeHead(200); s.end("{}"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const url = `http://127.0.0.1:${port}/graphql`;
+  try {
+    const ro = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    await assert.rejects(safeFetch(url, ro, { method: "DELETE" }), /not a read/);
+    await assert.rejects(safeFetch(url, ro, { method: "POST", body: JSON.stringify({ query: "mutation { x }" }) }), /not a read/);
+    assert.equal((await safeFetch(url, ro, { method: "POST", body: JSON.stringify({ query: "{ me { id } }" }) })).status, 200);
+    const active = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true });
+    assert.equal((await safeFetch(url, active, { method: "DELETE" })).status, 200);
+    assert.deepEqual(seen, ["POST", "DELETE"]);
+  } finally { server.close(); }
 });

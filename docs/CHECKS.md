@@ -28,7 +28,7 @@ empty list runs every read-only check.
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
-| graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path |
+| graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
 | subdomain-takeover | Declared host with a CNAME to a hosting service where nothing is deployed | yes (CNAME + service's not-found page) | DNS + one GET per declared host |
@@ -37,7 +37,7 @@ empty list runs every read-only check.
 | git-history | Keys removed from the code but still in past commits | yes (detector match on an added line) | no (local git log) |
 | storage-buckets | S3, R2, GCS buckets the app points at, listable by anyone | yes (anonymous listing, declared host) | static; one GET per declared bucket |
 | dev-server | Vite, webpack or Next.js dev server reachable on the deployed host | yes (dev runtime signature) | GETs on the declared host |
-| ai-infra | Ollama, OpenAI-compatible model APIs, Qdrant, Chroma, Weaviate, Flowise, Langflow open without auth | yes (anonymous inventory) | GETs on declared bases |
+| ai-infra | Ollama, OpenAI-compatible model APIs, Qdrant, Chroma, Weaviate, Flowise, Langflow, MCP servers open without auth | yes (anonymous inventory) | GETs, plus the MCP handshake and tools/list by POST, on declared bases |
 | vercel-preview | Vercel deployments served without the Vercel login wall | yes (200 without the wall) | one GET per declared *.vercel.app |
 | cache-deception | Private responses cached under a static-looking URL | yes (anonymous GET returns B's object) | GETs, needs allowActiveTesting and B's token |
 | auth-config | Supabase open sign-up without email confirmation, Better Auth OpenAPI published | yes (public settings) | GETs |
@@ -296,8 +296,9 @@ Sends the smallest read-only introspection query with GET (`?query=`) to
 `/graphql`, `/api/graphql`, `/v1/graphql`, `/query`, `/gql` on the declared
 host (or `options.graphql.paths`). A response carrying `__schema` proves
 introspection is open: the whole API map, admin mutations included, is public.
-Servers that accept GraphQL over POST only are not tested (Crenel never sends
-POST), and the log says so.
+When GET gives nothing, the same query goes out as a JSON POST: the HTTP
+client lets that POST through only because its body is a single query with no
+mutation or subscription (see "What goes out" below).
 
 ## open-redirect
 
@@ -365,7 +366,9 @@ Inventory endpoints of AI services, anonymous GETs only: Ollama `/api/tags`, an
 OpenAI-compatible `/v1/models`, Qdrant `/collections`, Chroma's collection list,
 Weaviate `/v1/schema`, Flowise `/api/v1/chatflows`, Langflow `/api/v1/flows/`, and MCP
 servers over SSE (`/sse` answering `event: endpoint` without credentials; only
-the first 32 bytes are read).
+the first 32 bytes are read) or over Streamable HTTP (`/mcp`, `/api/mcp`: an
+anonymous `initialize` by POST that returns a protocolVersion, then `tools/list`
+to count the tools; no tool is ever called).
 Bases: the staging URL plus `options.ai-infra.urls` (e.g. a model server on its
 own port), declared hosts only. Only counts and service names are reported.
 
@@ -400,3 +403,19 @@ RSC header, `/_next/data/<buildId>/<route>.json` (build id read from the page),
 a doubled or trailing slash, an upper-case letter, an encoded slash. A variant
 served with a real page, where the canonical path redirected or refused, is the
 proof. A canonical redirect *to* the variant (URL normalization) is ignored.
+
+## What goes out
+
+Every check uses one HTTP client (`src/core/net.ts`), which refuses any method
+other than GET and HEAD unless `scope.allowActiveTesting` is true. One
+exception, decided on the exact bytes about to be sent: a POST whose body is
+provably a read.
+
+| Body | Allowed when |
+|---|---|
+| GraphQL | a single `{query, variables?, operationName?}` object whose document starts as a query and contains no `mutation` or `subscription` |
+| MCP JSON-RPC | `initialize`, `notifications/initialized`, `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` (never `tools/call`) |
+| OSV | `api.osv.dev/v1/querybatch`, a public advisory lookup |
+
+Batched GraphQL or JSON-RPC arrays are refused. A refused request is written to
+the journal like any other.

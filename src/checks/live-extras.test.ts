@@ -118,3 +118,24 @@ test("auth-variants: a trailing-slash normalization redirect is not a bypass", a
   });
   try { assert.equal((await authVariants.run(ctx(base))).length, 0); } finally { srv.close(); }
 });
+
+test("ai-infra: an MCP server over Streamable HTTP that answers an anonymous initialize is proven; one that asks for a token is not", async () => {
+  const seen: string[] = [];
+  const { srv, base } = await serve((req, res) => {
+    let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => {
+      if (req.method === "POST") seen.push(`${req.url} ${JSON.parse(b).method}`);
+      if (req.url === "/api/mcp") { res.writeHead(401); return res.end(); }
+      if (req.url !== "/mcp" || req.method !== "POST") { res.writeHead(404); return res.end(); }
+      const m = JSON.parse(b).method;
+      if (m === "initialize") { res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "s1" }); return res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", serverInfo: { name: "x" }, capabilities: {} } })); }
+      if (m === "tools/list" && req.headers["mcp-session-id"] === "s1") { res.writeHead(200, { "content-type": "text/event-stream" }); return res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "run_sql" }, { name: "send_email" }] } })}\n\n`); }
+      res.writeHead(400); res.end();
+    });
+  });
+  try {
+    const found = (await aiInfra.run(ctx(base))).filter((f) => f.id.endsWith("mcp"));
+    assert.deepEqual(found.map((f) => f.id.replace(base, "")), ["ai-infra:/mcp"]);
+    assert.match(found[0]!.description, /2 tool\(s\) listed/);
+    assert.ok(seen.every((s) => /initialize|tools\/list/.test(s)), seen.join(", "));
+  } finally { srv.close(); }
+});

@@ -10,7 +10,9 @@
 //      smuggle the agent off scope);
 //   4. the response body is capped, so a hostile target cannot flood context;
 //   5. every request has a timeout and obeys the scope's kill switch, and the
-//      scope's observer sees each request sent or refused (journal, budgets).
+//      scope's observer sees each request sent or refused (journal, budgets);
+//   6. only GET and HEAD go out by default. A POST passes when its body is
+//      provably a read (readOnlyPost); anything else needs allowActiveTesting.
 //
 // It is deliberately small and dependency-free.
 
@@ -94,6 +96,39 @@ export interface SafeResponse {
   truncated: boolean;
 }
 
+const READ_METHODS = new Set(["GET", "HEAD"]);
+// MCP JSON-RPC calls that list or handshake, never call a tool or read a resource's content.
+const MCP_READ = new Set(["initialize", "notifications/initialized", "tools/list", "resources/list", "resources/templates/list", "prompts/list"]);
+
+/** A GraphQL document that can only read: no mutation or subscription anywhere (even as a name: conservative). */
+export function isGraphqlQueryOnly(query: string): boolean {
+  const code = query
+    .replace(/"""[\s\S]*?"""/g, '""')
+    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
+    .replace(/#[^\n]*/g, "");
+  if (/\b(mutation|subscription)\b/i.test(code)) return false;
+  return /^\s*(query\b|\{)/.test(code);
+}
+
+/**
+ * Why a POST to `url` with `body` only reads, or null. Three shapes, checked on
+ * the bytes that would be sent: a single GraphQL query, an MCP list or
+ * handshake call, and OSV's batch lookup (a public metadata API).
+ */
+export function readOnlyPost(url: string, body: string | undefined): string | null {
+  if (body === undefined) return null;
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.hostname === "api.osv.dev" && u.pathname === "/v1/querybatch") return "osv-lookup";
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return null; }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return null; // batched GraphQL or JSON-RPC: refused
+  const o = j as Record<string, unknown>;
+  if (o.jsonrpc === "2.0" && typeof o.method === "string" && MCP_READ.has(o.method)) return "mcp-list";
+  if (typeof o.query === "string" && Object.keys(o).every((k) => k === "query" || k === "variables" || k === "operationName") && isGraphqlQueryOnly(o.query)) return "graphql-query";
+  return null;
+}
+
 /** Fetch `url`, enforcing the scope allowlist, no private IPs, and safe redirects. */
 export async function safeFetch(
   url: string,
@@ -103,7 +138,12 @@ export async function safeFetch(
   // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
   const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
   let current = url;
-  const method = init.method ?? "GET";
+  const method = (init.method ?? "GET").toUpperCase();
+  if (!READ_METHODS.has(method) && !scope.allowActiveTesting && !(method === "POST" && readOnlyPost(url, init.body))) {
+    const why = `Refused: ${method} ${url} is not a read and allowActiveTesting is off`;
+    scope.onRequest?.({ method, url, refused: why });
+    throw new ScopeError(why);
+  }
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     try {
       scope.signal?.throwIfAborted();
@@ -118,7 +158,7 @@ export async function safeFetch(
     const signal = scope.signal ? AbortSignal.any([scope.signal, timeout]) : timeout;
     let res: Response;
     try {
-      // A body is only ever sent to a third-party metadata API the user declared (OSV), never to a target.
+      // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
       res = await fetch(current, { method, headers: init.headers, body: init.body, redirect: "manual", signal });
     } catch (err) {
       scope.onRequest?.({ method, url: current, error: (err as Error).message });

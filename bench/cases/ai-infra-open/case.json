@@ -1,9 +1,10 @@
 {
-  "title": "An Ollama model server open to anyone, a vector database that asks for a key",
+  "title": "An Ollama model server and an MCP server open to anyone, a vector database that asks for a key",
   "type": "live",
   "config": {},
   "mustFind": [
-    { "id": "ollama-open", "check": "ai-infra", "text": "Ollama", "state": "proven", "minSeverity": "high", "why": "Anyone can run models on this hardware." }
+    { "id": "ollama-open", "check": "ai-infra", "text": "Ollama", "state": "proven", "minSeverity": "high", "why": "Anyone can run models on this hardware." },
+    { "id": "mcp-http-open", "check": "ai-infra", "text": "MCP server open", "state": "proven", "minSeverity": "critical", "why": "Anyone can call the internal tools." }
   ],
   "mustNotFlag": [
     { "id": "chroma-protected", "check": "ai-infra", "text": "Chroma", "forbid": "any", "why": "It answers 401." }

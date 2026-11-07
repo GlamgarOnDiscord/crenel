@@ -22,3 +22,20 @@ test("an introspection answered over GET is proven; a server that refuses it is 
     assert.match(found[0]!.description, /AdminUser/);
   } finally { srv.close(); }
 });
+
+test("a server that takes GraphQL over POST only is tested with a POST that carries a query", async () => {
+  const schema = { data: { __schema: { queryType: { name: "Query" }, mutationType: null, types: [{ name: "Query", kind: "OBJECT" }] } } };
+  const bodies: string[] = [];
+  const srv = createServer((req, res) => {
+    if (req.method !== "POST" || !req.url?.startsWith("/graphql")) { res.writeHead(405); return res.end(); }
+    let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { bodies.push(b); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(schema)); });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const found = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: { graphql: { paths: ["/graphql"] } }, log: () => {} });
+    assert.equal(found.length, 1);
+    assert.match(found[0]!.proof!.method, /POST/);
+    assert.deepEqual(JSON.parse(bodies[0]!), { query: "query{__schema{queryType{name}mutationType{name}types{name kind}}}" });
+  } finally { srv.close(); }
+});
