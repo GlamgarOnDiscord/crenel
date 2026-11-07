@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs fifteen checks. Each is deterministic and read-only, and marks every
+Crenel runs 39 checks. Each is deterministic and read-only by default, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
