@@ -17,6 +17,8 @@ export interface ScopeConfig {
   allowActiveTesting?: boolean;
   /** A staging base URL; must resolve to an allowed host. */
   stagingUrl?: string;
+  /** Allow targets that resolve to private IPs (an internal staging box). Off by default. */
+  allowPrivate?: boolean;
 }
 
 export class ScopeError extends Error {
@@ -29,11 +31,13 @@ export class ScopeError extends Error {
 export class Scope {
   private readonly allowed: Set<string>;
   readonly allowActiveTesting: boolean;
+  readonly allowPrivate: boolean;
   readonly stagingUrl?: string;
 
   constructor(config: ScopeConfig) {
     this.allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase().trim()));
     this.allowActiveTesting = config.allowActiveTesting ?? false;
+    this.allowPrivate = config.allowPrivate ?? false;
     if (config.stagingUrl) {
       // Validate the staging URL against the allowlist at construction time, so a
       // misconfigured run fails before any check gets to make a request.

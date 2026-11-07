@@ -1,0 +1,116 @@
+// Scoped HTTP client. This is the P0 harness fix from the research: scope must
+// live outside the model, in code. Every outbound request an agent or check
+// makes goes through here, which enforces four things:
+//
+//   1. the host is in the Scope allowlist (you declared you own it);
+//   2. the host does not resolve to a private/loopback/link-local address
+//      (blocks SSRF and DNS-rebinding to internal services), unless the target
+//      explicitly opts into private ranges for an internal staging box;
+//   3. every redirect hop is re-validated against the same rules (a 302 cannot
+//      smuggle the agent off scope);
+//   4. the response body is capped, so a hostile target cannot flood context.
+//
+// It is deliberately small and dependency-free.
+
+import { lookup } from "node:dns/promises";
+import { Scope, ScopeError } from "./scope.js";
+
+const MAX_REDIRECTS = 5;
+const MAX_BYTES = 2 * 1024 * 1024;
+
+/** True for IPv4/IPv6 addresses that must never be reached from a scan. */
+export function isPrivateIp(ip: string): boolean {
+  const a = ip.toLowerCase();
+  // IPv6
+  if (a === "::1" || a === "::") return true;
+  if (a.startsWith("fe80:")) return true; // link-local
+  if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique local
+  if (a.startsWith("::ffff:")) return isPrivateIp(a.slice(7)); // v4-mapped
+  // IPv4
+  const m = a.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [p0, p1] = [Number(m[1]), Number(m[2])];
+  if (p0 === 10) return true;
+  if (p0 === 127) return true; // loopback
+  if (p0 === 0) return true;
+  if (p0 === 169 && p1 === 254) return true; // link-local
+  if (p0 === 172 && p1 >= 16 && p1 <= 31) return true;
+  if (p0 === 192 && p1 === 168) return true;
+  if (p0 === 100 && p1 >= 64 && p1 <= 127) return true; // CGNAT
+  return false;
+}
+
+async function assertResolvesPublic(host: string, allowPrivate: boolean): Promise<void> {
+  if (allowPrivate) return;
+  let addrs;
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch {
+    throw new ScopeError(`Refused: cannot resolve ${host}`);
+  }
+  for (const { address } of addrs) {
+    if (isPrivateIp(address)) {
+      throw new ScopeError(
+        `Refused: ${host} resolves to a private address (${address}). ` +
+          `Set scope.allowPrivate only for an internal staging box you own.`,
+      );
+    }
+  }
+}
+
+export interface SafeResponse {
+  status: number;
+  url: string;
+  headers: Headers;
+  body: string;
+  truncated: boolean;
+}
+
+/** Fetch `url`, enforcing the scope allowlist, no private IPs, and safe redirects. */
+export async function safeFetch(
+  url: string,
+  scope: Scope,
+  init: { method?: string; headers?: Record<string, string> } = {},
+): Promise<SafeResponse> {
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    scope.assertUrlAllowed(current);
+    await assertResolvesPublic(new URL(current).hostname, scope.allowPrivate);
+
+    const res = await fetch(current, {
+      method: init.method ?? "GET",
+      headers: init.headers,
+      redirect: "manual",
+    });
+
+    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+      const next = new URL(res.headers.get("location")!, current).toString();
+      current = next; // re-validated at the top of the next iteration
+      continue;
+    }
+
+    // Cap the body.
+    const reader = res.body?.getReader();
+    let received = 0, truncated = false;
+    const chunks: Uint8Array[] = [];
+    if (reader) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          if (received + value.length > MAX_BYTES) {
+            chunks.push(value.slice(0, MAX_BYTES - received));
+            truncated = true;
+            await reader.cancel();
+            break;
+          }
+          chunks.push(value);
+          received += value.length;
+        }
+      }
+    }
+    const body = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+    return { status: res.status, url: current, headers: res.headers, body, truncated };
+  }
+  throw new ScopeError(`Refused: too many redirects from ${url}`);
+}

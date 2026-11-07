@@ -15,6 +15,7 @@
 //     report any that did not return 401/403/404 as PROVEN broken authorization.
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { safeFetch } from "../core/net.js";
 
 interface ResourceSpec {
   /** e.g. "project" */
@@ -107,10 +108,9 @@ export const authzMatrix: Check = {
       ctx.scope.assertUrlAllowed(url);
       let status = 0;
       try {
-        const res = await fetch(url, {
+        const res = await safeFetch(url, ctx.scope, {
           method: c.method,
           headers: { authorization: `Bearer ${tokenA}` },
-          redirect: "manual",
         });
         status = res.status;
       } catch (err) {

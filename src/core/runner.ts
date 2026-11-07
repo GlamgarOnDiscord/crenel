@@ -29,6 +29,7 @@ export async function run(config: Config, configPath: string, opts: RunOptions =
   const scope = new Scope({
     allowedHosts: config.scope.allowedHosts,
     allowActiveTesting: config.scope.allowActiveTesting,
+    allowPrivate: config.scope.allowPrivate,
     stagingUrl: config.scope.stagingUrl,
   });
 

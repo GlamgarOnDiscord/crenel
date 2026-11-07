@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
   scope: z.object({
     allowedHosts: z.array(z.string()).default([]),
     allowActiveTesting: z.boolean().default(false),
+    allowPrivate: z.boolean().default(false),
     stagingUrl: z.string().url().optional(),
   }),
   /** Which checks to run. Empty means "all read-only checks". */
