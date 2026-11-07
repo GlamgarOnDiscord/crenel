@@ -1,0 +1,23 @@
+{
+  "title": "Mass assignment: a body copied into the profile, a nested billing merge, an allowlist, a strict schema",
+  "type": "live",
+  "config": {
+    "options": {
+      "authz-matrix": { "accounts": { "a": { "token": "tok-a" } } },
+      "mass-assignment": { "enabled": true, "targets": [
+        { "name": "profile", "path": "/api/me", "fields": { "role": "admin", "credits": 999999 }, "body": { "name": "Ann" } },
+        { "name": "workspace", "path": "/api/workspaces/:id", "id": "ws_a", "fields": { "billing.plan": "enterprise", "billing.seats": 500 }, "body": { "title": "A's space" } },
+        { "name": "account", "path": "/api/account", "fields": { "isAdmin": true, "plan": "pro" }, "body": { "name": "Ann" } },
+        { "name": "settings", "path": "/api/settings", "method": "PUT", "fields": { "role": "admin" } }
+      ] }
+    }
+  },
+  "mustFind": [
+    { "id": "profile-role", "check": "mass-assignment", "where": "/api/me$", "text": "role", "state": "proven", "minSeverity": "critical", "why": "A user makes themselves admin through their own profile update." },
+    { "id": "workspace-plan", "check": "mass-assignment", "where": "/api/workspaces/ws_a", "text": "billing.plan", "state": "proven", "minSeverity": "high", "why": "The nested billing object is merged as sent: a free workspace becomes enterprise." }
+  ],
+  "mustNotFlag": [
+    { "id": "account-allowlist", "check": "mass-assignment", "where": "/api/account", "forbid": "any", "why": "Only name is copied: isAdmin and plan are ignored." },
+    { "id": "settings-strict", "check": "mass-assignment", "where": "/api/settings", "forbid": "any", "why": "A strict schema answers 400 to a role change." }
+  ]
+}

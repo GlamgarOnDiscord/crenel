@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 40 checks. Each is deterministic and read-only by default (the
+Crenel runs 41 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -50,6 +50,7 @@ empty list runs every read-only check.
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
+| mass-assignment | Privileged fields (role, plan, credits, isAdmin, owner) accepted in a user's own update | yes (A's next read shows the value) | **writes**: allowActiveTesting + `options.mass-assignment.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
 ## exposed-secrets
@@ -631,6 +632,41 @@ A's object, 2 canaries (anonymous, then A) and their restores on B's (a POST
 restore may take a second try by PATCH). The generated regression test
 sends the same write as A and without a token, expects 401, 403 or 404, and
 checks B's field did not move.
+
+## mass-assignment
+
+Active mode. An update route that copies the request body into the row
+(`Object.assign(user, req.body)`, `update(req.body)`, a Supabase `.update(body)`)
+lets a user set what the form never shows. Account A only ever updates its
+**own** object:
+
+```yaml
+options:
+  mass-assignment:
+    enabled: true
+    targets:
+      - name: profile
+        path: /api/me                 # A's own update route (or /api/users/:id with id: <A's id>)
+        readPath: /api/me             # optional, default path
+        method: PATCH                 # PATCH (default), PUT, POST
+        fields: { role: admin, credits: 999999, "billing.plan": enterprise }
+        body: { name: Ann }           # ordinary fields the form sends
+```
+
+1. A reads its object. A field already at the declared value is not tried.
+2. A sends one update with `body` and `fields` (PUT: the object as read, plus
+   them).
+3. A reads again. A field now at the declared value is **proven**: critical
+   when its name is about privileges (role, admin, owner, tenant, org,
+   permission, scope, staff, verified), high otherwise (plan, credits, seats).
+4. Every field the update moved, privileged or not, is written back to its old
+   value (`null` when it was absent) and read again; what stayed changed is
+   listed as not restored.
+
+A field the read never returns cannot be seen to change: the receipt says so,
+declare a `readPath` that shows it. Writes per target: one update and one
+restore, on A's own object. The generated test sends the same fields as A and
+expects them unchanged on the next read.
 
 ## What goes out
 

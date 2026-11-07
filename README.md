@@ -12,8 +12,8 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-40-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-293%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Checks](https://img.shields.io/badge/checks-41-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Tests](https://img.shields.io/badge/tests-299%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -54,7 +54,7 @@ pnpm crenel generate-tests     # one regression test per finding
 | --- | --- |
 | **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `live-bundle` the same on every JS chunk your live site serves · `git-history` keys deleted from the code but not from the history · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
 | **Authorization** | `authz-matrix` account A reaching account B's objects, anonymous access, proven live on staging |
-| **Active mode** (opt-in, staging only) | `authz-write` account A changing or deleting account B's objects, proven by B's own read, then restored |
+| **Active mode** (opt-in, staging only) | `authz-write` account A changing or deleting account B's objects, proven by B's own read, then restored · `mass-assignment` role, plan or credits accepted in a user's own update |
 | **BaaS & storage** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) · `supabase-rpc` functions that return data to anonymous visitors · `supabase-functions` Edge Functions acting as service role for anyone · `storage-buckets` S3, R2, GCS buckets anyone can list |
 | **Supply chain** | `dependency-risk` known-malware versions, install hooks · `ci-hardening` · `dockerfile` · `mcp-surface` |
 | **Server code** | `webhook-signature` unverified Stripe, GitHub or Clerk webhooks · `ssrf` fetching a URL from the request · `business-logic` prices, plans or roles the browser sends (hypotheses) |
