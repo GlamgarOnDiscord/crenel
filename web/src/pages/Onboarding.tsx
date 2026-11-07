@@ -41,7 +41,7 @@ export function Onboarding() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--fg-muted)" }}>
             <ShieldCheck size={15} className="faint" /> Je déclare posséder cette cible ou être autorisé à la tester.
           </div>
-          <Link to="/app/scan/run"><Button style={{ width: "100%", justifyContent: "center" }}>Lancer le premier scan <ArrowRight size={15} /></Button></Link>
+          <Button to="/app/scan/run" style={{ width: "100%", justifyContent: "center" }}>Lancer le premier scan <ArrowRight size={15} /></Button>
         </div>
 
         <Link to="/app/overview" className="muted" style={{ fontSize: 13 }}>Passer, voir une démo</Link>

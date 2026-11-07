@@ -11,7 +11,7 @@ export function Landing() {
         <Link to="/" className="brand" style={{ padding: 0 }}><Mark size={28} /><Wordmark /></Link>
         <span className="sp" style={{ flex: 1 }} />
         <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex" }}>Docs</a>
-        <Link to="/app/overview"><Button variant="ghost" size="sm">Ouvrir la console</Button></Link>
+        <Button to="/app/overview" variant="ghost" size="sm">Ouvrir la console</Button>
       </nav>
 
       <header className="landing">
@@ -22,8 +22,8 @@ export function Landing() {
               <h1>Attaquez votre app <em>avant</em> qu'on le fasse.</h1>
               <p className="sub">Crenel trouve les secrets exposés et les failles d'autorisation entre comptes, prouve chacune par une requête rejouable, et la transforme en test qui ne revient plus.</p>
               <div className="cta">
-                <Link to="/app/overview"><Button>Ouvrir la console <ArrowRight size={15} /></Button></Link>
-                <a href={REPO_URL} target="_blank" rel="noopener noreferrer"><Button variant="ghost"><Github size={15} /> GitHub</Button></a>
+                <Button to="/app/overview">Ouvrir la console <ArrowRight size={15} /></Button>
+                <Button href={REPO_URL} variant="ghost"><Github size={15} /> GitHub</Button>
               </div>
             </div>
             <div className="hide-sm"><Mascot size={168} /></div>

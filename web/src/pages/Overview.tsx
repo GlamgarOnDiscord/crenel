@@ -16,7 +16,7 @@ export function Overview() {
       <Topbar crumb="acme-app · staging" title="Vue d'ensemble" actions={
         <>
           <span className="chipbtn">Cible <b>acme-app</b> ▾</span>
-          <Link to="/app/scan/run"><Button><Plus size={15} /> Nouveau scan</Button></Link>
+          <Button to="/app/scan/run"><Plus size={15} /> Nouveau scan</Button>
         </>
       } />
       <div className="content">

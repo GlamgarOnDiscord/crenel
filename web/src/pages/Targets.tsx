@@ -7,7 +7,7 @@ import { targets } from "../data/mock.ts";
 export function Targets() {
   return (
     <>
-      <Topbar crumb="Espace de travail" title="Cibles" actions={<Link to="/app/onboarding"><Button><Plus size={15} /> Ajouter une cible</Button></Link>} />
+      <Topbar crumb="Espace de travail" title="Cibles" actions={<Button to="/app/onboarding"><Plus size={15} /> Ajouter une cible</Button>} />
       <div className="content">
         <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>Une cible est un site ou un dépôt que vous possédez. Chaque cible a son propre dossier de scans, findings et tests. Crenel ne teste que des hôtes que vous avez déclarés.</p>
         <section className="folders">

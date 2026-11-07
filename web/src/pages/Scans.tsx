@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { Play } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
@@ -13,7 +12,7 @@ const runs = [
 export function Scans() {
   return (
     <>
-      <Topbar crumb="acme-app · staging" title="Scans" actions={<Link to="/app/scan/run"><Button><Play size={14} /> Lancer un scan</Button></Link>} />
+      <Topbar crumb="acme-app · staging" title="Scans" actions={<Button to="/app/scan/run"><Play size={14} /> Lancer un scan</Button>} />
       <div className="content">
         <section className="card">
           <div style={{ overflowX: "auto" }}>

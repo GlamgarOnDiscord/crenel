@@ -1,12 +1,18 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { cn } from "../lib/cn.ts";
 import type { FindingState, Severity } from "../lib/types.ts";
 
-export function Button({ children, variant = "primary", size, ...rest }: {
-  children: ReactNode; variant?: "primary" | "ghost"; size?: "sm";
+// A button, or — when `to` is given — a react-router Link styled as one, so we
+// never nest a <button> inside an <a> (invalid HTML, double tab stop).
+export function Button({ children, variant = "primary", size, to, href, ...rest }: {
+  children: ReactNode; variant?: "primary" | "ghost"; size?: "sm"; to?: string; href?: string;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const className = cn("btn", variant === "ghost" && "ghost", size === "sm" && "sm");
+  if (to) return <Link to={to} className={className}>{children}</Link>;
+  if (href) return <a href={href} className={className} target="_blank" rel="noopener noreferrer">{children}</a>;
   return (
-    <button className={cn("btn", variant === "ghost" && "ghost", size === "sm" && "sm")} {...rest}>
+    <button className={className} {...rest}>
       {children}
     </button>
   );
