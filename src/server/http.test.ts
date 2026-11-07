@@ -7,6 +7,8 @@ import { request } from "node:http";
 import { startServer, type CrenelServer } from "./http.js";
 import { startDemoTarget, DEMO_TOKENS, type DemoTarget } from "../testing/demo-target.js";
 import { exposedSecrets } from "../checks/exposed-secrets.js";
+import { exposedFiles } from "../checks/exposed-files.js";
+import type { Check } from "../core/types.js";
 import { headers } from "../checks/headers.js";
 import { readJournal, verifyJournal } from "../agent/journal.js";
 
@@ -42,14 +44,14 @@ options:
 `;
 }
 
-async function setup(o: { active?: boolean } = {}): Promise<Ctx> {
+async function setup(o: { active?: boolean; servesEnv?: boolean; checks?: Check[] } = {}): Promise<Ctx> {
   const dir = mkdtempSync(join(tmpdir(), "crenel-srv-"));
-  const target = await startDemoTarget();
+  const target = await startDemoTarget({ servesEnv: o.servesEnv });
   mkdirSync(join(dir, "dist"));
   writeFileSync(join(dir, "dist", "app.js"), 'const k = "sk_live_ABCDEFGHIJKLMNOP1234";\n');
   const cfgPath = join(dir, "crenel.config.yaml");
   writeFileSync(cfgPath, configYaml(target.url, o));
-  const srv = await startServer({ configPath: cfgPath, port: 0, token: "test-token", webDir: null, llm: "off", checks: [exposedSecrets, headers] });
+  const srv = await startServer({ configPath: cfgPath, port: 0, token: "test-token", webDir: null, llm: "off", checks: o.checks ?? [exposedSecrets, headers] });
   return { dir, srv, target, cfgPath };
 }
 async function teardown(c: Ctx) {
@@ -211,5 +213,18 @@ test("config and targets: invalid YAML is refused, adding a host needs the owner
     assert.match(readFileSync(c.cfgPath, "utf8"), /staging\.example\.com/);
     const del = await (await api(c, "/api/targets/staging.example.com", { method: "DELETE" })).json() as any;
     assert.deepEqual(del.scope.allowedHosts, ["127.0.0.1"]);
+  } finally { await teardown(c); }
+});
+
+test("a full scan runs the live-site checks under the gate, and the replay validator proves a served .env", async () => {
+  const c = await setup({ servesEnv: true, checks: [exposedSecrets, headers, exposedFiles] });
+  try {
+    const { id } = await (await post(c, "/api/runs", { prompt: "/scan", mode: "bypass" })).json() as { id: string };
+    await follow(c, id);
+    const state = await (await api(c, "/api/state")).json() as any;
+    const env = (state.findings?.items ?? state.findings ?? []).find((f: any) => f.id === "exposed-files:/.env");
+    assert.ok(env, "the served .env is a finding");
+    assert.equal(env.state, "proven", "replayed through the staging URL, it stays proven");
+    assert.ok(c.target.seen.every((r) => r.method === "GET"));
   } finally { await teardown(c); }
 });

@@ -22,6 +22,8 @@ import { safeFetch } from "../core/net.js";
 import { REGISTRY, resolveChecks } from "../core/registry.js";
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
 import { generateRegressionFile } from "../generate/tests.js";
+import { crawlLiveBundle } from "../checks/live-bundle.js";
+import { reviewBundle } from "./bundle-review.js";
 import { scanBaas } from "../checks/baas-exposure.js";
 import { Journal } from "./journal.js";
 import { authorize, type GateDecision, type Judge, type Mode, type PlannedRequest } from "./gate.js";
@@ -53,18 +55,19 @@ export const SEV: Record<Severity, Sev> = { critical: "crit", high: "high", medi
 const webState = (s: Finding["state"]) => (s === "proven" ? "proven" : s === "fixed" ? "fixed" : "lead");
 
 const TOOL_CHECKS: Record<string, string[]> = {
-  "scan.secrets": ["exposed-secrets", "public-env", "sourcemaps", "committed-credentials", "committed-env"],
-  "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit"],
+  "scan.secrets": ["exposed-secrets", "public-env", "sourcemaps", "committed-credentials", "committed-env", "git-history", "storage-buckets"],
+  "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit", "webhook-signature", "ssrf"],
   "scan.deps": ["dependency-risk"],
   "scan.baas": ["baas-exposure"],
-  "scan.web": ["headers"],
+  "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns"],
 };
 const LABEL: Record<string, string> = {
   "scan.secrets": "Chercher des secrets dans le bundle",
   "scan.repo": "Fouiller le dépôt",
   "scan.deps": "Auditer les dépendances",
   "scan.baas": "Vérifier les clés BaaS et la RLS",
-  "scan.web": "Lire les en-têtes de staging",
+  "scan.web": "Inspecter le site déployé (en-têtes, chunks JS, fichiers exposés)",
+  "review.bundle": "Relire les chunks JS avec le modèle (pistes)",
   "authz.matrix": "Prouver l'isolation entre comptes",
   "validate.claims": "Rejouer chaque preuve (validateurs)",
   "tests.generate": "Générer les tests de régression",
@@ -246,7 +249,8 @@ export class AgentRun {
     // The optional toolbox: in a full scan when options.toolbox.enabled, always on /tools.
     const tools = ["tools.trufflehog", ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
     if (intent === "tools") return [...tools, ...tail];
-    return [...scan, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...tail];
+    const review = this.deps.llm && this.scope.stagingUrl && scan.includes("scan.web") ? ["review.bundle"] : [];
+    return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...tail];
   }
 
   /** One pass of the plan. Returns the findings it produced, validated. */
@@ -274,6 +278,7 @@ export class AgentRun {
       }
       if (tool === "tests.generate") continue; // done in finish()
       if (tool === "authz.matrix") { claims.push(...(await this.authzTool(found, ran))); continue; }
+      if (tool === "review.bundle") { toolFound.push(...(await this.reviewTool())); ran.add("bundle-review"); continue; }
       if (tool.startsWith("tools.")) {
         const out = await this.toolboxTool(tool.slice(6) as ToolName);
         toolFound.push(...out.found);
@@ -410,6 +415,29 @@ export class AgentRun {
     return fs.slice(0, 8).map((f) => ({ sev: SEV[f.severity], text: f.title, state: claimed ? "lead" : webState(f.state), id: uidOf(f.id) }));
   }
 
+  /** The model reads every chunk the site serves; what it says stays a lead. */
+  private async reviewTool(): Promise<{ f: Finding; v?: ClaimVerdict }[]> {
+    const llm = this.deps.llm!;
+    const url = this.scope.stagingUrl!;
+    const t0 = Date.now();
+    const uid = this.ui({ kind: "tool", tool: "review.bundle", args: llm.label, input: JSON.stringify({ start: url }, null, 2), lines: ["…"], dur: "" });
+    // The crawl is the same GETs scan.web already had approved.
+    if (!(await this.gated("review.bundle", [{ method: "GET", url }, { method: "GET", url: `${url.replace(/\/+$/, "")}/assets/*.js (chunks)` }]))) {
+      this.uiUpdate(uid, { kind: "tool", tool: "review.bundle", args: llm.label, input: "", lines: ["non lancé (requêtes refusées)"], dur: ms(Date.now() - t0) });
+      return [];
+    }
+    const { files, bytes } = await crawlLiveBundle(this.ctx(this.scope), url);
+    const r = await reviewBundle(files, llm, { signal: this.ac.signal, maxCalls: 6, log: (m) => this.journal.append("note", { text: m }) });
+    const lines = [
+      `${files.length} fichier(s), ${Math.round(bytes / 1024)} Ko lus par le modèle en ${r.calls} appel(s)`,
+      `${r.findings.length} piste(s), ${r.dropped} écartée(s) (citation introuvable dans le fichier)`,
+      ...(r.endpoints.length ? [`endpoints à ajouter à la matrice: ${r.endpoints.map((e) => `${e.method} ${e.path}`).join(", ")}`] : []),
+      ...(r.unseenChars ? [`${Math.round(r.unseenChars / 1024)} Ko non relus (budget d'appels)`] : []),
+    ];
+    this.uiUpdate(uid, { kind: "tool", tool: "review.bundle", args: llm.label, input: JSON.stringify({ start: url, files: files.length }, null, 2), lines, findings: this.inline(r.findings), dur: ms(Date.now() - t0) });
+    return r.findings.map((f) => ({ f }));
+  }
+
   private async checkTool(tool: string): Promise<{ findings: Finding[]; ran: string[] }> {
     const names = new Set(TOOL_CHECKS[tool] ?? []);
     const checks = this.checks.filter((c) => names.has(c.name));
@@ -419,8 +447,19 @@ export class AgentRun {
     let scope = this.offlineScope();
     let skip = false;
     if (tool === "scan.web") {
+      // The live checks only send GETs: the page and its chunks, a list of known
+      // file paths, an introspection query, redirect probes, and one request per
+      // declared host for takeovers. The gate sees one line per kind.
       const url = this.scope.stagingUrl;
-      if (url) { if (await this.gated(tool, [{ method: "GET", url }])) scope = this.scope; else skip = true; }
+      if (url) {
+        const base = url.replace(/\/+$/, "");
+        const reqs: PlannedRequest[] = [
+          { method: "GET", url }, { method: "GET", url: `${base}/assets/*.js (chunks)` }, { method: "GET", url: `${base}/.env, /.git/config…` },
+          { method: "GET", url: `${base}/graphql?query={__schema…}` }, { method: "GET", url: `${base}/login?next=https://crenel-redirect-check.invalid` },
+          ...this.scope.allowedHosts.filter((h) => /[a-z]/i.test(h) && hostOf(url) !== h).map((h) => ({ method: "GET", url: `https://${h}/` })),
+        ];
+        if (await this.gated(tool, reqs)) scope = this.scope; else skip = true;
+      }
     }
     if (tool === "scan.baas") {
       const reqs = scanBaas(this.projectDir).filter((h) => h.kind === "supabase" && this.scope.isHostAllowed(h.url))
@@ -533,7 +572,7 @@ export class AgentRun {
 
     // Network replays only toward hosts already approved in this run (or bypass/grants).
     // Checks that read the network (headers, BaaS) replay through the network too.
-    const NET_CHECKS = new Set(["headers", "baas-exposure"]);
+    const NET_CHECKS = new Set(["headers", "baas-exposure", ...TOOL_CHECKS["scan.web"]!]);
     const netReplay = (c: Claim) => c.class !== "check.replay" || NET_CHECKS.has(String(c.detail.check));
     const needsNet = all.filter(netReplay);
     let netScope = this.offlineScope();

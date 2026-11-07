@@ -13,7 +13,7 @@ export interface DemoTarget {
 
 export const DEMO_TOKENS = { a: "tok-a", b: "tok-b", c: "tok-c" };
 
-export function startDemoTarget(opts: { genericOk?: boolean } = {}): Promise<DemoTarget> {
+export function startDemoTarget(opts: { genericOk?: boolean; servesEnv?: boolean } = {}): Promise<DemoTarget> {
   const seen: DemoTarget["seen"] = [];
   const acct: Record<string, string> = { [DEMO_TOKENS.a]: "acct_a", [DEMO_TOKENS.b]: "acct_b", [DEMO_TOKENS.c]: "acct_c" };
   const projects: Record<string, { id: string; owner: string; name: string }> = {
@@ -25,6 +25,7 @@ export function startDemoTarget(opts: { genericOk?: boolean } = {}): Promise<Dem
     const p = new URL(req.url!, "http://x").pathname;
     const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
     if (p === "/") { res.writeHead(200, { "content-type": "text/html" }); res.end("<h1>demo</h1>"); return; }
+    if (p === "/.env" && opts.servesEnv) { res.writeHead(200, { "content-type": "text/plain" }); res.end("DATABASE_URL=postgres://app@db/app\n"); return; }
     let m = p.match(/^\/api\/projects\/([^/]+)$/);
     if (m) {
       if (!who) return json(401, {});
