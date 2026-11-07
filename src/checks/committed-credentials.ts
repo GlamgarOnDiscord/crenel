@@ -11,12 +11,19 @@ import { walkFiles } from "../core/walk.js";
 
 const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 
-interface Rule { file: (name: string) => boolean; secret: RegExp; what: string; sev: Severity }
+// `pathGuard`, when present, must also accept the file's path relative to the
+// project. It exists for config.json: that name is ubiquitous (tool configs,
+// fixtures, app settings), so matching it anywhere on an "auth" field would be a
+// false-positive mill. A Docker registry auth lives in a `.docker/` directory, so
+// we only flag config.json there; .dockercfg stays unconditional.
+interface Rule { file: (name: string) => boolean; secret: RegExp; what: string; sev: Severity; pathGuard?: (rel: string) => boolean }
+const inDockerDir = (rel: string) => /(^|[\\/])\.docker[\\/]/.test(rel);
 const RULES: Rule[] = [
   { file: (n) => n === ".npmrc", secret: /(?:_authToken|_auth|_password)\s*=\s*\S+/i, what: "npm auth token", sev: "critical" },
   { file: (n) => n === ".pypirc", secret: /(?:password|token)\s*[:=]\s*\S+/i, what: "PyPI credential", sev: "critical" },
   { file: (n) => n === ".netrc" || n === "_netrc", secret: /\bpassword\s+\S+/i, what: "netrc password", sev: "critical" },
-  { file: (n) => n === ".dockercfg" || n === "config.json", secret: /"auth"\s*:\s*"[A-Za-z0-9+/=]+"/, what: "Docker registry auth", sev: "high" },
+  { file: (n) => n === ".dockercfg", secret: /"auth"\s*:\s*"[A-Za-z0-9+/=]+"/, what: "Docker registry auth", sev: "high" },
+  { file: (n) => n === "config.json", secret: /"auth"\s*:\s*"[A-Za-z0-9+/=]+"/, what: "Docker registry auth", sev: "high", pathGuard: inDockerDir },
   { file: (n) => n === ".git-credentials", secret: /https?:\/\/[^:]+:[^@]+@/i, what: "git credential", sev: "critical" },
 ];
 
@@ -30,7 +37,8 @@ export const committedCredentials: Check = {
     const accept = (name: string) => RULES.some((r) => r.file(name));
     for (const file of walkFiles(ctx.projectDir, { skipDirs: SKIP, accept })) {
       const base = basename(file);
-      const rule = RULES.find((r) => r.file(base));
+      const rel = relative(ctx.projectDir, file) || file;
+      const rule = RULES.find((r) => r.file(base) && (!r.pathGuard || r.pathGuard(rel)));
       if (!rule) continue;
       let text: string;
       try {
@@ -38,7 +46,6 @@ export const committedCredentials: Check = {
         text = readFileSync(file, "utf8");
       } catch { continue; }
       if (!rule.secret.test(text)) continue; // the file name alone is not enough; it must carry a credential
-      const rel = relative(ctx.projectDir, file) || file;
       findings.push({
         id: `committed-credentials:${rel}`,
         check: "committed-credentials",

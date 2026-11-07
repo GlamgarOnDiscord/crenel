@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { committedCredentials } from "./committed-credentials.js";
@@ -38,5 +38,24 @@ test("an .npmrc without a credential (just a registry URL) is not flagged", asyn
   const dir = project({ ".npmrc": "registry=https://registry.npmjs.org/\n" });
   try {
     assert.equal((await committedCredentials.run(ctx(dir))).length, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a plain top-level config.json with an auth field is NOT flagged (ubiquitous name)", async () => {
+  // config.json is everywhere; only a Docker registry auth under .docker/ is one.
+  const dir = project({ "config.json": '{"auth":"dXNlcjpwYXNz"}\n' });
+  try {
+    assert.equal((await committedCredentials.run(ctx(dir))).length, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a .docker/config.json with an auth field IS flagged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-cred-"));
+  mkdirSync(join(dir, ".docker"));
+  writeFileSync(join(dir, ".docker", "config.json"), '{"auths":{"registry":{"auth":"dXNlcjpwYXNz"}}}\n');
+  try {
+    const found = await committedCredentials.run(ctx(dir));
+    assert.equal(found.length, 1);
+    assert.equal(found[0]!.location, join(".docker", "config.json"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
