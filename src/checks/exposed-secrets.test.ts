@@ -110,3 +110,25 @@ test("placeholders that only look like keys are not findings", async () => {
   for (const p of ["sk_live_xxxxxxxxxxxxxxxxxxxx", "sk_live_YOUR_SECRET_KEY_HERE_12", "ghp_000000000000000000000000000000000000", "sk-ant-api03-<your-key>-aaaaaaaaaa", "sk_test_EXAMPLEKEY1234567890ab"]) assert.ok(isPlaceholder(p), p);
   for (const k of ["sk_live_51BenchServerKey9x8y7z6w5v4u", "sk_live_ABCDEFGHIJKLMNOP1234", "ghp_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"]) assert.ok(!isPlaceholder(k), k);
 });
+
+test("decoded views: keys split, joined, base64-encoded, escaped or reversed are found once, with the decoding named", async () => {
+  const { decodedViews } = await import("./exposed-secrets.js");
+  const key = "sk_live_" + "51HiddenKeyAbcdefGhij0123";
+  const b64 = Buffer.from(key).toString("base64");
+  const esc = [...key].map((c) => "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+  const rev = [...key].reverse().join("");
+  const views = decodedViews(`a = "sk_li" + 've_51HiddenKeyAbcdefGhij0123';\nb = ["sk_live_51Hidden", "KeyAbcdefGhij0123"].join("");\nc = atob("${b64}");\nd = "${esc}";\ne = "${rev}".split("").reverse().join("");`);
+  assert.deepEqual(views.map((v) => [v.method, v.text]), [
+    ["string concatenation", key], ["array join", key], ["base64 (atob)", key], ["escaped characters", key], ["reversed string", key],
+  ]);
+  const dir = mkdtempSync(join(tmpdir(), "crenel-dec-"));
+  try {
+    writeFileSync(join(dir, "app.js"), `const k = "sk_li" + "ve_51HiddenKeyAbcdefGhij0123";\nconst plain = "sk_live_51PlainKeyAbcdefGhij0123" + "";\nconst ph = "sk_live_" + "xxxxxxxxxxxxxxxxxxxx";\nconst label = "Price: " + "12";`);
+    const f = await exposedSecrets.run({ scope: undefined as never, projectDir: dir, options: {}, log: () => {} });
+    assert.deepEqual(f.map((x) => x.id).sort(), ["exposed-secrets:stripe-secret:app.js:1:decoded", "exposed-secrets:stripe-secret:app.js:2"]);
+    const hidden = f.find((x) => x.id.endsWith(":decoded"))!;
+    assert.match(hidden.title, /hidden by string concatenation/);
+    assert.equal(hidden.state, "proven");
+    assert.doesNotMatch(JSON.stringify(f), /51HiddenKeyAbcdefGhij0123/, "the key is redacted");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

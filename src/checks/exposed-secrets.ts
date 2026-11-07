@@ -102,6 +102,37 @@ function redact(secret: string): string {
   return `${secret.slice(0, 6)}...${secret.slice(-4)} (${secret.length} chars)`;
 }
 
+const LIT = String.raw`(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')`;
+const unquote = (lit: string): string => {
+  const body = lit.slice(1, -1);
+  return body.replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|.)/g, (_m, e: string) =>
+    (e[0] === "x" && e.length === 3) || (e[0] === "u" && e.length === 5) ? String.fromCharCode(parseInt(e.slice(1), 16)) : e === "n" ? "\n" : e);
+};
+const printable = (s: string) => /^[\x20-\x7e\r\n\t]+$/.test(s);
+
+/**
+ * Views of the source where a key hidden from plain scanners becomes readable:
+ * concatenated literals ("sk_li" + "ve_..."), ["a","b"].join(""), atob("..."),
+ * \x / \u escapes, and "...".split("").reverse().join(""). Literals only: no
+ * code is evaluated.
+ */
+export function decodedViews(content: string): { text: string; index: number; method: string }[] {
+  const out: { text: string; index: number; method: string }[] = [];
+  const lits = (s: string) => [...s.matchAll(new RegExp(LIT, "g"))].map((m) => unquote(m[0]));
+  for (const m of content.matchAll(new RegExp(`${LIT}(?:\\s*\\+\\s*${LIT})+`, "g"))) out.push({ text: lits(m[0]).join(""), index: m.index!, method: "string concatenation" });
+  for (const m of content.matchAll(new RegExp(`\\[\\s*(${LIT}(?:\\s*,\\s*${LIT})+)\\s*,?\\s*\\]\\s*\\.join\\(\\s*(?:""|'')\\s*\\)`, "g"))) out.push({ text: lits(m[1]!).join(""), index: m.index!, method: "array join" });
+  for (const m of content.matchAll(/\batob\(\s*["']([A-Za-z0-9+/=]{16,})["']\s*\)/g)) {
+    const t = Buffer.from(m[1]!, "base64").toString("utf8");
+    if (printable(t)) out.push({ text: t, index: m.index!, method: "base64 (atob)" });
+  }
+  for (const m of content.matchAll(new RegExp(LIT, "g"))) {
+    if (!/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})/.test(m[0])) continue;
+    out.push({ text: unquote(m[0]), index: m.index!, method: "escaped characters" });
+  }
+  for (const m of content.matchAll(new RegExp(`(${LIT})\\.split\\(\\s*(?:""|'')\\s*\\)\\.reverse\\(\\)\\.join\\(\\s*(?:""|'')\\s*\\)`, "g"))) out.push({ text: [...unquote(m[1]!)].reverse().join(""), index: m.index!, method: "reversed string" });
+  return out;
+}
+
 export const exposedSecrets: Check = {
   name: "exposed-secrets",
   title: "Secrets and private keys shipped to the client bundle",
@@ -126,40 +157,57 @@ export const exposedSecrets: Check = {
         continue;
       }
       const rel = relative(root, file);
+      const add = (p: SecretPattern, secret: string, line: number, decoded?: string) => {
+        const sensitive = p.sensitive !== false;
+        findings.push({
+          id: `exposed-secrets:${p.id}:${rel}:${line}${decoded ? ":decoded" : ""}`,
+          check: "exposed-secrets",
+          title: (sensitive ? `${p.title} exposed in ${rel}` : `${p.title} in ${rel}`) + (decoded ? ` (hidden by ${decoded})` : ""),
+          severity: p.severity,
+          state: "proven", // a deterministic regex match on a key shape is proof enough to act
+          location: `${rel}:${line}`,
+          description: (sensitive
+            ? `A ${p.title} appears in a file under the scanned directory. If this directory is a ` +
+              `client bundle, the secret is readable by anyone who opens the page.`
+            : `A ${p.title} appears in ${rel}. Test-mode keys are safe to expose, so this is not an ` +
+              `incident, but shipping any key to the client is a habit worth breaking.`) +
+            (decoded ? ` It is split or encoded in the source (${decoded}), which hides it from plain scanners but not from anyone running the code.` : ""),
+          remediation: sensitive
+            ? `Rotate this credential now (assume it is compromised), then move it server-side. ` +
+              `Client code should only ever hold publishable keys.`
+            : `No rotation needed for a test key. Prefer a publishable key in client code, and keep ` +
+              `even test secrets out of the bundle.`,
+          proof: decoded
+            ? { method: `deterministic regex match on a known key format, after decoding (${decoded})`, replay: `sed -n '${line}p' "${rel}"`, evidence: redact(secret) }
+            : { method: "deterministic regex match on a known key format", replay: `grep -nE '${p.regex.source}' "${rel}"`, evidence: redact(secret) },
+          regressionHint:
+            `Add a CI step that greps the build output for ${p.id} and fails if present.`,
+        });
+        rawOf.set(findings[findings.length - 1]!, secret);
+      };
+      const inRaw = new Set<string>();
       for (const p of PATTERNS) {
         p.regex.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = p.regex.exec(content)) !== null) {
           if (p.accept && !p.accept(m[0], content, m.index)) continue;
           if (isPlaceholder(m[0])) continue;
-          const line = content.slice(0, m.index).split("\n").length;
-          const sensitive = p.sensitive !== false;
-          findings.push({
-            id: `exposed-secrets:${p.id}:${rel}:${line}`,
-            check: "exposed-secrets",
-            title: sensitive ? `${p.title} exposed in ${rel}` : `${p.title} in ${rel}`,
-            severity: p.severity,
-            state: "proven", // a deterministic regex match on a key shape is proof enough to act
-            location: `${rel}:${line}`,
-            description: sensitive
-              ? `A ${p.title} appears in a file under the scanned directory. If this directory is a ` +
-                `client bundle, the secret is readable by anyone who opens the page.`
-              : `A ${p.title} appears in ${rel}. Test-mode keys are safe to expose, so this is not an ` +
-                `incident, but shipping any key to the client is a habit worth breaking.`,
-            remediation: sensitive
-              ? `Rotate this credential now (assume it is compromised), then move it server-side. ` +
-                `Client code should only ever hold publishable keys.`
-              : `No rotation needed for a test key. Prefer a publishable key in client code, and keep ` +
-                `even test secrets out of the bundle.`,
-            proof: {
-              method: "deterministic regex match on a known key format",
-              replay: `grep -nE '${p.regex.source}' "${rel}"`,
-              evidence: redact(m[0]),
-            },
-            regressionHint:
-              `Add a CI step that greps the build output for ${p.id} and fails if present.`,
-          });
-          rawOf.set(findings[findings.length - 1]!, m[0]);
+          inRaw.add(m[0]);
+          add(p, m[0], content.slice(0, m.index).split("\n").length);
+        }
+      }
+      // Keys split or encoded in the source: the same detectors on decoded views.
+      for (const v of decodedViews(content)) {
+        for (const p of PATTERNS) {
+          p.regex.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = p.regex.exec(v.text)) !== null) {
+            // Already reported when a piece alone matched (a long first half): same key, one finding.
+            if (isPlaceholder(m[0]) || [...inRaw].some((r) => m![0].includes(r) || r.includes(m![0]))) continue;
+            if (p.accept && !p.accept(m[0], v.text, m.index)) continue;
+            inRaw.add(m[0]);
+            add(p, m[0], content.slice(0, v.index).split("\n").length, v.method);
+          }
         }
       }
     }

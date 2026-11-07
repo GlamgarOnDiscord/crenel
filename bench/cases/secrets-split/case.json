@@ -1,0 +1,12 @@
+{
+  "title": "A bundle that splits a live key into pieces to dodge scanners, next to harmless concatenations and a base64 icon",
+  "type": "static",
+  "config": {},
+  "mustFind": [
+    { "id": "split-openai-key", "check": "exposed-secrets", "text": "OpenAI", "state": "proven", "minSeverity": "high", "why": "The key is rebuilt at runtime from two literals: anyone running the page has it." }
+  ],
+  "mustNotFlag": [
+    { "id": "doc-placeholder", "check": "exposed-secrets", "text": "Stripe", "forbid": "any", "why": "The docs snippet concatenates a placeholder, not a key." },
+    { "id": "icon-data", "check": "exposed-secrets", "where": "icons", "forbid": "any", "why": "A base64 icon decodes to an image, not a key." }
+  ]
+}

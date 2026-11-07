@@ -58,7 +58,11 @@ API key and OAuth client secret, OpenAI (incl. `sk-proj-`), Anthropic, GitHub
 (classic, fine-grained, OAuth family), Slack, npm, SendGrid, Supabase
 service-role JWT (the payload is decoded: only `role: service_role` counts) and
 `sb_secret_` keys, and PEM private-key blocks. A Google key inside a Firebase
-web config is public by design and left to `baas-exposure`. A match is **proven** with a
+web config is public by design and left to `baas-exposure`. Keys hidden from plain
+scanners are found too: the same detectors run on decoded views of the source
+(concatenated literals, `["a","b"].join("")`, `atob("...")` on a literal,
+`\x`/`\u` escapes, a reversed string); literals only, no code is evaluated, and
+the title names the decoding. A match is **proven** with a
 `grep` you can replay. Fix: rotate the key and move it server-side; client code
 holds only publishable keys.
 
