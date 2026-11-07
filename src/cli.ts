@@ -101,6 +101,12 @@ async function main(): Promise<number> {
     } else {
       process.stdout.write(renderText(result) + "\n");
     }
+    // A check that threw produced no findings; surface it loudly so a partial
+    // run is never mistaken for a clean one (the exit code reflects it below).
+    if (result.errors.length > 0) {
+      process.stderr.write(`\n${result.errors.length} check(s) ont échoué, résultat partiel:\n`);
+      for (const e of result.errors) process.stderr.write(`  - ${e.check}: ${e.message}\n`);
+    }
     if (flags.out && typeof flags.out === "string") {
       writeFileSync(flags.out, renderJson(result));
     }
@@ -129,8 +135,10 @@ async function main(): Promise<number> {
       process.stdout.write(`Baseline écrite dans ${baselinePath}.\n`);
     }
 
-    // Exit non-zero on a proven high/critical, or on a regression vs baseline.
-    return exitCode(result) || (regressed ? 1 : 0);
+    // Exit non-zero on a proven high/critical, on a regression vs baseline, or
+    // when a check failed (a partial run must not pass as clean: fail closed).
+    const errExit = result.errors.length > 0 ? 2 : 0;
+    return Math.max(exitCode(result), regressed ? 1 : 0, errExit);
   }
 
   if (cmd === "generate-tests") {

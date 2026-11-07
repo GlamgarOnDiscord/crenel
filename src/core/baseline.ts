@@ -63,11 +63,15 @@ export function saveBaseline(path: string, result: RunResult): void {
 export function diff(result: RunResult, baseline: Baseline): Diff {
   const baseIds = new Map(baseline.findings.map((e) => [e.id, e]));
   const nowIds = new Set(result.findings.map((f) => f.id));
+  const ran = new Set(result.checksRun);
   const added = result.findings.filter((f) => !baseIds.has(f.id));
   const persisting = result.findings.filter((f) => baseIds.has(f.id));
-  // Only things that were PROVEN before and are gone now count as "fixed": a
-  // lead that merely stopped showing is not a verified fix.
-  const fixed = baseline.findings.filter((e) => e.state === "proven" && !nowIds.has(e.id));
+  // Only things that were PROVEN before and are gone now count as "fixed", AND
+  // only when the check that produced them actually ran this time. A check that
+  // crashed produces no findings, which must not be read as "fixed".
+  const fixed = baseline.findings.filter(
+    (e) => e.state === "proven" && !nowIds.has(e.id) && ran.has(e.check),
+  );
   return { added, fixed, persisting };
 }
 

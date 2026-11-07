@@ -13,13 +13,15 @@ function level(sev: Severity, state: Finding["state"]): "error" | "warning" | "n
 }
 
 // "path:line" -> { uri, startLine } ; a bare path or URL keeps uri only.
+// A URL (has a scheme) is never split on its port colon, and a region's
+// startLine is clamped to >= 1 as the SARIF schema requires.
 function physicalLocation(location: string): Record<string, unknown> {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(location)) {
+    return { artifactLocation: { uri: location } };
+  }
   const m = location.match(/^(.*):(\d+)$/);
-  const uri = m ? m[1]! : location;
-  const artifactLocation = { uri };
-  return m
-    ? { artifactLocation, region: { startLine: Number(m[2]) } }
-    : { artifactLocation };
+  if (!m) return { artifactLocation: { uri: location } };
+  return { artifactLocation: { uri: m[1]! }, region: { startLine: Math.max(1, Number(m[2])) } };
 }
 
 export function toSarif(result: RunResult): string {
@@ -39,11 +41,24 @@ export function toSarif(result: RunResult): string {
             rules: [...rulesSeen.values()].map((r) => ({ id: r.id, name: r.name })),
           },
         },
+        // executionSuccessful=false when any check threw, so a partial run is
+        // not consumed as a clean one by GitHub code scanning.
+        invocations: [
+          {
+            executionSuccessful: result.errors.length === 0,
+            toolExecutionNotifications: result.errors.map((e) => ({
+              level: "error",
+              message: { text: `${e.check}: ${e.message}` },
+            })),
+          },
+        ],
         results: result.findings.map((f) => ({
           ruleId: f.check,
           level: level(f.severity, f.state),
           message: { text: `${f.title}. ${f.remediation}` },
           locations: [{ physicalLocation: physicalLocation(f.location) }],
+          // Stable id so an alert does not close and reopen between runs.
+          partialFingerprints: { crenelFindingId: f.id },
           properties: { severity: f.severity, state: f.state, id: f.id },
         })),
       },

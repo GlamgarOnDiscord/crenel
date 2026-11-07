@@ -10,8 +10,10 @@ function finding(over: Partial<Finding>): Finding {
     location: "l", description: "d", remediation: "r", ...over,
   };
 }
-function result(findings: Finding[]): RunResult {
-  return { project: "p", startedAt: "2026-01-01T00:00:00Z", findings, errors: [], checksRun: [] };
+// checksRun defaults to the check the finding() helper uses, since a check that
+// ran but found nothing is still "run" (that is how a fix is detected).
+function result(findings: Finding[], checksRun: string[] = ["c"]): RunResult {
+  return { project: "p", startedAt: "2026-01-01T00:00:00Z", findings, errors: [], checksRun };
 }
 
 test("diff splits added, fixed and persisting by id", () => {
@@ -34,4 +36,12 @@ test("a new proven high or critical is a regression; a new lead is not", () => {
   assert.equal(hasRegression(diff(result([finding({ id: "n", state: "proven", severity: "critical" })]), base)), true);
   assert.equal(hasRegression(diff(result([finding({ id: "n", state: "unproven", severity: "critical" })]), base)), false);
   assert.equal(hasRegression(diff(result([finding({ id: "n", state: "proven", severity: "low" })]), base)), false);
+});
+
+test("a proven finding whose check did not run is NOT reported as fixed", () => {
+  const base = toBaseline(result([finding({ id: "a", check: "headers", state: "proven" })]));
+  // this run: the headers check crashed, so it is absent from checksRun
+  const now = result([], ["exposed-secrets"]);
+  const d = diff(now, base);
+  assert.equal(d.fixed.length, 0, "a crashed check must not read as a fix");
 });
