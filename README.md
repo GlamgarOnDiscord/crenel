@@ -57,6 +57,7 @@ The diff reports what is **new** (a regression), what you **fixed** (a finding t
 | `exposed-secrets` | read-only, offline | Server-side keys and private keys shipped into a client bundle (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Supabase service role, PEM blocks). |
 | `dependency-risk` | read-only, offline | Supply-chain risk in your dependencies: a locked package whose exact version is on a malware denylist (proven), plus install hooks, non-registry deps and a missing lockfile (leads). |
 | `ci-hardening` | read-only, offline | Risky GitHub Actions workflows: `pull_request_target`, actions not pinned to a commit SHA, and installs without `--ignore-scripts`. |
+| `headers` | read-only | Missing security headers (CSP, HSTS, nosniff, frame-options, referrer) and cookie flags on your staging response. |
 | `authz-matrix` | read-only to generate, active to probe | One account reaching another account's objects. Generates a CI test always; with a staging URL and test accounts (opt-in), it replays each cross-tenant request and proves any that are not denied. |
 
 Run `bastion list` to see them.
@@ -106,7 +107,6 @@ Needs the user's credentials or a product decision (not done autonomously):
 - `cloudflare-audit`: wrap cloudflare/security-audit-skill and normalise its output.
 
 Self-contained next steps:
-- `headers` check (security headers and cookie flags on your own staging).
 - Sync the malware denylist from OSV / GitHub advisories in CI.
 - `mcp-surface`: checks for LLM and MCP features exposed to users.
 - A Tauri desktop app over the same core.

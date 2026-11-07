@@ -7,8 +7,9 @@ import { exposedSecrets } from "../checks/exposed-secrets.js";
 import { authzMatrix } from "../checks/authz-matrix.js";
 import { dependencyRisk } from "../checks/dependency-risk.js";
 import { ciHardening } from "../checks/ci-hardening.js";
+import { headers } from "../checks/headers.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {
