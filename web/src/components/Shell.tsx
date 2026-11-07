@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  House, ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
-  Plug, ShieldCheck, BookOpen, Settings, Search, Menu, X, ChevronsUpDown, Globe, FolderGit2, SquarePen, TerminalSquare, ChevronDown,
+  ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
+  Plug, ShieldCheck, BookOpen, Settings, Search, Menu, X, ChevronsUpDown, Globe, FolderGit2, SquarePen, ChevronDown,
 } from "lucide-react";
 import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
 import { DOCS_URL } from "../lib/links.ts";
 import { WorkspaceProvider, useWorkspace } from "../lib/workspace.tsx";
-import { findings, guardedCount, secrets, targets, tasks } from "../data/mock.ts";
+import { findings, guardedCount, targets, tasks } from "../data/mock.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Picker } from "./ui.tsx";
 import { ToastProvider } from "./toast.tsx";
@@ -18,22 +18,20 @@ import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 const proven = findings.filter((f) => f.state === "proven").length;
 const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
 
+// Only what a founder opens every day stays visible: start a task, follow
+// tasks, read proven findings, check what CI keeps out. The rest sits under a
+// collapsed "Plus" group and stays one ⌘K away.
 const nav = [
   { group: null, items: [
-    { to: "/app/overview", icon: House, label: "Accueil" },
-    { to: "/app/agent", icon: TerminalSquare, label: "Agent", live: true },
     { to: "/app/scans", icon: ListTodo, label: "Tâches", count: waiting || undefined },
-  ]},
-  { group: "Sécurité", items: [
     { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: proven, danger: true },
-    { to: "/app/secrets", icon: KeyRound, label: "Secrets", count: secrets.length },
-    { to: "/app/authz", icon: LockKeyhole, label: "Autorisation" },
     { to: "/app/tests", icon: ShieldCheck, label: "Tests gardés", count: guardedCount, guard: true },
   ]},
-  { group: "Espace", items: [
-    { to: "/app/targets", icon: FolderClosed, label: "Cibles", count: targets.length },
+  { group: "Plus", collapsed: true, items: [
+    { to: "/app/secrets", icon: KeyRound, label: "Secrets" },
+    { to: "/app/authz", icon: LockKeyhole, label: "Autorisation" },
+    { to: "/app/targets", icon: FolderClosed, label: "Cibles" },
     { to: "/app/integrations", icon: Plug, label: "Intégrations" },
-    { to: "/app/settings", icon: Settings, label: "Paramètres" },
   ]},
 ];
 
@@ -60,7 +58,7 @@ function TargetSwitcher() {
 function NavGroup({ g }: { g: (typeof nav)[number] }) {
   const { pathname } = useLocation();
   const holds = g.items.some((it) => pathname.startsWith(it.to));
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!("collapsed" in g && g.collapsed));
   const shown = open || holds;
   return (
     <div className="navgroup">
@@ -75,7 +73,6 @@ function NavGroup({ g }: { g: (typeof nav)[number] }) {
             <div key={it.to} data-id={it.to} className="navwrap">
               <NavLink to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
                 <it.icon size={16} aria-hidden="true" /> {it.label}
-                {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
                 {"count" in it && it.count !== undefined && (
                   <span className={cn("count t-badge", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
                 )}
@@ -98,8 +95,13 @@ function SideContent({ onSearch }: { onSearch: () => void }) {
       {nav.map((g, gi) => <NavGroup key={gi} g={g} />)}
       <div className="spacer" />
       <div className="foot">
-        <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden="true" /> Documentation</a>
-        <div className="me"><span className="av">T</span><span className="me-tx"><span>Tom</span><span className="me-r">propriétaire</span></span></div>
+        <div className="me">
+          <span className="av">T</span><span className="me-tx"><span>Tom</span><span className="me-r">propriétaire</span></span>
+          <span className="me-actions">
+            <Tooltip content="Documentation"><a className="me-btn" href={DOCS_URL} target="_blank" rel="noopener noreferrer" aria-label="Documentation"><BookOpen size={15} aria-hidden="true" /></a></Tooltip>
+            <Tooltip content="Paramètres"><NavLink to="/app/settings" className={({ isActive }) => cn("me-btn", isActive && "active")} aria-label="Paramètres"><Settings size={15} aria-hidden="true" /></NavLink></Tooltip>
+          </span>
+        </div>
       </div>
     </>
   );

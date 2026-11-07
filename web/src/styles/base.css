@@ -895,3 +895,8 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .folder-spark { --accent: var(--fg-muted); --accent-strong: var(--fg); }
 .metrics > article { padding: 20px 22px !important; }
 .filters > * { min-width: 0; max-width: 100%; }
+
+/* Sidebar footer: docs and settings as quiet icon buttons next to the user. */
+.me-actions { margin-left: auto; display: flex; gap: 2px; }
+.me-btn { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--fg-faint); transition: color .15s, background .15s; }
+.me-btn:hover, .me-btn.active { color: var(--fg); background: var(--bg-hover, rgba(255,255,255,.05)); }
