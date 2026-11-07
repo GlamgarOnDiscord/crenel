@@ -105,13 +105,32 @@ function testFor(f: Finding): string | null {
       ].join("\n");
     }
     case "authz-matrix": {
+      // One test per proven object, on that exact object: a fix that only
+      // covers new objects (old rows still leaking) fails here. Leads and the
+      // offline plan have nothing concrete to assert.
+      if (f.state !== "proven") return null;
+      let path: string;
+      try { const u = new URL(f.location); path = u.pathname + u.search; } catch { return null; }
+      const token = /:c(:discovered)?$/.test(f.id) ? "TOKEN_C" : "TOKEN_A";
       return [
         `test(${JSON.stringify(title)}, async () => {`,
-        `  // Account A must never reach account B's object.`,
-        `  for (const id of B_OWNS) {`,
-        "    const res = await fetch(`${BASE_URL}/api/projects/${id}`, { headers: { authorization: `Bearer ${TOKEN_A}` } });",
+        `  // This object belongs to account B: another account, and nobody signed out, must be denied.`,
+        `  for (const auth of [{ authorization: \`Bearer \${${token}}\` }, {}]) {`,
+        `    const res = await fetch(\`\${BASE_URL}${esc(path)}\`, { headers: auth });`,
         `    expect([401, 403, 404]).toContain(res.status);`,
         `  }`,
+        `});`,
+      ].join("\n");
+    }
+    case "live-bundle": {
+      if (f.state !== "proven") return null;
+      const url = f.location.replace(/:\d+$/, "");
+      const isMap = f.id.startsWith("live-bundle:sourcemap:");
+      return [
+        `test(${JSON.stringify(title)}, async () => {`,
+        isMap
+          ? `  expect((await fetch(${JSON.stringify(url)})).status).not.toBe(200);`
+          : `  const src = await (await fetch(${JSON.stringify(url)})).text();\n  expect(src).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|sb_secret_|AIza[0-9A-Za-z_-]{35}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY/);`,
         `});`,
       ].join("\n");
     }
@@ -165,7 +184,7 @@ export function generateRegressionFile(findings: Finding[]): string {
       "",
       "const BASE_URL = process.env.STAGING_URL!;",
       "const TOKEN_A = process.env.TEST_TOKEN_A!;",
-      "const B_OWNS: string[] = JSON.parse(process.env.B_OWNS ?? '[]');",
+      "const TOKEN_C = process.env.TEST_TOKEN_C ?? TOKEN_A;",
     );
   }
   return header.join("\n") + "\n\n" + bodies.join("\n\n") + "\n";
