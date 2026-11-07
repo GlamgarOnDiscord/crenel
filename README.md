@@ -39,7 +39,10 @@ pnpm install
 pnpm demo          # scans the bundled vulnerable example, offline
 ```
 
-You should see a proven `critical` finding for a Stripe secret key shipped in the example bundle, plus a `lead` from the authorization matrix.
+You should see proven `critical` findings (a Stripe secret key and a known-malicious
+package shipped in the example), plus `leads` from the authorization matrix and CI
+checks. The command exits non-zero on purpose: a proven high/critical finding is a
+CI gate, not a crash.
 
 ## Use it on your project
 
