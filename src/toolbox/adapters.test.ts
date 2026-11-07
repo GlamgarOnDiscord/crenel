@@ -102,8 +102,7 @@ test("tool argv: filtered nuclei templates and tags, no interactsh, bounded kata
   assert.equal(k[k.indexOf("-d") + 1], "2");
   assert.equal(k[k.indexOf("-fs") + 1], "fqdn");
   assert.ok(!k.includes("-aff"), "no automatic form filling");
-  assert.ok(trufflehogArgv(false).includes("--no-verification"));
-  assert.ok(!trufflehogArgv(true).includes("--no-verification"));
+  assert.ok(trufflehogArgv().includes("--no-verification"));
   // Options can narrow, never widen.
   assert.throws(() => ToolboxOptions.parse({ nuclei: { tags: ["intrusive"] } }));
   assert.equal(ToolboxOptions.parse({ nuclei: { tags: ["exposure"] } }).nuclei.tags[0], "exposure");
@@ -118,4 +117,13 @@ test("katana routes are merged with what the proxy forwarded (katana's output dr
   const all = mergeRoutes(fromKatana, fromProxy);
   assert.equal(all.length, 2);
   assert.deepEqual(suggestResources(all).map((s) => s.path), ["/api/invoices/:id"]);
+});
+
+test("nuclei does not run without scope.allowActiveTesting, even from the CLI", async () => {
+  const { runTool } = await import("./run.js");
+  const config = { project: "t", projectDir: ".", checks: [], options: {}, scope: { allowedHosts: ["127.0.0.1"], allowActiveTesting: false, allowPrivate: true, stagingUrl: "http://127.0.0.1:4580" } };
+  const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+  const out = await runTool({ tool: "nuclei", config, projectDir: ".", scope, checks: REGISTRY, status: { available: true, image: "x", imagePresent: true } });
+  assert.equal(out.ran, false);
+  assert.match(out.reason ?? "", /allowActiveTesting/);
 });

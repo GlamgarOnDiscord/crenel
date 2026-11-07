@@ -38,9 +38,10 @@ export const ToolboxOptions = z.object({
     durationSec: z.number().int().min(10).max(1800).default(120),
   }).strict().default({ depth: 2, durationSec: 120 }),
   trufflehog: z.object({
-    /** Opt-in: let trufflehog check whether a key is live. Goes through the proxy, to verifyHosts only. */
+    /** Deprecated, ignored: trufflehog never verifies. Its leads are replayed by
+     *  exposed-secrets, whose opt-in liveness (options.exposed-secrets.verify)
+     *  makes one read-only GET per key through Crenel's scoped client. */
     verify: z.boolean().default(false),
-    /** Provider hosts trufflehog may call when verify is on (e.g. api.stripe.com). Nothing else. */
     verifyHosts: z.array(z.string().trim().min(1)).default([]),
   }).strict().default({ verify: false, verifyHosts: [] }),
 }).strict();
@@ -64,8 +65,6 @@ export interface ToolRunInput {
   signal?: AbortSignal;
   /** Override for tests. */
   status?: DockerStatus;
-  /** trufflehog liveness checks (options.toolbox.trufflehog.verify) are honoured only when true: the CLI. */
-  allowVerify?: boolean;
 }
 
 export interface ToolRunOutput {
@@ -105,8 +104,8 @@ export function katanaArgv(target: string, proxy: string, o: ToolboxOptions): st
   ];
 }
 
-export function trufflehogArgv(verify: boolean): string[] {
-  return ["trufflehog", "filesystem", "/project", "--json", "--no-update", ...(verify ? [] : ["--no-verification"])];
+export function trufflehogArgv(): string[] {
+  return ["trufflehog", "filesystem", "/project", "--json", "--no-update", "--no-verification"];
 }
 
 /** Run one tool. Never throws: a missing Docker or a failed container setup returns ran=false with the reason. */
@@ -130,16 +129,16 @@ async function runToolInner(i: ToolRunInput): Promise<ToolRunOutput> {
   const proxy = { ratePerSec: o.ratePerSec, maxRequests: o.maxRequests };
 
   if (i.tool === "trufflehog") {
-    const verify = !!i.allowVerify && o.trufflehog.verify && o.trufflehog.verifyHosts.length > 0;
-    // Without verification: no network at all. With it: a scope of the declared provider hosts only.
-    const scope = verify ? new Scope({ allowedHosts: o.trufflehog.verifyHosts, signal: i.scope.signal, onRequest: i.scope.onRequest }) : null;
-    const r = await runConfined({ tool: "trufflehog", scope, argv: trufflehogArgv(verify), projectDir: i.projectDir, image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
+    // No network at all: liveness, when asked for, is exposed-secrets' job on replay.
+    const r = await runConfined({ tool: "trufflehog", scope: null, argv: trufflehogArgv(), projectDir: i.projectDir, image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
     const p = parseTrufflehog(r.stdout);
     const verdicts = await replay(p.claims, i);
     return finish({ ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr) }, p.findings, verdicts);
   }
 
   if (i.tool === "nuclei") {
+    // Thousands of templates, some of them sending payloads: active testing, never by default.
+    if (!i.config.scope.allowActiveTesting) return { ...base, reason: "nuclei is active testing: set scope.allowActiveTesting: true for your own staging" };
     const r = await runConfined({ tool: "nuclei", scope: i.scope, argv: [], argvWithProxy: (px) => nucleiArgv(target!, px, o), image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
     const p = parseNuclei(r.stdout, i.scope, target);
     const verdicts = await replay(p.claims, i);

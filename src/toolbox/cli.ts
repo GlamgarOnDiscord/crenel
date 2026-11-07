@@ -106,7 +106,7 @@ export async function toolsCommand(i: ToolsCliInput): Promise<number> {
   }
   const projectDir = isAbsolute(i.config.projectDir) ? i.config.projectDir : resolve(configDir, i.config.projectDir);
   const t0 = Date.now();
-  const r = await runTool({ tool: sub as ToolName, config: i.config, projectDir, scope, checks: REGISTRY, onEvent, allowVerify: true });
+  const r = await runTool({ tool: sub as ToolName, config: i.config, projectDir, scope, checks: REGISTRY, onEvent });
   write({
     at: new Date().toISOString(), kind: "toolbox.run", tool: r.tool, ran: r.ran, reason: r.reason, exit: r.exit, timedOut: r.timedOut,
     network: r.network, proxy: r.proxy, ms: Date.now() - t0, project: i.config.project,

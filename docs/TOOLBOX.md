@@ -43,7 +43,7 @@ For every request and every tunnel:
 - katana: depth 1 to 5 (default 2), field scope `fqdn`, no form filling, no headless browser, bounded duration;
 - trufflehog: no network by default.
 
-A decrypting proxy (MITM with a per-run CA) would let the proxy filter methods over HTTPS too. It is not done: it means injecting a CA into the container and handling certificate pinning, and it is a bigger attack surface than the problem it solves for read-only tools.
+A decrypting proxy (MITM with a per-run CA) would let the proxy filter methods over HTTPS too. It is not done, on purpose: it means injecting a CA into the container and handling certificate pinning, and it is a bigger attack surface than the problem it solves for read-only tools.
 
 What is **not** covered:
 
@@ -92,12 +92,11 @@ options:
       excludeTags: []     # added to Crenel's denylist
       concurrency: 10
     katana: { depth: 2, durationSec: 120 }
-    trufflehog:
-      verify: false       # opt-in liveness check of found keys
-      verifyHosts: []     # e.g. [api.stripe.com]: the only hosts it may reach
 ```
 
-`trufflehog.verify` (CLI only) runs trufflehog with network, through the proxy, with a scope made of `verifyHosts` only: a detector whose provider host is not declared is refused and journalled. Liveness checks use the provider's API, sometimes with a `POST` over HTTPS that the proxy cannot see (see above). Keep it off unless you need it.
+trufflehog always runs with `--no-verification` and no network. Each of its leads is replayed by `exposed-secrets`, and that check's opt-in liveness (`options.exposed-secrets.verify: true`, provider host declared in `scope.allowedHosts`) makes one read-only `GET` per key through Crenel's own scoped client, where every request is visible and journalled. trufflehog's own verifiers sometimes `POST` over HTTPS, which the proxy cannot see, so they are not used. The old `trufflehog.verify` and `verifyHosts` options are still accepted and ignored.
+
+nuclei counts as active testing: it does not run, from the console or the CLI, unless `scope.allowActiveTesting` is `true`.
 
 A full nuclei run against one host with the whole allowlist is a few thousand GET requests (about 3,400 for the demo app); at the default 10 requests per second that is several minutes. Narrow `nuclei.tags` for a quicker pass.
 
