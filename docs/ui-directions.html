@@ -1,0 +1,164 @@
+<title>Bastion — 4 directions UI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* Single committed dark shell: this page showcases four dark palettes, so the
+   literal colors inside each tile are content, not the page's own theme. The
+   shell background and text are set explicitly below. */
+:root {
+  --shell-bg: #09090b;
+  --shell-panel: #121214;
+  --shell-border: #232327;
+  --shell-fg: #ededf0;
+  --shell-dim: #8a8a92;
+  --f-ui: "Inter", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--shell-bg); color: var(--shell-fg);
+  font-family: var(--f-ui); line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1200px; margin: 0 auto; padding-block: 32px 64px; }
+header.page { display: grid; gap: 10px; margin-bottom: 28px; }
+.eyebrow { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--shell-dim); }
+h1 { font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.2rem); font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.sub { color: var(--shell-dim); max-width: 64ch; margin: 0; }
+.legend { font-size: 0.85rem; color: var(--shell-dim); border: 1px dashed var(--shell-border); border-radius: 8px; padding: 10px 12px; }
+
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* A tile renders one direction, using its own scoped tokens. */
+.tile {
+  --bg: #000; --panel: #111; --border: #222; --txt: #fff; --dim: #888;
+  --acc: #fff; --acc-ink: #000;
+  --crit: #f05; --high: #f90; --med: #ec4; --low: #4d8;
+  border: 1px solid var(--shell-border); border-radius: 16px; overflow: hidden;
+  background: var(--shell-panel);
+}
+.tile[data-dir="a"] { --bg:#0C0D10; --panel:#15161B; --border:#242631; --txt:#E6E8EC; --dim:#8A8F98; --acc:#8B5CF6; --acc-ink:#fff; --crit:#F0523E; --high:#F2994A; --med:#E6C34A; --low:#4ADE80; }
+.tile[data-dir="b"] { --bg:#0E100F; --panel:#171A18; --border:#242826; --txt:#EAF0EC; --dim:#8A958E; --acc:#38E8A0; --acc-ink:#05231A; --crit:#FF5C5C; --high:#FFA24A; --med:#E7C84A; --low:#38E8A0; }
+.tile[data-dir="c"] { --bg:#0A0A0B; --panel:#121214; --border:#202023; --txt:#F4F4F5; --dim:#8A8A90; --acc:#E8E8EA; --acc-ink:#111; --crit:#E5484D; --high:#C98A3A; --med:#AFA03E; --low:#5B9E63; }
+.tile[data-dir="d"] { --bg:#0C0D0A; --panel:#141510; --border:#26281F; --txt:#F4F5EF; --dim:#8E9284; --acc:#A3E635; --acc-ink:#14160A; --crit:#FF4D4D; --high:#FF9D2E; --med:#E8C84A; --low:#A3E635; }
+
+.tile-head { padding: 16px 18px; display: grid; gap: 4px; border-bottom: 1px solid var(--shell-border); }
+.tile-head .k { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--shell-dim); }
+.tile-head .name { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+.tile-head .desc { font-size: 0.86rem; color: var(--shell-dim); }
+
+/* Swatches */
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 18px; border-bottom: 1px solid var(--shell-border); }
+.sw { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 0.64rem; color: var(--shell-dim); }
+.sw i { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.12); display: inline-block; }
+
+/* The app preview, painted in the direction's own tokens */
+.app { background: var(--bg); color: var(--txt); padding: 16px; font-size: 13px; }
+.app .bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.app .bar .title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dot { width: 18px; height: 18px; border-radius: 5px; background: var(--acc); display: grid; place-items: center; color: var(--acc-ink); font-size: 11px; font-weight: 700; font-family: var(--f-mono); }
+.pill { font-family: var(--f-mono); font-size: 0.66rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
+.pill b { width: 6px; height: 6px; border-radius: 50%; background: var(--low); display: inline-block; }
+
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.kpi .lab { font-family: var(--f-mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+.kpi .num { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.kpi .num.acc { color: var(--acc); }
+
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+.panel .ph { padding: 9px 12px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center; }
+.panel .ph span { font-family: var(--f-mono); font-size: 0.62rem; color: var(--dim); font-weight: 400; }
+.row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.chip { font-family: var(--f-mono); font-size: 0.6rem; font-weight: 700; padding: 2px 7px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.chip.crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 16%, transparent); }
+.chip.high { color: var(--high); background: color-mix(in srgb, var(--high) 16%, transparent); }
+.chip.med  { color: var(--med);  background: color-mix(in srgb, var(--med) 16%, transparent); }
+.row .ttl { font-size: 0.82rem; min-width: 0; }
+.row .ttl small { display: block; font-family: var(--f-mono); font-size: 0.64rem; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .st { font-family: var(--f-mono); font-size: 0.6rem; color: var(--dim); }
+.row .st.proven { color: var(--low); }
+
+.proof { font-family: var(--f-mono); font-size: 0.66rem; color: var(--dim); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 14px; overflow-x: auto; white-space: nowrap; }
+.proof b { color: var(--txt); }
+
+.foot { display: flex; align-items: center; gap: 10px; }
+.btn { font-family: var(--f-ui); font-weight: 600; font-size: 0.8rem; border: 0; border-radius: 8px; padding: 9px 14px; background: var(--acc); color: var(--acc-ink); cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--txt); border: 1px solid var(--border); }
+.spark { margin-left: auto; }
+.spark svg { display: block; width: 120px; height: 36px; }
+</style>
+
+<div class="wrap">
+  <header class="page">
+    <span class="eyebrow">Bastion · design</span>
+    <h1>Quatre directions d'UI, même écran</h1>
+    <p class="sub">Un seul et même écran type de l'outil (scan, liste de findings, preuve, action) décliné dans quatre identités sombres. Contenu identique partout pour comparer la peau, pas la mise en page. Toutes les références sont de vrais designers, aucun visuel IA.</p>
+    <p class="legend">A Terminal, d'après le scanner « Ward » · B Telemetry, d'après BASALT/METRICS et Ember · C Quiet, d'après Lunor et shadcn · D Signal, d'après SevenTeen et Pulse.</p>
+  </header>
+
+  <div class="grid">
+    <!-- Les 4 tuiles sont générées identiques puis skinnées ; voir le script. -->
+    <div class="tile" data-dir="a"></div>
+    <div class="tile" data-dir="b"></div>
+    <div class="tile" data-dir="c"></div>
+    <div class="tile" data-dir="d"></div>
+  </div>
+</div>
+
+<script>
+const DIRS = {
+  a: { name: "A — Terminal", desc: "Charbon, mono, sélection violette. L'esprit d'un scanner en terminal.", ref: "d'après Ward" },
+  b: { name: "B — Telemetry", desc: "Charbon mat, menthe électrique. Rigueur d'une fiche de télémétrie.", ref: "d'après BASALT/METRICS" },
+  c: { name: "C — Quiet", desc: "Noir assumé, monochrome, un accent retenu. Calme et haut de gamme.", ref: "d'après Lunor" },
+  d: { name: "D — Signal", desc: "Charbon olive, lime vif, gros chiffres. Affirmé, bon pour la landing.", ref: "d'après SevenTeen" },
+};
+const SW = { "--bg":"bg", "--panel":"panel", "--border":"border", "--txt":"txt", "--acc":"accent", "--crit":"crit", "--high":"high", "--low":"low" };
+const SPARK = "M0,30 L15,26 L30,28 L45,18 L60,22 L75,12 L90,16 L105,6 L120,10";
+
+function hex(el, varName) {
+  return getComputedStyle(el).getPropertyValue(varName).trim();
+}
+
+function render(tile) {
+  const d = DIRS[tile.dataset.dir];
+  const sw = Object.entries(SW).map(([v, label]) =>
+    `<span class="sw"><i style="background:${hex(tile, v)}"></i>${hex(tile, v)}</span>`).join("");
+  tile.innerHTML = `
+    <div class="tile-head">
+      <span class="k">${d.ref}</span>
+      <span class="name">${d.name}</span>
+      <span class="desc">${d.desc}</span>
+    </div>
+    <div class="swatches">${sw}</div>
+    <div class="app">
+      <div class="bar">
+        <div class="title"><span class="dot">B</span> Scan · acme-app</div>
+        <span class="pill"><b></b> terminé · 1m 12s</span>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="lab">Prouvés</div><div class="num">2</div></div>
+        <div class="kpi"><div class="lab">Leads</div><div class="num acc">3</div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Findings <span>par sévérité</span></div>
+        <div class="row"><span class="chip crit">crit</span><span class="ttl">Clé Stripe dans le bundle<small>dist/app.js:5</small></span><span class="st proven">prouvé</span></div>
+        <div class="row"><span class="chip high">high</span><span class="ttl">Clé Google exposée<small>dist/app.js:7</small></span><span class="st proven">prouvé</span></div>
+        <div class="row"><span class="chip med">med</span><span class="ttl">Autorisation inter-tenant non testée<small>/api/projects/:id</small></span><span class="st">lead</span></div>
+      </div>
+      <div class="proof"><b>preuve</b> &nbsp;curl -i -H 'authorization: Bearer A' /api/projects/proj_b_1 &nbsp;→ 200</div>
+      <div class="foot">
+        <button class="btn">Générer les tests</button>
+        <button class="btn ghost">Exporter</button>
+        <span class="spark"><svg viewBox="0 0 120 36" fill="none" aria-hidden="true"><path d="${SPARK}" stroke="var(--acc)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </div>
+    </div>`;
+}
+document.querySelectorAll(".tile").forEach(render);
+</script>

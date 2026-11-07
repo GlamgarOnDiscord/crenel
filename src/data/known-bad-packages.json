@@ -1,0 +1,18 @@
+{
+  "_comment": "Seed denylist of npm packages known to have shipped malware at a specific version. Deterministic, offline match against the lockfile. Sync from OSV / GitHub advisories in CI; this is a starter set, not exhaustive.",
+  "_sources": [
+    "https://github.com/advisories/GHSA-g7cv-rxg3-hmpx"
+  ],
+  "packages": [
+    { "name": "@tanstack/react-router", "version": "1.169.5", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/react-router", "version": "1.169.8", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/router-core", "version": "1.169.5", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/router-core", "version": "1.169.8", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/react-start", "version": "1.167.68", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/react-start", "version": "1.167.71", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/start-plugin-core", "version": "1.169.23", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/router-plugin", "version": "1.167.38", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/history", "version": "1.161.9", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" },
+    { "name": "@tanstack/history", "version": "1.161.12", "advisory": "GHSA-g7cv-rxg3-hmpx", "note": "Malware in @tanstack/* (credential exfiltration)" }
+  ]
+}

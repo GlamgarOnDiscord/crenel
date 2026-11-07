@@ -1,0 +1,14 @@
+{
+  "name": "demo-vulnerable-app",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "node ./scripts/setup.js",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.169.5",
+    "left-pad": "git+https://github.com/someone/left-pad.git#main",
+    "react": "18.3.1"
+  }
+}

@@ -39,6 +39,7 @@ pnpm bastion scan --json --out bastion-report.json   # for CI
 | Check | Kind | What it catches |
 |---|---|---|
 | `exposed-secrets` | read-only, offline | Server-side keys and private keys shipped into a client bundle (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Supabase service role, PEM blocks). |
+| `dependency-risk` | read-only, offline | Supply-chain risk in your dependencies: a locked package whose exact version is on a malware denylist (proven), plus install hooks, non-registry deps and a missing lockfile (leads). |
 | `authz-matrix` | read-only to generate, active to probe | One account reaching another account's objects. Generates a CI test always; with a staging URL and test accounts (opt-in), it replays each cross-tenant request and proves any that are not denied. |
 
 Run `bastion list` to see them.
@@ -68,7 +69,8 @@ Bastion is built to be safe to publish and safe to run. The scope guard (`src/co
 
 ## Roadmap
 
-- `dependency-risk`: flag new, unpinned, or install-script packages, and lockfile drift.
+- `dependency-risk`: sync the malware denylist from OSV / GitHub advisories in CI, and add optional online CVE enrichment behind a flag.
+- `cloudflare-audit`: wrap cloudflare/security-audit-skill and normalise its output into Bastion findings.
 - `mcp-surface`: checks for LLM and MCP features exposed to users (prompt-injection, tool scope).
 - `headers`: security headers and cookie flags on your own staging.
 - `validate`: re-run every past proven finding and mark the fixed ones.

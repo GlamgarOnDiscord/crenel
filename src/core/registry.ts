@@ -5,8 +5,9 @@
 import type { Check } from "./types.js";
 import { exposedSecrets } from "../checks/exposed-secrets.js";
 import { authzMatrix } from "../checks/authz-matrix.js";
+import { dependencyRisk } from "../checks/dependency-risk.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {
