@@ -6,7 +6,7 @@ import { isAbsolute, resolve, dirname } from "node:path";
 import type { Config } from "./config.js";
 import { Scope } from "./scope.js";
 import { resolveChecks } from "./registry.js";
-import type { CheckContext, Finding } from "./types.js";
+import type { Check, CheckContext, Finding } from "./types.js";
 
 export interface RunResult {
   project: string;
@@ -20,7 +20,13 @@ export interface RunOptions {
   verbose?: boolean;
 }
 
-export async function run(config: Config, configPath: string, opts: RunOptions = {}): Promise<RunResult> {
+export async function run(
+  config: Config,
+  configPath: string,
+  opts: RunOptions = {},
+  // Checks to run. Defaults to the registry; overridable for tests.
+  checksOverride?: Check[],
+): Promise<RunResult> {
   const configDir = dirname(resolve(configPath));
   const projectDir = isAbsolute(config.projectDir)
     ? config.projectDir
@@ -33,7 +39,7 @@ export async function run(config: Config, configPath: string, opts: RunOptions =
     stagingUrl: config.scope.stagingUrl,
   });
 
-  const checks = resolveChecks(config.checks);
+  const checks = checksOverride ?? resolveChecks(config.checks);
   const log = (msg: string) => {
     if (opts.verbose) process.stderr.write(`  ${msg}\n`);
   };
