@@ -19,6 +19,7 @@ import { relative } from "../core/walk.js";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { safeFetch } from "../core/net.js";
 // Bundled at build time, so the denylist always ships with the check.
 import denylistData from "../data/known-bad-packages.json" with { type: "json" };
 
@@ -173,7 +174,85 @@ export const dependencyRisk: Check = {
       }
     }
 
+    // --- optional registry signals (opt-in, network) ---
+    const opts = (ctx.options["dependency-risk"] ?? {}) as { registry?: boolean | string };
+    if (opts.registry) {
+      const registry = (typeof opts.registry === "string" ? opts.registry : "https://registry.npmjs.org").replace(/\/+$/, "");
+      if (!ctx.scope.isHostAllowed(registry)) {
+        ctx.log(`dependency-risk: registry signals skipped, add ${new URL(registry).hostname} to scope.allowedHosts to enable them`);
+      } else {
+        const direct = Object.keys({ ...(pkg.dependencies as object ?? {}), ...(pkg.devDependencies as object ?? {}) });
+        findings.push(...await registrySignals(direct, locked, registry, ctx, rel(lockPath)));
+      }
+    }
+
     ctx.log(`dependency-risk: root ${rel(root)}, ${locked.size} locked package(s), ${findings.length} finding(s)`);
     return findings;
   },
 };
+
+const DAY = 86_400_000;
+const NEW_PACKAGE_DAYS = 30;
+const FRESH_VERSION_DAYS = 7;
+const MAX_PACKAGES = 150;
+
+/**
+ * Age signals from the registry for the direct dependencies (opt-in, network).
+ * A package first published days ago is the shape of slopsquatting (a name an
+ * AI assistant invented, registered by an attacker) and typosquatting; a locked
+ * version published in the last days is the window of a maintainer takeover,
+ * before the community notices. Leads, never proof: new is not malicious.
+ */
+export async function registrySignals(direct: string[], locked: Set<string>, registry: string, ctx: CheckContext, lockRel: string, now = Date.now()): Promise<Finding[]> {
+  const out: Finding[] = [];
+  const names = direct.slice(0, MAX_PACKAGES);
+  if (direct.length > MAX_PACKAGES) ctx.log(`dependency-risk: registry signals limited to the first ${MAX_PACKAGES} direct dependencies`);
+  for (const name of names) {
+    const url = `${registry}/${name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name)}`;
+    let doc: { time?: Record<string, string> };
+    try {
+      const res = await safeFetch(url, ctx.scope, { headers: { accept: "application/json" }, maxBytes: 12 * 1024 * 1024 });
+      if (res.status === 404) {
+        out.push({
+          id: `dependency-risk:not-on-registry:${name}`, check: "dependency-risk",
+          title: `Dependency not found on the registry: ${name}`, severity: "medium", state: "unproven", location: lockRel,
+          description: `${name} is a direct dependency but ${new URL(registry).host} does not know it. Either it comes from a private registry, or the name was invented (an AI assistant's suggestion) and could be registered by anyone later.`,
+          remediation: "Check where it comes from; if it is not yours, remove it before someone publishes a package under that name.",
+          proof: { method: "registry lookup", replay: `curl -s -o /dev/null -w '%{http_code}' '${url}'`, evidence: "HTTP 404" },
+        });
+        continue;
+      }
+      if (res.status !== 200 || res.truncated) continue;
+      doc = JSON.parse(res.body);
+    } catch (err) {
+      ctx.log(`dependency-risk: ${name}: ${(err as Error).message}`);
+      continue;
+    }
+    const time = doc.time ?? {};
+    const created = Date.parse(time.created ?? "");
+    if (Number.isFinite(created) && now - created < NEW_PACKAGE_DAYS * DAY) {
+      const days = Math.floor((now - created) / DAY);
+      out.push({
+        id: `dependency-risk:new-package:${name}`, check: "dependency-risk",
+        title: `Very new package: ${name} (first published ${days} day(s) ago)`, severity: "medium", state: "unproven", location: lockRel,
+        description: `${name} appeared on the registry ${days} day(s) ago. Fresh packages with plausible names are how slopsquatting and typosquatting land in projects.`,
+        remediation: "Check that this is the package you meant (author, repository, downloads). Prefer an established one.",
+        proof: { method: "registry metadata: time.created", replay: `npm view ${name} time.created`, evidence: time.created! },
+      });
+    }
+    for (const v of [...locked].filter((x) => x.startsWith(`${name}@`)).map((x) => x.slice(name.length + 1))) {
+      const at = Date.parse(time[v] ?? "");
+      if (Number.isFinite(at) && now - at < FRESH_VERSION_DAYS * DAY) {
+        const days = Math.floor((now - at) / DAY);
+        out.push({
+          id: `dependency-risk:fresh-version:${name}@${v}`, check: "dependency-risk",
+          title: `Locked version published ${days} day(s) ago: ${name}@${v}`, severity: "low", state: "unproven", location: lockRel,
+          description: `${name}@${v} is days old. Hijacked versions are usually caught within days; locking one this early skips that window.`,
+          remediation: "Wait a few days before adopting new versions (a minimum release age in your package manager), or review this release.",
+          proof: { method: "registry metadata: time[version]", replay: `npm view ${name}@${v} time`, evidence: time[v]! },
+        });
+      }
+    }
+  }
+  return out;
+}

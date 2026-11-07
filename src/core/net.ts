@@ -98,8 +98,10 @@ export interface SafeResponse {
 export async function safeFetch(
   url: string,
   scope: Scope,
-  init: { method?: string; headers?: Record<string, string> } = {},
+  init: { method?: string; headers?: Record<string, string>; maxBytes?: number } = {},
 ): Promise<SafeResponse> {
+  // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
+  const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
   let current = url;
   const method = init.method ?? "GET";
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -138,8 +140,8 @@ export async function safeFetch(
         const { done, value } = await reader.read();
         if (done) break;
         if (value) {
-          if (received + value.length > MAX_BYTES) {
-            chunks.push(value.slice(0, MAX_BYTES - received));
+          if (received + value.length > cap) {
+            chunks.push(value.slice(0, cap - received));
             truncated = true;
             await reader.cancel();
             break;

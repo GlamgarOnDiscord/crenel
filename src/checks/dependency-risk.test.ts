@@ -102,3 +102,34 @@ test("install hooks and non-registry deps are leads, missing lockfile too", asyn
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("registry signals (opt-in): a days-old package, a fresh locked version, a name unknown to the registry", async () => {
+  const { registrySignals } = await import("./dependency-risk.js");
+  const { createServer } = await import("node:http");
+  const now = Date.UTC(2026, 10, 7);
+  const iso = (daysAgo: number) => new Date(now - daysAgo * 86_400_000).toISOString();
+  const docs: Record<string, unknown> = {
+    "/fresh-helper": { time: { created: iso(3), "1.0.0": iso(3) } },
+    "/react": { time: { created: iso(4000), "18.3.1": iso(2) } },
+    "/@scope%2Fold": { time: { created: iso(900), "2.0.0": iso(300) } },
+  };
+  const srv = createServer((req, res) => {
+    const d = docs[req.url ?? ""];
+    res.writeHead(d ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify(d ?? { error: "not found" }));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const registry = `http://127.0.0.1:${(srv.address() as import("node:net").AddressInfo).port}`;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    const locked = new Set(["fresh-helper@1.0.0", "react@18.3.1", "@scope/old@2.0.0", "made-up-pkg@1.0.0"]);
+    const found = await registrySignals(["fresh-helper", "react", "@scope/old", "made-up-pkg"], locked, registry, { scope, projectDir: ".", options: {}, log: () => {} }, "pnpm-lock.yaml", now);
+    assert.deepEqual(found.map((f) => f.id).sort(), [
+      "dependency-risk:fresh-version:fresh-helper@1.0.0",
+      "dependency-risk:fresh-version:react@18.3.1",
+      "dependency-risk:new-package:fresh-helper",
+      "dependency-risk:not-on-registry:made-up-pkg",
+    ]);
+    assert.ok(found.every((f) => f.state === "unproven"));
+  } finally { srv.close(); }
+});

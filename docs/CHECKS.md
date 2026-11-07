@@ -49,6 +49,14 @@ that runs code on install (lead); a dependency pulled from git/http/file instead
 of the registry (lead); and no lockfile at all (lead). Refresh the denylist with
 `pnpm sync-denylist`.
 
+
+**Registry signals (opt-in, network).** With `options.dependency-risk.registry:
+true` (or a registry URL) and its host in `scope.allowedHosts`, each direct
+dependency is looked up: a package first published less than 30 days ago
+(slopsquatting and typosquatting shape), a locked version published less than 7
+days ago (the window of a maintainer takeover), and a name the registry does not
+know (an invented name anyone could register later). All leads.
+
 ## ci-hardening
 
 Reads `.github/workflows/*.yml`. Flags `pull_request_target` (runs with your
