@@ -46,6 +46,7 @@ empty list runs every read-only check.
 | api-docs | OpenAPI or Swagger definition served by the deployed API | yes (the body parses as a spec) | GETs on declared bases |
 | supabase-rpc | Postgres functions the client calls (`.rpc("x")`) returning data to the anon role | yes (GET with the public key, refused without it) | static; GETs on the Supabase host + active gate |
 | cache-poisoning | Unkeyed header (X-Forwarded-Host/Proto) reflected and stored by the cache | yes (sentinel served without the header) | GETs, needs allowActiveTesting and `options.cache-poisoning.enabled` |
+| business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -487,6 +488,25 @@ Every request carries a unique `?crenel=<nonce>` that no visitor asks for. Befor
 any poisoning request, a fresh nonce must not come back as a cache hit; when it
 does, the cache ignores the query string and a test entry could reach the real
 page, so the path is skipped. Redirects are read, never followed.
+
+## business-logic
+
+Hypotheses, never proofs: the flaws behind "paid without paying" and "made
+myself admin" need writes to prove, which Crenel never sends. Offline, in client
+code (server folders such as `api/`, `server/`, `functions/` and route handlers
+are skipped), it flags:
+
+- **payment**: a request to the app's own route (relative URL) whose body
+  carries `amount`, `unit_amount`, `total`, `totalPrice` or `price` (a Stripe
+  `price_…` id is the right pattern and is ignored; third-party hosts too);
+- **privilege**: a request body, or a Supabase `.update/.insert/.upsert`, that
+  carries `role`, `plan`, `tier`, `credits`, `isAdmin`, `isPro`,
+  `subscription_status`, `permissions`;
+- **routes**: `/api/admin…`, `/api/invite(s)…`, `/api/credits…`,
+  `/api/impersonate…` named in the client (one low lead).
+
+Each is `unproven`, medium (routes: low), and carries a regression test written
+out for the team to run on staging; Crenel does not run it, because it writes.
 
 ## What goes out
 

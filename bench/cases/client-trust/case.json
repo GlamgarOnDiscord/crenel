@@ -1,0 +1,14 @@
+{
+  "title": "A SPA that posts the cart total and the chosen plan to its own API, next to a checkout that sends only a Stripe price id",
+  "type": "static",
+  "config": {},
+  "mustFind": [
+    { "id": "client-amount", "check": "business-logic", "text": "amount.*/api/orders|/api/orders", "where": "cart", "why": "The order route receives the total the browser computed." },
+    { "id": "client-plan", "check": "business-logic", "text": "plan", "where": "settings", "why": "The profile update carries the plan field." }
+  ],
+  "mustNotFlag": [
+    { "id": "stripe-price-id", "check": "business-logic", "where": "upgrade", "forbid": "any", "why": "Sending a Stripe price id is the right pattern; Stripe prices it." },
+    { "id": "aria-role", "check": "business-logic", "where": "menu", "forbid": "any", "why": "An ARIA role on a button is not a privilege." },
+    { "id": "server-route", "check": "business-logic", "where": "server", "forbid": "any", "why": "Server code computing an amount is where it belongs." }
+  ]
+}
