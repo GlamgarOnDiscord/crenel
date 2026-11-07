@@ -1,5 +1,9 @@
 # Bastion
 
+> Product/UI working name: **Crenel** (Bastion is taken). Brand, mascot and web
+> console live under that name; see `docs/IDENTITY.md`. The engine package is
+> still `bastion` pending the final name.
+
 A defensive security harness for SaaS. It helps you attack your own app before anyone else does, then turns each finding into something that stays fixed.
 
 Bastion exists because new SaaS, and especially apps built fast with AI, keep shipping the same few bugs: a secret in the client bundle, and one account able to read another account's data. Bastion checks for exactly those, proves them so you do not chase false alarms, and hands you a regression test so they cannot come back.
@@ -52,6 +56,7 @@ The diff reports what is **new** (a regression), what you **fixed** (a finding t
 |---|---|---|
 | `exposed-secrets` | read-only, offline | Server-side keys and private keys shipped into a client bundle (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Supabase service role, PEM blocks). |
 | `dependency-risk` | read-only, offline | Supply-chain risk in your dependencies: a locked package whose exact version is on a malware denylist (proven), plus install hooks, non-registry deps and a missing lockfile (leads). |
+| `ci-hardening` | read-only, offline | Risky GitHub Actions workflows: `pull_request_target`, actions not pinned to a commit SHA, and installs without `--ignore-scripts`. |
 | `authz-matrix` | read-only to generate, active to probe | One account reaching another account's objects. Generates a CI test always; with a staging URL and test accounts (opt-in), it replays each cross-tenant request and proves any that are not denied. |
 
 Run `bastion list` to see them.
@@ -78,6 +83,13 @@ options:
 ## Safety and scope
 
 Bastion is built to be safe to publish and safe to run. The scope guard (`src/core/scope.ts`) refuses any request to a host not in `allowedHosts`, refuses active checks unless you opt in, and never performs destructive actions. Every outbound request goes through a scoped HTTP client (`src/core/net.ts`) that also refuses hosts resolving to private or loopback addresses (set `scope.allowPrivate` only for an internal staging box you own), re-validates every redirect hop against the allowlist, and caps the response body. Only ever point it at systems you own or are explicitly authorised to test. It is a hardening tool, not an attack tool.
+
+## Web console
+
+A React + Vite app lives in `web/` (the Crenel console): overview, agent run
+(a Claude-Code-style prompt and streamed steps), findings and detail, targets,
+secrets, authorization matrix, generated tests, integrations, settings, and a
+landing page. Run it with `cd web && pnpm install && pnpm dev`.
 
 ## Roadmap
 
