@@ -218,8 +218,22 @@ input, textarea { font-family: inherit; color: inherit; }
 @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0,1fr); } .grid4 { grid-template-columns: repeat(2,minmax(0,1fr)); } .folders, .feat { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 720px) {
   .app { grid-template-columns: 1fr; }
-  .side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; overflow: visible; }
+  /* Sidebar collapses to a top bar: brand on its own line, nav as a single
+     horizontally scrollable strip of pills (no uneven multi-column wrap). */
+  .side {
+    flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px;
+    padding: 10px 12px; overflow-x: auto; overflow-y: hidden;
+    border-right: 0; border-bottom: 1px solid var(--line);
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .side::-webkit-scrollbar { display: none; }
   .side .navlabel, .side .spacer, .side .foot, .search { display: none; }
+  /* Nav links are grouped in wrapper divs; flatten them so each link becomes a
+     direct flex item of the strip instead of stacking in per-group columns. */
+  .side > div { display: contents; }
+  .side .brand { flex: none; padding: 0 6px 0 0; margin-right: 2px; }
+  .side .nav { flex: none; white-space: nowrap; padding: 7px 11px; }
+  .side .nav .count { margin-left: 6px; }
   .grid4, .folders, .feat { grid-template-columns: 1fr; }
   .topbar h1 { font-size: 22px; }
   .hide-sm { display: none; }
