@@ -1,0 +1,9 @@
+{
+  "title": "A Next.js image optimizer restricted to the app's own image CDN",
+  "type": "live",
+  "config": {},
+  "mustFind": [],
+  "mustNotFlag": [
+    { "id": "image-proxy-restricted", "check": "next-image", "forbid": "any", "why": "remotePatterns refuses hosts it does not list." }
+  ]
+}

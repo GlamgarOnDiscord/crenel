@@ -1,0 +1,11 @@
+{
+  "title": "A Next.js image optimizer whose remotePatterns accept any hostname",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "image-proxy-open", "check": "next-image", "text": "fetches any host", "state": "proven", "minSeverity": "high", "why": "Anyone can make the server fetch URLs of their choice." }
+  ],
+  "mustNotFlag": [
+    { "id": "spa-pages", "check": "dev-server|exposed-files", "forbid": "any", "why": "Every other path is the app shell." }
+  ]
+}

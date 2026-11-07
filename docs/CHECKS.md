@@ -42,6 +42,7 @@ empty list runs every read-only check.
 | cache-deception | Private responses cached under a static-looking URL | yes (anonymous GET returns B's object) | GETs, needs allowActiveTesting and B's token |
 | auth-config | Supabase open sign-up without email confirmation, Better Auth OpenAPI published | yes (public settings) | GETs |
 | auth-variants | Protected route served through another spelling (.rsc, ?_rsc=, /_next/data, //, case) | yes (canonical refused, variant served) | GETs |
+| next-image | Next.js image optimizer fetching any host (remotePatterns `**`) | yes (Next's own answer to a control URL) | GETs on the declared host; the target fetches one control URL |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -403,6 +404,30 @@ RSC header, `/_next/data/<buildId>/<route>.json` (build id read from the page),
 a doubled or trailing slash, an upper-case letter, an encoded slash. A variant
 served with a real page, where the canonical path redirected or refused, is the
 proof. A canonical redirect *to* the variant (URL normalization) is ignored.
+
+## next-image
+
+Next.js's image optimizer (`/_next/image`) only downloads URLs that match
+`images.remotePatterns`. A `**` hostname turns it into an open proxy: anyone
+makes your server fetch the URL of their choice (SSRF, internal addresses too
+before Next.js 16) on your bandwidth.
+
+Crenel's own client still talks only to the declared host. It first requests
+`/_next/image` with no parameter, which must answer Next's own
+`"url" parameter is required` (negative control: a soft-200 page or another
+framework is never read as the optimizer). It then asks the optimizer for a
+control URL, `GET /_next/image?url=<control>&w=64&q=75` (width retried with 640
+then 1080 if `64` is not in your `imageSizes`). Next's answer decides:
+`"url" parameter is not allowed` means remotePatterns refused it (fine);
+`The requested resource isn't a valid image`, `"url" parameter is valid but
+upstream response ...` or an image coming back means the server fetched it
+(**proven**, high).
+
+**The target server makes one outbound request** to the control URL. Crenel
+never contacts it. The default is `https://example.com/`, a domain IANA reserves
+for examples: public, free, stable. Change it with
+`options.next-image.controlUrl` (http or https only) and the endpoint with
+`options.next-image.path`.
 
 ## What goes out
 
