@@ -1,0 +1,13 @@
+# DEMO workflow with intentionally risky patterns for ci-hardening to catch.
+name: deploy
+on:
+  pull_request_target:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: some-org/do-stuff@main
+      - run: pnpm install
+      - run: pnpm build
