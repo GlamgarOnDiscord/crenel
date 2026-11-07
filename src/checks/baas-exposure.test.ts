@@ -153,3 +153,33 @@ test("Firestore collection names are read from the client code", async () => {
   try { assert.deepEqual(firestoreCollections(dir).sort(), ["invoices", "orders", "users"]); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("Firebase: a listable Storage bucket and the default RTDB instance are proven by GET; a protected bucket is not", async () => {
+  const { storageBuckets, rtdbUrls } = await import("./baas-exposure.js");
+  assert.deepEqual(storageBuckets({ projectId: "demo-app" }), ["demo-app.appspot.com", "demo-app.firebasestorage.app"]);
+  assert.deepEqual(rtdbUrls({ projectId: "demo-app" }), ["https://demo-app-default-rtdb.firebaseio.com"]);
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fbs-"));
+  writeFileSync(join(dir, "app.js"), `const fb={apiKey:"AIza${"z".repeat(35)}",authDomain:"demo.firebaseapp.com",projectId:"demo-app",storageBucket:"demo-app.firebasestorage.app"};`);
+  const seen: string[] = [];
+  const real = globalThis.fetch;
+  let open = true;
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    seen.push(`${init?.method ?? "GET"} ${url}`);
+    if (url.startsWith("https://firebasestorage.googleapis.com/v0/b/demo-app.firebasestorage.app/o?maxResults=1"))
+      return new Response(open ? JSON.stringify({ items: [{ name: "avatars/u1.png", bucket: "x" }] }) : JSON.stringify({ error: { code: 403 } }), { status: open ? 200 : 403 });
+    if (url === "https://demo-app-default-rtdb.firebaseio.com/.json?shallow=true") return new Response(open ? '{"users":true}' : '{"error":"Permission denied"}', { status: open ? 200 : 401 });
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  try {
+    const scope = new Scope({ allowedHosts: ["firebasestorage.googleapis.com", "demo-app-default-rtdb.firebaseio.com"], allowPrivate: true, allowActiveTesting: true });
+    const found = await baasExposure.run(ctx(dir, scope));
+    const ids = found.filter((f) => f.state === "proven").map((f) => f.id).sort();
+    assert.deepEqual(ids, ["baas-exposure:firebase-rtdb:https://demo-app-default-rtdb.firebaseio.com", "baas-exposure:firebase-storage:demo-app.firebasestorage.app"]);
+    assert.ok(!JSON.stringify(found).includes("avatars/u1.png"), "object names are never kept");
+    assert.ok(seen.every((s) => s.startsWith("GET ")));
+    open = false;
+    const closed = await baasExposure.run(ctx(dir, scope));
+    assert.equal(closed.filter((f) => f.state === "proven").length, 0);
+  } finally { globalThis.fetch = real; rmSync(dir, { recursive: true, force: true }); }
+});

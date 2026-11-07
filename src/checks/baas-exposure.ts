@@ -23,7 +23,8 @@
 // only when the rules allow public reads; that is the active probe. Firestore:
 // listing collections needs a POST (never sent), but a collection the bundle
 // names is read with a GET on the REST API (firestore.googleapis.com must be
-// declared); one document back is the proof. Appwrite, PocketBase and Convex have no public-key-equals-access model
+// declared); one document back is the proof. Cloud Storage for Firebase: an
+// anonymous listing of one object name (firebasestorage.googleapis.com declared). Appwrite, PocketBase and Convex have no public-key-equals-access model
 // that a GET can prove, so they are leads that point at their permission model.
 
 import { readFileSync, statSync } from "node:fs";
@@ -54,6 +55,7 @@ export interface FirebaseConfig {
   kind: "firebase";
   projectId?: string;
   databaseURL?: string;
+  storageBucket?: string;
   file: string;
   line: number;
 }
@@ -113,8 +115,9 @@ export function extractBaas(content: string, file: string): BaasHit[] {
     const around = content.slice(m.index!, m.index! + 800);
     const projectId = around.match(/\bprojectId\s*:\s*["']([a-z0-9-]{4,40})["']/)?.[1];
     const databaseURL = around.match(/\bdatabaseURL\s*:\s*["'](https:\/\/[a-z0-9.-]+\.(?:firebaseio\.com|firebasedatabase\.app))["']/)?.[1];
+    const storageBucket = around.match(/\bstorageBucket\s*:\s*["']([a-z0-9][a-z0-9._-]{2,80}\.(?:appspot\.com|firebasestorage\.app))["']/)?.[1];
     if (!projectId && !databaseURL) continue;
-    push({ kind: "firebase", projectId, databaseURL, file, line: lineOf(content, m.index!) });
+    push({ kind: "firebase", projectId, databaseURL, ...(storageBucket ? { storageBucket } : {}), file, line: lineOf(content, m.index!) });
   }
   for (const m of content.matchAll(/https:\/\/(?:cloud|[a-z0-9-]+\.cloud)\.appwrite\.io\/v1/g)) push({ kind: "appwrite", url: m[0], file, line: lineOf(content, m.index!) });
   for (const m of content.matchAll(/new PocketBase\(\s*["'](https?:\/\/[^"'\s]+)["']/g)) push({ kind: "pocketbase", url: m[1]!, file, line: lineOf(content, m.index!) });
@@ -240,6 +243,19 @@ export async function readFirebaseRoot(databaseURL: string, scope: Scope): Promi
 }
 
 const FIRESTORE = "https://firestore.googleapis.com";
+const FIREBASE_STORAGE = "https://firebasestorage.googleapis.com";
+
+/** Buckets to try: the config's, else the two default names (before and after 30/10/2024). */
+export function storageBuckets(h: Pick<FirebaseConfig, "projectId" | "storageBucket">): string[] {
+  if (h.storageBucket) return [h.storageBucket];
+  return h.projectId ? [`${h.projectId}.appspot.com`, `${h.projectId}.firebasestorage.app`] : [];
+}
+
+/** Realtime Database URLs: the config's, else the default instance name (only probed when declared). */
+export function rtdbUrls(h: Pick<FirebaseConfig, "projectId" | "databaseURL">): string[] {
+  if (h.databaseURL) return [h.databaseURL];
+  return h.projectId ? [`https://${h.projectId}-default-rtdb.firebaseio.com`] : [];
+}
 
 /** Collection names the client code reads: collection(db, "x"), .collection("x"), doc(db, "x", …). */
 export function firestoreCollections(projectDir: string): string[] {
@@ -324,23 +340,48 @@ export const baasExposure: Check = {
             `Realtime Database rules are what protect the data. Open rules (allow read: if true) expose everything.`,
           remediation: "Review Firestore and Realtime Database rules: require request.auth and scope reads to the owner. Restrict the API key by HTTP referrer.",
         };
-        if (h.databaseURL && canProbe(h.databaseURL)) {
+        // Cloud Storage for Firebase: an anonymous listing of one object name proves the rules allow public reads.
+        if (canProbe(FIREBASE_STORAGE)) {
+          ctx.scope.assertActiveAllowed("baas-exposure (live read)");
+          for (const bucket of storageBuckets(h)) {
+            const url = `${FIREBASE_STORAGE}/v0/b/${encodeURIComponent(bucket)}/o?maxResults=1`;
+            try {
+              const res = await safeFetch(url, ctx.scope, { maxBytes: 64 * 1024 });
+              if (res.status !== 200) continue;
+              const j = JSON.parse(res.body) as { items?: unknown[]; prefixes?: unknown[] };
+              const n = (j.items?.length ?? 0) + (j.prefixes?.length ?? 0);
+              if (!n) continue;
+              findings.push({
+                id: `baas-exposure:firebase-storage:${bucket}`, check: "baas-exposure",
+                title: `Firebase Storage bucket ${bucket} listable without signing in`, severity: "high", state: "proven",
+                location: `${FIREBASE_STORAGE}/v0/b/${bucket}/o`,
+                description: `An anonymous GET listed the bucket's objects (one name asked for, ${j.items?.length ? "a file" : "a folder"} returned). Anyone can enumerate and download what users uploaded. The name was not kept.`,
+                remediation: "Storage rules: deny by default, allow read and list only to request.auth with a path that contains the owner's uid.",
+                proof: { method: "anonymous listing of one object name (maxResults=1, name not kept)", replay: `curl -s '${url}'`, evidence: "HTTP 200, objects listed without signing in" },
+                regressionHint: `The Firebase Storage bucket ${bucket} must not be listable without auth.`,
+              });
+              break;
+            } catch (err) { ctx.log(`baas-exposure: storage ${bucket}: ${(err as Error).message}`); }
+          }
+        }
+        const rtdb = rtdbUrls(h).find((u) => canProbe(u));
+        if (rtdb) {
           ctx.scope.assertActiveAllowed("baas-exposure (live read)");
           try {
-            const r = await readFirebaseRoot(h.databaseURL, ctx.scope);
+            const r = await readFirebaseRoot(rtdb, ctx.scope);
             if (r && r.status === 200 && r.keys > 0) {
               findings.push({
-                id: `baas-exposure:firebase-rtdb:${h.databaseURL}`,
+                id: `baas-exposure:firebase-rtdb:${rtdb}`,
                 check: "baas-exposure",
-                title: `Realtime Database readable without signing in (${hostOf(h.databaseURL)})`,
+                title: `Realtime Database readable without signing in (${hostOf(rtdb)})`,
                 severity: "critical",
                 state: "proven",
-                location: `${h.databaseURL}/.json`,
+                location: `${rtdb}/.json`,
                 description: `A shallow read of the database root answered with ${r.keys} top-level key(s) without any sign-in. The content was not kept.`,
                 remediation: "Set Realtime Database rules to deny reads by default and allow only authenticated owners.",
                 proof: {
                   method: "anonymous shallow read of the database root (keys only, content not kept)",
-                  replay: `curl -s '${h.databaseURL}/.json?shallow=true'`,
+                  replay: `curl -s '${rtdb}/.json?shallow=true'`,
                   evidence: `HTTP 200, ${r.keys} top-level key(s) readable without signing in`,
                 },
                 regressionHint: "The Realtime Database root must not be readable without auth.",

@@ -159,7 +159,13 @@ name, the column count and "rows are readable without signing in". A table
 that answers is **proven**, critical when its column names look personal or
 secret (email, phone, token, password...), high otherwise. Firebase Realtime
 Database gets the same treatment with a shallow read of the root
-(`/.json?shallow=true`, keys only). Firestore needs a POST to list collections,
+(`/.json?shallow=true`, keys only). When no `databaseURL` is in the config, the default
+instance `https://<projectId>-default-rtdb.firebaseio.com` is tried if declared.
+**Cloud Storage for Firebase**: with `firebasestorage.googleapis.com` declared,
+one anonymous `GET /v0/b/<bucket>/o?maxResults=1` (the config's `storageBucket`,
+else `<projectId>.appspot.com` and `<projectId>.firebasestorage.app`): an object
+or folder name coming back proves the bucket is listable by anyone (high); the
+name is not kept. Firestore needs a POST to list collections,
 which Crenel never sends, so it stays a lead. The generated regression test
 asserts that the table returns no row with the anon key.
 

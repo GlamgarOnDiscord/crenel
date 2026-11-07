@@ -24,7 +24,7 @@ import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
 import { generateRegressionFile } from "../generate/tests.js";
 import { crawlLiveBundle } from "../checks/live-bundle.js";
 import { reviewBundle } from "./bundle-review.js";
-import { scanBaas } from "../checks/baas-exposure.js";
+import { scanBaas, storageBuckets, rtdbUrls, type FirebaseConfig } from "../checks/baas-exposure.js";
 import { Journal } from "./journal.js";
 import { authorize, type GateDecision, type Judge, type Mode, type PlannedRequest } from "./gate.js";
 import { authzUrl, claimFor, validateClaim, type AuthzOptions, type Claim, type ClaimVerdict } from "./validators.js";
@@ -463,9 +463,17 @@ export class AgentRun {
       }
     }
     if (tool === "scan.baas") {
-      const reqs = scanBaas(this.projectDir).filter((h) => h.kind === "supabase" && this.scope.isHostAllowed(h.url))
+      const hits = scanBaas(this.projectDir);
+      const reqs = hits.filter((h) => h.kind === "supabase" && this.scope.isHostAllowed(h.url))
         .map((h) => ({ method: "GET", url: `${(h as { url: string }).url}/rest/v1/` }));
-      if (reqs.length && this.scope.allowActiveTesting && (await this.gated(tool, [...reqs, ...reqs.map((r) => ({ method: "GET", url: r.url + "<table>?select=*&limit=1" })), ...reqs.map((r) => ({ method: "GET", url: r.url + "rpc/<function> (read-only transaction)" }))]))) scope = this.scope;
+      // Firebase: Storage listing (one name), RTDB shallow root, Firestore named collections; declared hosts only.
+      const fb = hits.filter((h): h is FirebaseConfig => h.kind === "firebase").flatMap((h) => [
+        ...storageBuckets(h).map((b) => `https://firebasestorage.googleapis.com/v0/b/${b}/o?maxResults=1`),
+        ...rtdbUrls(h).map((u) => `${u}/.json?shallow=true`),
+        ...(h.projectId ? [`https://firestore.googleapis.com/v1/projects/${h.projectId}/databases/(default)/documents/<collection>?pageSize=1`] : []),
+      ]).filter((u) => this.scope.isHostAllowed(u)).map((url) => ({ method: "GET", url }));
+      const planned = [...reqs, ...reqs.map((r) => ({ method: "GET", url: r.url + "<table>?select=*&limit=1" })), ...reqs.map((r) => ({ method: "GET", url: r.url + "rpc/<function> (read-only transaction)" })), ...fb];
+      if (planned.length && this.scope.allowActiveTesting && (await this.gated(tool, planned))) scope = this.scope;
     }
     const uid = this.ui({ kind: "tool", tool, args, input, lines: ["…"], dur: "" });
     const findings: Finding[] = [];
