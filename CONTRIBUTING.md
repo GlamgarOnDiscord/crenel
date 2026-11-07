@@ -25,6 +25,8 @@ pnpm demo        # scan the bundled vulnerable example
 cd web
 pnpm install
 pnpm dev
+pnpm test        # SSR smoke test: every route renders without throwing
+pnpm build
 ```
 
 - One global design system in `web/src/styles`; components stay clean markup.
