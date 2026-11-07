@@ -1,0 +1,16 @@
+{
+  "title": "Partial fix: new objects are protected, legacy objects still leak",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [ { "name": "project", "path": "/api/projects/:id", "methods": ["GET"] } ],
+      "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "project": ["proj_b_legacy", "proj_b_new"] } } }
+    } }
+  },
+  "mustFind": [
+    { "id": "legacy-leak", "check": "authz", "text": "proj_b_legacy", "state": "proven", "minSeverity": "high", "why": "Legacy objects bypass the ownership check." }
+  ],
+  "mustNotFlag": [
+    { "id": "new-protected", "check": "authz", "text": "proj_b_new", "forbid": "any", "why": "New objects are correctly denied." }
+  ]
+}

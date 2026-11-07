@@ -1,0 +1,12 @@
+{
+  "title": "Server-side fetch of a caller-controlled URL, next to an allowlisted one",
+  "type": "static",
+  "config": { "projectDir": "project" },
+  "mustFind": [
+    { "id": "ssrf-preview", "where": "preview\\.ts", "text": "ssrf|url|fetch", "state": "any",
+      "why": "The server fetches any URL, including cloud metadata and internal services." }
+  ],
+  "mustNotFlag": [
+    { "id": "allowlisted-fetch", "where": "avatar\\.ts", "text": "ssrf|url|fetch", "forbid": "any", "why": "Protocol and host are allowlisted." }
+  ]
+}

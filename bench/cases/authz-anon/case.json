@@ -1,0 +1,14 @@
+{
+  "title": "Forbidden with a token, open without one",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [ { "name": "export", "path": "/api/exports/:id", "methods": ["GET"] } ],
+      "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "export": ["exp_b_1"] } } }
+    } }
+  },
+  "mustFind": [
+    { "id": "anonymous-export", "check": "authz", "text": "exp_b_1", "state": "proven", "minSeverity": "high", "why": "Retrying without credentials after a 403 returns B's export." }
+  ],
+  "mustNotFlag": []
+}

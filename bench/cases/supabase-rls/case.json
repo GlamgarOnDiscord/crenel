@@ -1,0 +1,11 @@
+{
+  "title": "Supabase anon key in the bundle: one table without RLS, one with",
+  "type": "live",
+  "config": { "projectDir": "project" },
+  "mustFind": [
+    { "id": "profiles-readable", "text": "profiles", "state": "proven", "minSeverity": "high", "why": "The anon key reads emails and phone numbers from profiles: RLS is off." }
+  ],
+  "mustNotFlag": [
+    { "id": "orders-protected", "text": "orders", "forbid": "proven", "why": "RLS returns an empty list for anon." }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "title": "A Stripe webhook that never checks the signature, next to one that does",
+  "type": "static",
+  "config": { "projectDir": "project" },
+  "mustFind": [
+    { "id": "unsigned-stripe-webhook", "where": "stripe-webhook\\.ts", "text": "webhook|signature", "state": "any",
+      "why": "Anyone can POST a fake checkout.session.completed and get paid credits." }
+  ],
+  "mustNotFlag": [
+    { "id": "signed-webhook", "where": "stripe-webhook-safe\\.ts", "text": "webhook|signature", "forbid": "any", "why": "constructEvent verifies the signature." }
+  ]
+}

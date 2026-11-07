@@ -1,0 +1,8 @@
+// bench fixture: a built client bundle. All keys are fake.
+const supabaseUrl = "https://bnchxyzqwerty.supabase.co";
+const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJuY2h4eXpxd2VydHkiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTc2NzIyNTYwMCwiZXhwIjoyMDgyNzU4NDAwfQ.Zm9yZ2VkLXNpZ25hdHVyZS1ub3QtYS1yZWFsLWtleS1jcmVuZWwtYmVuY2g";
+const stripePublishable = "pk_live_51BenchFakePublishableKeyNotSecret00000000000000";
+// const oldKey = "sk_live_51BenchCommentedOutKeyShouldNotCount0000000000";
+export function admin() {
+  return createClient(supabaseUrl, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJuY2h4eXpxd2VydHkiLCJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzY3MjI1NjAwLCJleHAiOjIwODI3NTg0MDB9.Zm9yZ2VkLXNpZ25hdHVyZS1ub3QtYS1yZWFsLWtleS1jcmVuZWwtYmVuY2g");
+}

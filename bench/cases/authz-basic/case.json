@@ -1,0 +1,21 @@
+{
+  "title": "Cross-tenant reads: one real leak, one correct route, one soft 404",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [
+        { "name": "project", "path": "/api/projects/:id", "methods": ["GET"] },
+        { "name": "invoice", "path": "/api/invoices/:id", "methods": ["GET"] },
+        { "name": "file", "path": "/api/files/:id", "methods": ["GET"] }
+      ],
+      "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "project": ["proj_b_1"], "invoice": ["inv_b_1"], "file": ["file_b_1"] } } }
+    } }
+  },
+  "mustFind": [
+    { "id": "project-leak", "check": "authz", "text": "proj_b_1", "state": "proven", "minSeverity": "high", "why": "Account A reads account B's project." }
+  ],
+  "mustNotFlag": [
+    { "id": "invoice-correct", "check": "authz", "text": "inv_b_1", "forbid": "any", "why": "404 for a foreign invoice is the right answer." },
+    { "id": "files-soft-404", "check": "authz", "text": "file_b_1", "forbid": "proven", "why": "200 with an error body and no B data is not a leak. A status-only oracle gets this wrong." }
+  ]
+}
