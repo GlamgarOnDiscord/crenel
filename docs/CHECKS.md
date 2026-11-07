@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs eleven checks. Each is deterministic and read-only, and marks every
+Crenel runs twelve checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -20,6 +20,7 @@ empty list runs every read-only check.
 | committed-env | Committed `.env` files | no (leads) | no |
 | sourcemaps | Source maps shipped with the client bundle | no (leads) | no |
 | public-env | A secret behind a client-exposed env prefix | no (leads) | no |
+| tls-verification | Code/config disabling TLS cert verification | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -108,4 +109,12 @@ Flags an env var that carries a framework "public" prefix (`NEXT_PUBLIC_`,
 `...PASSWORD`). Those prefixes are inlined into the client bundle by design, so
 such a var leaks its value to the browser whatever its shape. Fix: drop the
 public prefix and read the secret server-side only.
+
+## tls-verification
+
+Flags code or config that turns off TLS certificate verification:
+`NODE_TLS_REJECT_UNAUTHORIZED=0` (process-wide), `rejectUnauthorized: false`, or
+`strictSSL: false`. Any of these accept a forged certificate, so a network
+attacker can read and alter "HTTPS" traffic. Leads. Fix: remove them and trust
+the proper CA.
 
