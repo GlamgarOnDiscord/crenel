@@ -37,3 +37,17 @@ test("a clean directory yields no findings, and node_modules is skipped", async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a Stripe test key is a low-severity note, not a critical incident", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec-"));
+  try {
+    writeFileSync(join(dir, "app.js"), 'const k = "sk_test_ABCDEFGHIJKLMNOP1234";\n');
+    const found = await exposedSecrets.run(ctx(dir));
+    const hit = found.find((f) => f.id.includes("stripe-secret-test"));
+    assert.ok(hit, "test key should still be detected");
+    assert.equal(hit!.severity, "low");
+    assert.doesNotMatch(hit!.description + hit!.remediation, /compromis|compromised|rotate now/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

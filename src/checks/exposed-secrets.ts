@@ -16,20 +16,26 @@ interface SecretPattern {
   title: string;
   regex: RegExp;
   severity: Finding["severity"];
+  /** False for test-mode keys that are safe to expose; keeps messaging honest. */
+  sensitive?: boolean;
 }
 
 // Patterns are intentionally specific. We match distinctive prefixes rather than
-// generic "looks like a token", to keep false positives near zero.
+// generic "looks like a token", to keep false positives near zero. Stripe test
+// keys (sk_test_/rk_test_) are published by design, so they are a low-severity
+// note, not a critical "assume compromised" finding.
 const PATTERNS: SecretPattern[] = [
-  { id: "stripe-secret", title: "Stripe secret key", regex: /\bsk_(live|test)_[A-Za-z0-9]{16,}/g, severity: "critical" },
-  { id: "stripe-restricted", title: "Stripe restricted key", regex: /\brk_(live|test)_[A-Za-z0-9]{16,}/g, severity: "high" },
-  { id: "aws-access-key", title: "AWS access key id", regex: /\bAKIA[0-9A-Z]{16}\b/g, severity: "high" },
-  { id: "google-api-key", title: "Google API key", regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g, severity: "high" },
-  { id: "openai-key", title: "OpenAI API key", regex: /\bsk-[A-Za-z0-9]{20,}\b/g, severity: "high" },
-  { id: "anthropic-key", title: "Anthropic API key", regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}/g, severity: "high" },
-  { id: "github-pat", title: "GitHub personal access token", regex: /\bghp_[A-Za-z0-9]{36}\b/g, severity: "high" },
-  { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, severity: "critical" },
-  { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]*role[A-Za-z0-9_-]*service_role[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+/g, severity: "critical" },
+  { id: "stripe-secret", title: "Stripe secret key (live)", regex: /\bsk_live_[A-Za-z0-9]{16,}/g, severity: "critical", sensitive: true },
+  { id: "stripe-secret-test", title: "Stripe test secret key", regex: /\bsk_test_[A-Za-z0-9]{16,}/g, severity: "low", sensitive: false },
+  { id: "stripe-restricted", title: "Stripe restricted key (live)", regex: /\brk_live_[A-Za-z0-9]{16,}/g, severity: "high", sensitive: true },
+  { id: "stripe-restricted-test", title: "Stripe restricted test key", regex: /\brk_test_[A-Za-z0-9]{16,}/g, severity: "low", sensitive: false },
+  { id: "aws-access-key", title: "AWS access key id", regex: /\bAKIA[0-9A-Z]{16}\b/g, severity: "high", sensitive: true },
+  { id: "google-api-key", title: "Google API key", regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g, severity: "high", sensitive: true },
+  { id: "openai-key", title: "OpenAI API key", regex: /\bsk-[A-Za-z0-9]{20,}\b/g, severity: "high", sensitive: true },
+  { id: "anthropic-key", title: "Anthropic API key", regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}/g, severity: "high", sensitive: true },
+  { id: "github-pat", title: "GitHub personal access token", regex: /\bghp_[A-Za-z0-9]{36}\b/g, severity: "high", sensitive: true },
+  { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, severity: "critical", sensitive: true },
+  { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]*role[A-Za-z0-9_-]*service_role[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+/g, severity: "critical", sensitive: true },
 ];
 
 // Only scan text-like files, and skip anything large or binary.
@@ -89,19 +95,24 @@ export const exposedSecrets: Check = {
         let m: RegExpExecArray | null;
         while ((m = p.regex.exec(content)) !== null) {
           const line = content.slice(0, m.index).split("\n").length;
+          const sensitive = p.sensitive !== false;
           findings.push({
             id: `exposed-secrets:${p.id}:${rel}:${line}`,
             check: "exposed-secrets",
-            title: `${p.title} exposed in ${rel}`,
+            title: sensitive ? `${p.title} exposed in ${rel}` : `${p.title} in ${rel}`,
             severity: p.severity,
             state: "proven", // a deterministic regex match on a key shape is proof enough to act
             location: `${rel}:${line}`,
-            description:
-              `A ${p.title} appears in a file under the scanned directory. If this directory is a ` +
-              `client bundle, the secret is readable by anyone who opens the page.`,
-            remediation:
-              `Rotate this credential now (assume it is compromised), then move it server-side. ` +
-              `Client code should only ever hold publishable keys.`,
+            description: sensitive
+              ? `A ${p.title} appears in a file under the scanned directory. If this directory is a ` +
+                `client bundle, the secret is readable by anyone who opens the page.`
+              : `A ${p.title} appears in ${rel}. Test-mode keys are safe to expose, so this is not an ` +
+                `incident, but shipping any key to the client is a habit worth breaking.`,
+            remediation: sensitive
+              ? `Rotate this credential now (assume it is compromised), then move it server-side. ` +
+                `Client code should only ever hold publishable keys.`
+              : `No rotation needed for a test key. Prefer a publishable key in client code, and keep ` +
+                `even test secrets out of the bundle.`,
             proof: {
               method: "deterministic regex match on a known key format",
               replay: `grep -nE '${p.regex.source}' "${rel}"`,
