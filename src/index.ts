@@ -5,5 +5,7 @@ export { loadConfig } from "./core/config.js";
 export type { Config } from "./core/config.js";
 export { Scope, ScopeError } from "./core/scope.js";
 export { REGISTRY, resolveChecks } from "./core/registry.js";
-export { renderText, renderJson, exitCode } from "./report/render.js";
+export { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
+export { loadBaseline, saveBaseline, toBaseline, diff, hasRegression } from "./core/baseline.js";
+export type { Baseline, BaselineEntry, Diff } from "./core/baseline.js";
 export type { Check, CheckContext, Finding, Severity } from "./core/types.js";

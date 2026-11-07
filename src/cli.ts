@@ -10,7 +10,8 @@ import { writeFileSync, existsSync } from "node:fs";
 import { loadConfig } from "./core/config.js";
 import { run } from "./core/runner.js";
 import { REGISTRY } from "./core/registry.js";
-import { renderText, renderJson, exitCode } from "./report/render.js";
+import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
+import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 
 const STARTER = `# Bastion config. Declare only what you own.
 project: my-saas
@@ -99,7 +100,27 @@ async function main(): Promise<number> {
     if (flags.out && typeof flags.out === "string") {
       writeFileSync(flags.out, renderJson(result));
     }
-    return exitCode(result);
+
+    // Baseline: diff against a saved snapshot, and/or update it.
+    const baselinePath = typeof flags.baseline === "string" ? flags.baseline : undefined;
+    let regressed = false;
+    if (baselinePath) {
+      const base = loadBaseline(baselinePath);
+      if (base && !flags.json) {
+        const d = diff(result, base);
+        process.stdout.write("\n" + renderDiff(d));
+        regressed = hasRegression(d);
+      } else if (!base) {
+        process.stderr.write(`Pas de baseline à ${baselinePath} (utilise --update-baseline pour en créer une).\n`);
+      }
+    }
+    if (flags["update-baseline"] && baselinePath) {
+      saveBaseline(baselinePath, result);
+      process.stdout.write(`Baseline écrite dans ${baselinePath}.\n`);
+    }
+
+    // Exit non-zero on a proven high/critical, or on a regression vs baseline.
+    return exitCode(result) || (regressed ? 1 : 0);
   }
 
   process.stdout.write(
@@ -109,6 +130,7 @@ async function main(): Promise<number> {
       "Usage:",
       "  bastion init   [--config path] [--force]   write a starter config",
       "  bastion scan   [--config path] [--json] [--out file.json] [--verbose]",
+      "                 [--baseline file.json] [--update-baseline]",
       "  bastion list                                show available checks",
       "",
       "Bastion only tests hosts you declare you own. Active checks stay off until",

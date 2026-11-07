@@ -34,6 +34,18 @@ pnpm bastion scan --json --out bastion-report.json   # for CI
 
 `bastion scan` exits non-zero only when a **proven high or critical** finding exists, so it is safe to gate a pipeline on it without flaky failures from leads.
 
+### Baseline and regressions
+
+Record what you have today, then let later scans show only what changed:
+
+```bash
+pnpm bastion scan --config bastion.config.yaml --update-baseline --baseline bastion-baseline.json
+# later, in CI:
+pnpm bastion scan --config bastion.config.yaml --baseline bastion-baseline.json
+```
+
+The diff reports what is **new** (a regression), what you **fixed** (a finding that was proven before and is gone now), and what **persists**. The scan exits non-zero if a new proven high or critical appears, so a regression breaks the build while known, accepted leads do not.
+
 ## The two checks today
 
 | Check | Kind | What it catches |

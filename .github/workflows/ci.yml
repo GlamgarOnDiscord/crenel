@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Bastion's own lesson: never run dependency install scripts in CI.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      # Dogfood: scan the bundled example. It exits non-zero on purpose
+      # (the example ships planted secrets), so we only assert it runs.
+      - run: pnpm bastion scan --config examples/bastion.config.yaml || true

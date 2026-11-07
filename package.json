@@ -16,7 +16,7 @@
     "bastion": "tsx src/cli.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx ./src/**/*.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "demo": "tsx src/cli.ts scan --config examples/bastion.config.yaml"
   },
   "engines": {

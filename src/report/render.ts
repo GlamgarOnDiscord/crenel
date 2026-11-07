@@ -71,6 +71,27 @@ export function renderJson(result: RunResult): string {
   return JSON.stringify(result, null, 2);
 }
 
+export function renderDiff(d: import("../core/baseline.js").Diff): string {
+  const lines: string[] = [];
+  lines.push(pc.bold("Depuis la baseline"));
+  const added = d.added.length;
+  const fixed = d.fixed.length;
+  lines.push(
+    `  ${added > 0 ? pc.red(`+${added} nouveau(x)`) : pc.dim("+0 nouveau")}` +
+      `   ${fixed > 0 ? pc.green(`-${fixed} corrigé(s)`) : pc.dim("-0 corrigé")}` +
+      `   ${pc.dim(`${d.persisting.length} persistant(s)`)}`,
+  );
+  for (const f of sortFindings(d.added)) {
+    const tag = f.state === "proven" ? colorSev(f.severity, f.severity.toUpperCase()) : pc.dim("LEAD");
+    lines.push(`  ${pc.red("NOUVEAU")} ${tag}  ${f.title}  ${pc.dim(f.location)}`);
+  }
+  for (const e of d.fixed) {
+    lines.push(`  ${pc.green("CORRIGÉ")}  ${e.title}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 /** Exit code policy: non-zero only when a proven finding is high or critical. */
 export function exitCode(result: RunResult): number {
   const gating = result.findings.some(
