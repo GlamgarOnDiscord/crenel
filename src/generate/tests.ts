@@ -134,6 +134,16 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "graphql": {
+      if (f.state !== "proven") return null;
+      return [
+        `test(${JSON.stringify(title)}, async () => {`,
+        `  const res = await fetch(${JSON.stringify(f.location)} + "?query=" + encodeURIComponent("{__schema{types{name}}}"));`,
+        `  const body = res.ok ? await res.text() : "";`,
+        `  expect(body).not.toContain("__schema");`,
+        `});`,
+      ].join("\n");
+    }
     case "exposed-files": {
       if (f.state !== "proven") return null;
       return [

@@ -28,6 +28,7 @@ empty list runs every read-only check.
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
+| graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -254,3 +255,12 @@ the file's own signature (`KEY=value` lines for a .env, `[core]` for a Git
 config, `CREATE TABLE` for a dump), and a body different from what a random
 path returns, so a single-page app that answers everything with index.html is
 never reported.
+
+## graphql
+
+Sends the smallest read-only introspection query with GET (`?query=`) to
+`/graphql`, `/api/graphql`, `/v1/graphql`, `/query`, `/gql` on the declared
+host (or `options.graphql.paths`). A response carrying `__schema` proves
+introspection is open: the whole API map, admin mutations included, is public.
+Servers that accept GraphQL over POST only are not tested (Crenel never sends
+POST), and the log says so.
