@@ -166,7 +166,7 @@ export const exposedSecrets: Check = {
     // Opt-in liveness: ask each key's own provider whether it still works.
     const verify = !!(ctx.options["exposed-secrets"] as { verify?: boolean } | undefined)?.verify;
     if (verify) {
-      const cache = new Map<string, Promise<{ liveness: Liveness; status?: number; host?: string }>>();
+      const cache = new Map<string, Promise<{ liveness: Liveness; status?: number; host?: string; note?: string }>>();
       for (const f of findings) {
         const raw = rawOf.get(f);
         const pattern = f.id.split(":")[1]!;
@@ -179,7 +179,7 @@ export const exposedSecrets: Check = {
         }
         if (r.liveness === "active") {
           f.title = `${f.title} (key works right now)`;
-          f.description = `${f.description} Crenel checked with one read-only call to ${r.host}: the key authenticates (HTTP ${r.status}).`;
+          f.description = `${f.description} Crenel checked with one read-only call to ${r.host}: the key authenticates (HTTP ${r.status}).${r.note ? ` ${r.note}` : ""}`;
         } else {
           f.title = `${f.title} (revoked)`;
           f.severity = "low";

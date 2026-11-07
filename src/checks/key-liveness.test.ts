@@ -39,3 +39,25 @@ test("nothing is sent when the provider host is not declared, and the scan says 
     assert.equal((await checkLiveness("private-key-block", "x", scope)).liveness, "unknown", "no verifier, no call");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("google-api-key: 200 active with a cautious note, 400 API_KEY_INVALID revoked, 403 restricted unknown; key in x-goog-api-key only", async () => {
+  const seen: { url?: string; key?: string }[] = [];
+  const srv = createServer((req, res) => {
+    const key = req.headers["x-goog-api-key"] as string;
+    seen.push({ url: req.url, key });
+    if (key === "AIzaGOOD") { res.writeHead(200); return res.end('{"models":[]}'); }
+    if (key === "AIzaRESTRICTED") { res.writeHead(403); return res.end('{"error":{"details":[{"reason":"API_KEY_HTTP_REFERRER_BLOCKED"}]}}'); }
+    res.writeHead(400); res.end('{"error":{"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}');
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/v1beta/models`;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    const good = await checkLiveness("google-api-key", "AIzaGOOD", scope, url);
+    assert.equal(good.liveness, "active");
+    assert.match(good.note!, /no referrer restriction was observed/);
+    assert.equal((await checkLiveness("google-api-key", "AIzaOLD", scope, url)).liveness, "revoked");
+    assert.equal((await checkLiveness("google-api-key", "AIzaRESTRICTED", scope, url)).liveness, "unknown");
+    assert.ok(seen.every((s) => s.url === "/v1beta/models"), "the key never appears in the URL");
+  } finally { srv.close(); }
+});

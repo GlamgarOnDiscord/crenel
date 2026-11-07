@@ -64,11 +64,15 @@ holds only publishable keys.
 
 **Does the key still work? (opt-in, network).** With
 `options.exposed-secrets.verify: true`, each key that has a verifier (Stripe,
-OpenAI, Anthropic, GitHub, Slack, SendGrid, npm) gets one read-only "who am I"
+OpenAI, Anthropic, GitHub, Slack, SendGrid, npm, Google) gets one read-only "who am I"
 call to its own provider, only if that provider's API host is in
 `scope.allowedHosts` (e.g. `api.stripe.com`). The title then says *key works
 right now* or *revoked* (downgraded to low). The key travels only in the auth
-header and never appears in reports.
+header and never appears in reports. A Google key is checked by listing
+Gemini models (`generativelanguage.googleapis.com`, free, key in the
+`x-goog-api-key` header): 200 is reported as *no referrer restriction observed*,
+never as "unrestricted"; a 403 (referrer, IP or API restriction, service
+disabled) leaves the verdict unknown.
 
 ## dependency-risk
 
