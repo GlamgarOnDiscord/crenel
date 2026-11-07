@@ -55,7 +55,7 @@ options:
 
 // Flags that never take a value, so they do not swallow the following token
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
-const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "no-llm"]);
+const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
 const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host"]);
 
@@ -233,16 +233,19 @@ async function main(): Promise<number> {
     if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
       process.stderr.write(`Warning: listening on ${host}, reachable from other machines. The token is the only lock.\n`);
     }
-    const noLlm = !!flags["no-llm"];
-    const claudeAvailable = noLlm ? false : await detectClaude();
-    const srv = await startServer({ configPath, host, port: typeof flags.port === "string" ? Number(flags.port) : 4100, llm: noLlm ? "off" : "auto", claudeAvailable });
+    // The model is opt-in: `claude -p` spends the user's subscription, so it only
+    // runs when asked with --llm. Without it everything stays deterministic.
+    const useLlm = !!flags.llm && !flags["no-llm"];
+    const claudeAvailable = useLlm ? await detectClaude() : false;
+    if (useLlm && !claudeAvailable) process.stderr.write("--llm: the claude CLI was not found, running without a model.\n");
+    const srv = await startServer({ configPath, host, port: typeof flags.port === "string" ? Number(flags.port) : 4100, llm: useLlm ? "auto" : "off", claudeAvailable });
     const link = `${srv.url}/?token=${srv.token}`;
     process.stdout.write([
       "Crenel console",
       `  ${link}`,
       "",
       `  config   ${configPath}`,
-      `  model    ${claudeAvailable ? "claude -p (local CLI), advice and prose only" : "none (deterministic only)"}`,
+      `  model    ${claudeAvailable ? "claude -p (local CLI), advice and prose only" : "none (deterministic only; add --llm to use claude -p)"}`,
       `  state    .crenel/ next to the config (journals, findings, audit)`,
       "",
       "Local only. Ctrl+C stops the server and every run.",
@@ -290,7 +293,7 @@ async function main(): Promise<number> {
       "  crenel scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--junit file.xml]",
       "                 [--fail-on critical|high|medium|low] [--baseline file.json] [--update-baseline]",
       "                 [--audit log.jsonl] [--verbose]",
-      "  crenel serve  [--config path] [--port 4100] [--open] [--no-llm]   local web console and API",
+      "  crenel serve  [--config path] [--port 4100] [--open] [--llm]      local web console and API",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel list                                show available checks",

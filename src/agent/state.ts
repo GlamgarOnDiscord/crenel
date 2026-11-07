@@ -71,6 +71,7 @@ export class StateStore {
   }
 
   get auditPath() { return join(this.dir, "audit.jsonl"); }
+  get grantsPath() { return join(this.dir, "grants.json"); }
   get baselinePath() { return join(this.dir, "baseline.json"); }
   get regressionPath() { return join(this.dir, "regression.test.ts"); }
   runPath(id: string) { return join(this.dir, "runs", `${id}.jsonl`); }
@@ -137,5 +138,31 @@ export class StateStore {
       try { out.push(JSON.parse(l)); } catch { /* skip a torn line */ }
     }
     return out;
+  }
+}
+
+// Hosts the user allowed "Toujours pour cet hôte", kept in .crenel/grants.json
+// so the choice survives a restart. A grant only skips the question: the gate
+// still enforces the declared perimeter, and removing a target drops its grant.
+export class GrantSet extends Set<string> {
+  constructor(private readonly path: string) {
+    super();
+    try {
+      const saved = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (Array.isArray(saved)) for (const h of saved) if (typeof h === "string") super.add(h.toLowerCase());
+    } catch { /* no grants yet */ }
+  }
+  override add(host: string): this {
+    const h = host.toLowerCase();
+    if (!this.has(h)) { super.add(h); this.save(); }
+    return this;
+  }
+  override delete(host: string): boolean {
+    const gone = super.delete(host.toLowerCase());
+    if (gone) this.save();
+    return gone;
+  }
+  private save(): void {
+    writeFileSync(this.path, JSON.stringify([...this].sort(), null, 2) + "\n");
   }
 }

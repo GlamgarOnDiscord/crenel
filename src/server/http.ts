@@ -36,7 +36,7 @@ import { diff, loadBaseline } from "../core/baseline.js";
 import type { RunResult } from "../core/runner.js";
 import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
-import { StateStore } from "../agent/state.js";
+import { GrantSet, StateStore } from "../agent/state.js";
 import { claudeCli, type Llm } from "../agent/llm.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
@@ -77,8 +77,8 @@ const MIME: Record<string, string> = {
 // The console loads its type from Fontshare and Google Fonts; everything else is self.
 const CSP = [
   "default-src 'self'", "script-src 'self'", "connect-src 'self'", "img-src 'self' data: blob:", "media-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com",
-  "font-src 'self' data: https://cdn.fontshare.com https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://api.fontshare.com",
+  "font-src 'self' data: https://cdn.fontshare.com",
   "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'",
 ].join("; ");
 const MODES = new Set<Mode>(["ask", "readonly", "bypass"]);
@@ -149,7 +149,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   const host = opts.host ?? "127.0.0.1";
   const token = opts.token ?? randomBytes(24).toString("base64url");
   const store = new StateStore(join(dirname(configPath), ".crenel"));
-  const grants = new Set<string>();
+  const grants = new GrantSet(store.grantsPath);
   const runs = new Map<string, AgentRun>();
   const webDir = opts.webDir === undefined ? findWebDir() : opts.webDir;
   const llmOn = opts.llm !== "off" && (opts.claudeAvailable ?? false);

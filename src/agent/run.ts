@@ -88,7 +88,7 @@ export interface RunDeps {
   config: Config;
   configPath: string;
   store: StateStore;
-  /** Hosts allowed "always" for this server session (shared across runs). */
+  /** Hosts allowed "always" (shared across runs, persisted by the server). */
   grants: Set<string>;
   llm: Llm | null;
   judge?: Judge;

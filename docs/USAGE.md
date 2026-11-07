@@ -5,7 +5,7 @@
 | Command | |
 | --- | --- |
 | `crenel scan` | Run the checks. `--json`, `--out`, `--sarif` (SARIF 2.1.0), `--junit` (JUnit XML), `--fail-on critical\|high\|medium\|low` (default `high`, proven findings only), `--audit` (JSONL), `--baseline`, `--update-baseline`, `--verbose`. |
-| `crenel serve` | The web console and its local API. `--config`, `--port` (4100), `--open`, `--no-llm`. See below. |
+| `crenel serve` | The web console and its local API. `--config`, `--port` (4100), `--open`, `--llm` (opt-in: use the local `claude -p`, which spends your subscription). See [CONSOLE.md](CONSOLE.md). |
 | `crenel generate-tests` | One regression test per finding. |
 | `crenel triage` | Experimental: ask the local Claude CLI for advice on leads. Advice only, never proof. |
 | `crenel list` · `crenel init` | List checks · write a starter config. |

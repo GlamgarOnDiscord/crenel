@@ -2,6 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider, createHashRouter } from "react-router-dom";
 import { routes } from "./App.tsx";
+// JetBrains Mono is OFL: bundled, so code renders the same offline.
+import "@fontsource/jetbrains-mono/latin-400.css";
+import "@fontsource/jetbrains-mono/latin-500.css";
+import "@fontsource/jetbrains-mono/latin-700.css";
 import "./styles/tw.css";
 import "./styles/tokens.css";
 import "./styles/base.css";

@@ -9,6 +9,7 @@
     "test": "node --import ./test/register-css.mjs --import tsx --test \"src/**/*.test.tsx\""
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "5.3.0",
     "@radix-ui/react-collapsible": "1.1.12",
     "@radix-ui/react-dropdown-menu": "2.1.16",
     "@radix-ui/react-hover-card": "1.1.15",

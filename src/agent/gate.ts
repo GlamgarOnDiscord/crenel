@@ -15,7 +15,7 @@
 //
 // The verdict is "allow" (run it), "ask" (pause and ask the user: Allow once /
 // Always for this host / Deny) or "deny" (never sent). Hosts the user allowed
-// "always" are remembered in `grants` for the server session only.
+// "always" are remembered in `grants` (persisted in .crenel/grants.json).
 
 import { isPrivateIp } from "../core/net.js";
 import type { Scope } from "../core/scope.js";
@@ -57,7 +57,7 @@ export interface ToolCall {
 export interface GateContext {
   scope: Scope;
   mode: Mode;
-  /** Hosts the user allowed "always" during this server session. */
+  /** Hosts the user allowed "always" (kept across restarts in .crenel/grants.json). */
   grants: ReadonlySet<string>;
   /** The user's own words for this run; a judge needs them (ScopeJudge). */
   userRequest: string;
