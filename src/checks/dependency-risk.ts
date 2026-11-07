@@ -49,7 +49,7 @@ const LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock
 
 // Pull every name@version pair out of a lockfile, tolerant of pnpm/npm/yarn
 // shapes. We only need the pairs, not the full dependency graph.
-function parseLockedVersions(text: string): Set<string> {
+export function parseLockedVersions(text: string): Set<string> {
   const out = new Set<string>();
   // pnpm v9: keys like '@scope/name@1.2.3(peer)' or name@1.2.3:
   const pnpm = /(?:^|\n)\s{2,}'?((?:@[^@\s/'"]+\/)?[^@\s/'":]+)@([0-9][^\s'":()]*)/g;
