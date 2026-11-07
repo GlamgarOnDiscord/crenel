@@ -27,6 +27,8 @@ read-only over the engine's output; it renders the same model the CLI produces.
 </tr>
 </table>
 
+Every check, what it flags and how to fix it: [`docs/CHECKS.md`](docs/CHECKS.md).
+
 ## What makes it different
 
 Three ideas from the research on AI security agents are baked into the design:
