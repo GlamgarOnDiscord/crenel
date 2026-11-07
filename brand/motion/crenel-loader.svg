@@ -1,21 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="250 130 720 720">
   <title>Loading</title>
   <style>
-.eye,.iris,.glint,.tw,.sheen,.halo{transform-box:fill-box;transform-origin:center}
+.mx,.my,.sq,.tilt,.crest,.fr,.fl,.ft,.wing,.face,.key,.keyswing,.beak,.halo{transform-box:view-box}
+.sq{transform-origin:430px 1024px}
+.tilt{transform-origin:440px 1000px}
+.fr{transform-origin:545px 172px}
+.fl{transform-origin:418px 172px}
+.ft{transform-origin:470px 162px}
+.wing{transform-origin:335px 612px}
+.keyswing{transform-origin:590px 540px}
+.beak{transform-origin:640px 424px}
+.eye,.lid,.iris,.glint,.tw,.sheen{transform-box:fill-box;transform-origin:center}
 .eye{transform-origin:50% 60%}
-
+.lid{transform-origin:50% 92%}
+@keyframes ltilt{0%{transform:rotate(-4deg)}22.917%{transform:rotate(-4deg);animation-timing-function:cubic-bezier(.65,0,.35,1)}43.75%{transform:rotate(4.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}50%{transform:rotate(4deg)}72.917%{transform:rotate(4deg);animation-timing-function:cubic-bezier(.65,0,.35,1)}93.75%{transform:rotate(-4.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(-4deg)}}
+@keyframes lface{0%{transform:translate(-5px,0px)}25%{transform:translate(-5px,0px);animation-timing-function:cubic-bezier(.65,0,.35,1)}35.417%{transform:translate(0px,6px);animation-timing-function:cubic-bezier(.65,0,.35,1)}45.833%{transform:translate(5px,0px)}75%{transform:translate(5px,0px);animation-timing-function:cubic-bezier(.65,0,.35,1)}85.417%{transform:translate(0px,6px);animation-timing-function:cubic-bezier(.65,0,.35,1)}95.833%{transform:translate(-5px,0px)}100%{transform:translate(-5px,0px)}}
+@keyframes liris{0%{transform:translate(-8px,0)}20%{transform:translate(-8px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}31.25%{transform:translate(8px,0)}70%{transform:translate(8px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}81.25%{transform:translate(-8px,0)}100%{transform:translate(-8px,0)}}
+@keyframes lkey{0%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}25.833%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}28.75%{transform:rotate(-6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}33.125%{transform:rotate(3.3deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}38.958%{transform:rotate(-1.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}46.25%{transform:rotate(0.48deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}49.167%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}75.833%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}78.75%{transform:rotate(6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}83.125%{transform:rotate(-3.3deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}88.958%{transform:rotate(1.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}96.25%{transform:rotate(-0.48deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}99.167%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes lblink{0%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}13.75%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}15.625%{transform:scaleY(0.05)}17.083%{transform:scaleY(0.05);animation-timing-function:cubic-bezier(.2,.8,.3,1)}20.417%{transform:none}100%{transform:none}}
 @keyframes ltw{0%,100%{transform:scale(.5);opacity:.4}40%{transform:scale(1.3);opacity:1}62%{transform:scale(1.05);opacity:1}}
 @keyframes lsheen{0%,40%{transform:translateX(0) scaleX(1.8);opacity:0}41%{opacity:1}80%{transform:translateX(640px) scaleX(1.8);opacity:1}80.1%,100%{transform:translateX(640px) scaleX(1.8);opacity:0}}
-@keyframes lkey{0%,30%,100%{filter:brightness(1)}60%{filter:brightness(1.12)}}
-#gold-key{animation:lkey 2.4s ease-in-out infinite}
-@keyframes blink{0%{transform:none;animation-timing-function:cubic-bezier(.55,0,.8,.3)}77.5%{transform:none;animation-timing-function:cubic-bezier(.55,0,.8,.3)}79.375%,80.833%{transform:scaleY(0.05);animation-timing-function:cubic-bezier(.2,.7,.3,1)}84.167%{transform:none;animation-timing-function:cubic-bezier(.55,0,.8,.3)}100%{transform:none}}
-.eye{animation:blink 4.8s infinite}
-.tw{animation:ltw 2.4s cubic-bezier(.45,0,.25,1) infinite}
+.tilt{animation:ltilt 2.4s linear infinite;transform-origin:620px 600px}
+.face{animation:lface 2.4s linear infinite}
+.iris{animation:liris 2.4s linear infinite}
+.keyswing{animation:lkey 2.4s linear infinite}
+.eye{animation:lblink 4.8s linear infinite}
+.tw{animation:ltw 1.2s cubic-bezier(.37,0,.63,1) infinite}
 .tw-key-ring-star{animation-delay:0s}
-.tw-key-shaft-star{animation-delay:-1.60s}
-.tw-small-yellow-star{animation-delay:-0.80s}
-.tw-large-yellow-star{animation-delay:-1.20s}
-.sheen{animation:lsheen 2.4s cubic-bezier(.45,0,.25,1) infinite}
+.tw-key-shaft-star{animation-delay:-.4s}
+.tw-small-yellow-star{animation-delay:-.8s}
+.tw-large-yellow-star{animation-delay:-.6s}
+.sheen{animation:lsheen 2.4s cubic-bezier(.65,0,.35,1) infinite}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   </style>
   <defs>
@@ -159,9 +174,10 @@
     </clipPath>
     <path id="large-sparkle" d="M959 43 C954 91 954 100 903 109 C953 115 954 124 959 171 C965 125 966 116 1014 109 C965 102 964 94 959 43 Z"/>
     <path id="key-sparkle" d="M497 509 C494 572 492 582 440 590 C490 596 493 609 497 666 C502 608 505 598 550 590 C505 585 502 573 497 509 Z"/>
+    <linearGradient id="skirt-fill" gradientUnits="userSpaceOnUse" x1="-400" y1="0" x2="760" y2="0"><stop offset="0.0000" stop-color="#6a70a4"/><stop offset="0.3457" stop-color="#696fa3"/><stop offset="0.4310" stop-color="#485079"/><stop offset="0.5603" stop-color="#293251"/><stop offset="0.6897" stop-color="#252d4c"/><stop offset="0.8190" stop-color="#2f385c"/><stop offset="0.9310" stop-color="#46517d"/><stop offset="0.9784" stop-color="#596294"/><stop offset="1.0000" stop-color="#5d6699"/></linearGradient>
     <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#fffbe0" stop-opacity="0"/>
-      <stop offset=".5" stop-color="#fffbe0" stop-opacity=".7"/>
+      <stop offset=".5" stop-color="#fffbe0" stop-opacity=".75"/>
       <stop offset="1" stop-color="#fffbe0" stop-opacity="0"/>
     </linearGradient>
     <filter id="key-glow" x="-30%" y="-40%" width="160%" height="180%"><feGaussianBlur stdDeviation="14"/></filter>
@@ -169,13 +185,26 @@
   <g id="periwinkle-background">
     <path fill="url(#background-color)" d="M0 0H1024V1024H0Z"/>
   </g>
+  <g class="mx"><g class="my"><g class="sq"><g class="tilt">
+  <g class="crest">
   <g id="bird-crest">
-    <path id="rear-upright-feather" d="M484 110 C480 84 493 46 515 50 C546 48 565 99 574 165 L527 179 Z" fill="url(#rear-crest-color)"/>
-    <path d="M508 50 C542 40 565 100 574 164" fill="none" stroke="#c0afff" stroke-opacity=".65" stroke-width="2"/>
-    <path id="left-small-feather" d="M306 195 C283 186 270 171 271 151 C272 132 286 121 307 118 C333 114 359 121 385 132 L431 175 Z" fill="url(#left-crest-color)"/>
-    <path d="M272 143 C283 111 329 110 381 131" fill="none" stroke="#8185ce" stroke-opacity=".45" stroke-width="1.5"/>
-    <path id="tall-swept-feather" d="M382 131 C354 102 318 71 328 38 C334 17 351 9 371 11 C414 13 455 51 482 98 C494 119 511 140 533 158 L421 177 Z" fill="url(#tall-crest-color)"/>
-    <path d="M336 24 C347 10 362 9 377 12 C418 19 455 53 482 98" fill="none" stroke="url(#crest-rim)" stroke-width="2"/>
+    <g class="fr">
+      <path id="rear-upright-feather" d="M484 110 C480 84 493 46 515 50 C546 48 565 99 574 165 L527 179 Z" fill="url(#rear-crest-color)"/>
+      <path d="M508 50 C542 40 565 100 574 164" fill="none" stroke="#c0afff" stroke-opacity=".65" stroke-width="2"/>
+    </g>
+    <g class="fl">
+      <path id="left-small-feather" d="M306 195 C283 186 270 171 271 151 C272 132 286 121 307 118 C333 114 359 121 385 132 L431 175 Z" fill="url(#left-crest-color)"/>
+      <path d="M272 143 C283 111 329 110 381 131" fill="none" stroke="#8185ce" stroke-opacity=".45" stroke-width="1.5"/>
+    </g>
+    <g class="ft">
+      <path id="tall-swept-feather" d="M382 131 C354 102 318 71 328 38 C334 17 351 9 371 11 C414 13 455 51 482 98 C494 119 511 140 533 158 L421 177 Z" fill="url(#tall-crest-color)"/>
+      <path d="M336 24 C347 10 362 9 377 12 C418 19 455 53 482 98" fill="none" stroke="url(#crest-rim)" stroke-width="2"/>
+    </g>
+  </g>
+  </g>
+  <g id="body-skirt">
+    <path d="M24 828 L0 822 C-28 880 -84 1000 -160 1330 L708 1330 L716 1170 C726 1092 740 1036 752 1000 L24 1000 Z" fill="url(#skirt-fill)"/>
+    <path d="M744 1023 C730 1070 718 1150 708 1330" fill="none" stroke="url(#right-rim)" stroke-width="2.6"/>
   </g>
   <g id="bird-head-and-body">
     <use href="#bird-outline" fill="url(#bird-base)"/>
@@ -187,31 +216,37 @@
     </g>
     <path id="illuminated-right-edge" d="M552 160 C654 178 746 230 793 328 C827 396 841 458 836 519 C833 585 819 652 790 705 C775 730 776 740 779 768 C792 865 776 963 744 1024" fill="none" stroke="url(#right-rim)" stroke-width="2.6"/>
   </g>
+  <g class="wing">
+  <g id="left-wing">
+    <path d="M3 816 C-17 856 -37 906 -54 966 L-26 970 L3 954 Z" fill="#17203b"/>
+    <path d="M3 856 C-17 900 -33 940 -46 966 C-30 968 -12 970 3 970.5 Z" fill="url(#wing-base)"/>
+    <path id="wing-dark-leading-edge" d="M0 820 C50 718 121 620 209 581 C234 570 256 567 280 567 C206 598 115 718 72 816 L0 951 Z" fill="#17203b"/>
+    <path id="wing-surface" d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-base)"/>
+    <path d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-shade)"/>
+    <path id="wing-soft-highlight" d="M210 583 C236 567 256 563 278 565 C325 564 360 586 382 622 C408 664 413 710 400 757 C393 784 381 808 366 829" fill="none" stroke="url(#wing-rim)" stroke-width="2"/>
+  </g>
+  </g>
+  <g class="face">
   <g id="golden-eyes">
-    <g class="eye eye-l">
+    <g class="eye eye-l"><g class="lid">
       <ellipse cx="438" cy="437" rx="31" ry="34" fill="#111a2d" opacity=".6"/>
       <g class="iris">
       <path id="left-eye" d="M467 438 C467 455 455 469 439 469 C423 470 410 459 409 442 C407 425 414 409 430 405 C449 399 466 415 467 438 Z" fill="url(#eye-gold)" stroke="#ffe157" stroke-opacity=".7" stroke-width="1.2"/>
       <g class="glint">
       <ellipse id="left-eye-reflection" cx="449" cy="421" rx="8.5" ry="9.5" transform="rotate(-24 449 421)" fill="#fffff6"/>
       </g></g>
-    </g>
-    <g class="eye eye-r">
+    </g></g>
+    <g class="eye eye-r"><g class="lid">
       <ellipse cx="709" cy="385" rx="28" ry="32" fill="#111a2d" opacity=".7"/>
       <g class="iris">
       <path id="right-eye" d="M735 379 C739 397 728 413 713 415 C697 417 685 405 683 390 C679 374 688 356 702 354 C719 351 732 364 735 379 Z" fill="url(#eye-gold)" stroke="#ffe458" stroke-opacity=".65" stroke-width="1.2"/>
       <g class="glint">
       <ellipse id="right-eye-reflection" cx="719" cy="370" rx="8.4" ry="9.5" transform="rotate(-27 719 370)" fill="#fffff8"/>
       </g></g>
-    </g>
-  </g>
-  <g id="left-wing">
-    <path id="wing-dark-leading-edge" d="M0 820 C50 718 121 620 209 581 C234 570 256 567 280 567 C206 598 115 718 72 816 L0 951 Z" fill="#17203b"/>
-    <path id="wing-surface" d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-base)"/>
-    <path d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-shade)"/>
-    <path id="wing-soft-highlight" d="M210 583 C236 567 256 563 278 565 C325 564 360 586 382 622 C408 664 413 710 400 757 C393 784 381 808 366 829" fill="none" stroke="url(#wing-rim)" stroke-width="2"/>
+    </g></g>
   </g>
   <use class="halo" href="#key-outline" fill="#ffe14d" filter="url(#key-glow)" opacity="0"/>
+  <g class="key"><g class="keyswing">
   <g id="gold-key">
     <use href="#key-outline" fill="url(#key-gold)"/>
     <g clip-path="url(#key-clip)">
@@ -226,11 +261,31 @@
     </g>
   </g>
   <g clip-path="url(#key-clip)"><g transform="rotate(18 700 640)"><rect class="sheen" x="330" y="380" width="70" height="520" fill="url(#sheen)" opacity="0"/></g></g>
+  </g></g>
+  <g class="beak">
   <g id="bird-beak">
     <path id="beak-surface" d="M522 527 C509 524 510 508 518 488 C529 459 548 436 572 427 C606 413 634 426 662 442 C697 463 728 490 743 518 C752 534 757 554 743 566 C737 572 727 573 716 570 L522 527 Z" fill="url(#beak-color)"/>
     <path d="M522 527 C509 524 510 508 518 488 C529 459 548 436 572 427 C606 413 634 426 662 442 C697 463 728 490 743 518 C752 534 757 554 743 566 C737 572 727 573 716 570 L522 527 Z" fill="url(#beak-light)"/>
     <path id="beak-upper-rim" d="M546 443 C567 423 591 418 615 424 C658 433 716 477 739 510 C750 527 754 541 749 552" fill="none" stroke="url(#beak-rim)" stroke-width="2"/>
   </g>
+  </g>
+  <g class="key"><g class="keyswing" id="key-sparkles">
+    <g id="key-ring-star">
+      <g class="tw tw-key-ring-star">
+      <use href="#key-sparkle" fill="#ffda25" opacity=".65" filter="url(#soft-glow)"/>
+      <use href="#key-sparkle" fill="#fffadb"/>
+      <path d="M497 534 C494 575 490 585 457 590 C489 596 494 606 497 641 C500 605 506 596 536 590 C506 586 501 575 497 534 Z" fill="#fff"/>
+      </g>
+    </g>
+    <g id="key-shaft-star">
+      <g class="tw tw-key-shaft-star">
+      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#ffffb7" opacity=".6" filter="url(#small-glow)"/>
+      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#fffff4"/>
+      </g>
+    </g>
+  </g></g>
+  </g>
+  </g></g></g></g>
   <g id="sparkle-highlights">
     <g id="large-yellow-star" transform="translate(-72 48)">
       <g class="tw tw-large-yellow-star">
@@ -249,19 +304,6 @@
       <g class="tw tw-white-background-star">
       <path d="M984 252 C980 271 979 274 959 279 C979 283 980 287 984 305 C988 287 990 283 1008 279 C989 275 988 271 984 252 Z" fill="#eae9ff" opacity=".5" filter="url(#small-glow)"/>
       <path d="M984 252 C980 271 979 274 959 279 C979 283 980 287 984 305 C988 287 990 283 1008 279 C989 275 988 271 984 252 Z" fill="#fff"/>
-      </g>
-    </g>
-    <g id="key-ring-star">
-      <g class="tw tw-key-ring-star">
-      <use href="#key-sparkle" fill="#ffda25" opacity=".65" filter="url(#soft-glow)"/>
-      <use href="#key-sparkle" fill="#fffadb"/>
-      <path d="M497 534 C494 575 490 585 457 590 C489 596 494 606 497 641 C500 605 506 596 536 590 C506 586 501 575 497 534 Z" fill="#fff"/>
-      </g>
-    </g>
-    <g id="key-shaft-star">
-      <g class="tw tw-key-shaft-star">
-      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#ffffb7" opacity=".6" filter="url(#small-glow)"/>
-      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#fffff4"/>
       </g>
     </g>
   </g>
