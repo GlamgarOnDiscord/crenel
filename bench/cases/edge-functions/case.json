@@ -1,0 +1,12 @@
+{
+  "title": "Supabase Edge Functions: an admin export that trusts anyone, a signed webhook, an account deletion that reads the caller",
+  "type": "static",
+  "config": {},
+  "mustFind": [
+    { "id": "admin-stats-open", "check": "supabase-functions", "text": "admin-stats", "minSeverity": "high", "why": "It reads every profile with the service role for any caller holding the public key." }
+  ],
+  "mustNotFlag": [
+    { "id": "webhook-signed", "check": "supabase-functions", "text": "stripe-webhook", "forbid": "any", "why": "verify_jwt is off on purpose and the Stripe signature is checked." },
+    { "id": "delete-own-account", "check": "supabase-functions", "text": "delete-account", "forbid": "any", "why": "It reads the caller with auth.getUser and deletes only that user." }
+  ]
+}

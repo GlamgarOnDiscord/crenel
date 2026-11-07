@@ -47,6 +47,7 @@ empty list runs every read-only check.
 | supabase-rpc | Postgres functions the client calls (`.rpc("x")`) returning data to the anon role | yes (GET with the public key, refused without it) | static; GETs on the Supabase host + active gate |
 | cache-poisoning | Unkeyed header (X-Forwarded-Host/Proto) reflected and stored by the cache | yes (sentinel served without the header) | GETs, needs allowActiveTesting and `options.cache-poisoning.enabled` |
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
+| supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -517,6 +518,19 @@ are skipped), it flags:
 
 Each is `unproven`, medium (routes: low), and carries a regression test written
 out for the team to run on staging; Crenel does not run it, because it writes.
+
+## supabase-functions
+
+Reads `supabase/functions/<name>/` and `supabase/config.toml`. A function whose
+files read the service-role key (`SUPABASE_SERVICE_ROLE_KEY`, a secret key) and
+contain no caller check (`auth.getUser`, `getClaims`, a JWT verification, a
+webhook signature such as Stripe's `constructEvent`, or a secret header compared
+with an env secret) is a high lead. The service role bypasses RLS, and
+`verify_jwt` (on by default) only asks for *a* valid JWT: the anon key in your
+bundle is one, so anyone who opened the site can call the function; with
+`verify_jwt = false` nobody even needs that. `_shared` folders are modules and
+skipped. A check done in a shared module is invisible from the function's
+files, hence a lead.
 
 ## What goes out
 

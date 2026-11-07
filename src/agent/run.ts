@@ -56,7 +56,7 @@ const webState = (s: Finding["state"]) => (s === "proven" ? "proven" : s === "fi
 
 const TOOL_CHECKS: Record<string, string[]> = {
   "scan.secrets": ["exposed-secrets", "public-env", "sourcemaps", "committed-credentials", "committed-env", "git-history", "storage-buckets"],
-  "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit", "webhook-signature", "ssrf", "business-logic"],
+  "scan.repo": ["ci-hardening", "dockerfile", "mcp-surface", "jwt-config", "tls-verification", "cloudflare-audit", "webhook-signature", "ssrf", "business-logic", "supabase-functions"],
   "scan.deps": ["dependency-risk"],
   "scan.baas": ["baas-exposure", "supabase-rpc"],
   "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns", "dev-server", "ai-infra", "vercel-preview", "cache-deception", "auth-config", "auth-variants", "next-image", "api-docs", "cache-poisoning"],
