@@ -4,7 +4,8 @@
 //
 //   1. Deterministic, blocking, not negotiable: the tool must be known and
 //      non-mutating, every planned request must use a safe method (GET, HEAD,
-//      OPTIONS), an http(s) URL on a declared host, no private IP literal unless
+//      OPTIONS; the active-mode tool alone may also send POST, PUT, PATCH and
+//      DELETE to declared routes, and is asked for every time), an http(s) URL on a declared host, no private IP literal unless
 //      the config allows it, no path that looks like a side effect (logout,
 //      delete...), and an active probe needs allowActiveTesting in the config.
 //      The run mode cannot loosen any of this: "bypass" removes the questions,
@@ -28,8 +29,15 @@ export interface ToolSpec {
   network: boolean;
   /** Sends crafted requests (cross-tenant replays, BaaS reads): needs allowActiveTesting. */
   active: boolean;
-  /** Changes state somewhere. Crenel ships no such tool; the gate refuses it anyway. */
+  /** Changes state somewhere with no restore. Crenel ships no such tool; the gate refuses it anyway. */
   mutating: boolean;
+  /**
+   * Active mode (authz-write, mass-assignment, race): sends POST, PUT, PATCH or
+   * DELETE to declared staging routes, opt-in per check. Needs
+   * allowActiveTesting, and in "ask" mode it always asks, even for a host
+   * allowed "always" earlier.
+   */
+  writes?: boolean;
 }
 
 export const TOOLS: Record<string, ToolSpec> = {
@@ -40,6 +48,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   "scan.web": { name: "scan.web", network: true, active: false, mutating: false },
   "authz.matrix": { name: "authz.matrix", network: true, active: true, mutating: false },
   "validate.claims": { name: "validate.claims", network: true, active: false, mutating: false },
+  "active.writes": { name: "active.writes", network: true, active: true, mutating: false, writes: true },
   "tests.generate": { name: "tests.generate", network: false, active: false, mutating: false },
   "llm.advise": { name: "llm.advise", network: false, active: false, mutating: false },
   // Optional toolbox (containers whose only exit is the scoped egress proxy).
@@ -81,6 +90,7 @@ export interface GateDecision {
 }
 
 export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // GET routes that commonly have side effects: never probed, even read-only.
 const RISKY_PATH = /\/(logout|log-out|signout|sign-out|delete|destroy|remove|reset|unsubscribe|revoke|deactivate|cancel|purge|drop)(\/|$|\?)/i;
 
@@ -113,7 +123,7 @@ export function gateDeterministic(call: ToolCall, ctx: GateContext): GateDecisio
     if (!host) { reasons.push(`invalid URL ${r.url}`); continue; }
     const proto = new URL(r.url).protocol;
     if (proto !== "http:" && proto !== "https:") reasons.push(`${proto} is not http(s)`);
-    if (!SAFE_METHODS.has(method)) reasons.push(`${method} ${r.url}: only GET, HEAD and OPTIONS are ever sent`);
+    if (!SAFE_METHODS.has(method) && !(spec.writes && WRITE_METHODS.has(method))) reasons.push(`${method} ${r.url}: only GET, HEAD and OPTIONS are ever sent`);
     if (!ctx.scope.isHostAllowed(r.url)) reasons.push(`${host} is not in allowedHosts`);
     const literal = host.replace(/^\[|\]$/g, "");
     if (/^[\d.]+$|:/.test(literal) && isPrivateIp(literal) && !ctx.scope.allowPrivate) reasons.push(`${host} is a private address and allowPrivate is off`);
@@ -128,9 +138,11 @@ export function gateDeterministic(call: ToolCall, ctx: GateContext): GateDecisio
   if (ctx.mode === "bypass") {
     return { verdict: "allow", reasons: ["bypass mode: no question, perimeter still enforced"], stage: "deterministic", hosts: hostList, unattended: true };
   }
-  if (hostList.every((h) => ctx.grants.has(h))) {
+  // Writes are asked for every time in "ask" mode: a standing grant was given for reads.
+  if (!spec.writes && hostList.every((h) => ctx.grants.has(h))) {
     return { verdict: "allow", reasons: ["host allowed for this session"], stage: "deterministic", hosts: hostList, unattended: true };
   }
+  if (spec.writes) return { verdict: "ask", reasons: ["writes to staging (active mode) need your approval every time in this mode"], stage: "deterministic", hosts: hostList, unattended: false };
   return { verdict: "ask", reasons: ["network requests need your approval in this mode"], stage: "deterministic", hosts: hostList, unattended: false };
 }
 

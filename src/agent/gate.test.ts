@@ -68,3 +68,19 @@ test("a judge can harden (allow -> ask, ask -> deny) but never loosen a deny", a
   assert.equal(called, false, "the judge never sees what stage 1 denied");
   assert.equal((await authorize(call, ctx("bypass"), async () => { throw new Error("down"); })).verdict, "ask", "a failing judge escalates");
 });
+
+test("active.writes: write methods pass the method rule, need allowActiveTesting, and always ask in ask mode", () => {
+  const w = (m: string) => ({ tool: "active.writes", requests: [{ method: m, url: "https://staging.acme.test/api/projects/p_b" }] });
+  for (const m of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal(gateDeterministic(w(m), ctx("ask", { grants: new Set(["staging.acme.test"]) })).verdict, "ask", `${m}: a standing grant does not skip the question`);
+    assert.equal(gateDeterministic(w(m), ctx("readonly")).verdict, "deny");
+    assert.equal(gateDeterministic(w(m), { ...ctx("bypass"), scope: scope({ allowActiveTesting: false }) }).verdict, "deny");
+  }
+  const b = gateDeterministic(w("PATCH"), ctx("bypass"));
+  assert.equal(b.verdict, "allow");
+  assert.equal(b.unattended, true, "bypass writes are audited as unattended");
+  assert.equal(gateDeterministic({ tool: "active.writes", requests: [{ method: "PATCH", url: "https://evil.example/x" }] }, ctx("bypass")).verdict, "deny");
+  assert.equal(gateDeterministic({ tool: "active.writes", requests: [{ method: "CONNECT", url: "https://staging.acme.test/x" }] }, ctx("bypass")).verdict, "deny");
+  // Other tools still never send a write.
+  assert.equal(gateDeterministic({ tool: "authz.matrix", requests: [{ method: "PATCH", url: "https://staging.acme.test/x" }] }, ctx("bypass")).verdict, "deny");
+});

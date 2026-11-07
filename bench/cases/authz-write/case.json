@@ -1,0 +1,23 @@
+{
+  "title": "Cross-tenant writes: a rename and a delete without owner check, a scoped update, a silent 200",
+  "type": "live",
+  "config": {
+    "options": {
+      "authz-matrix": { "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b" } } },
+      "authz-write": { "enabled": true, "targets": [
+        { "name": "project", "path": "/api/projects/:id", "method": "PATCH", "field": "name", "victimId": "proj_b_1", "ownId": "proj_a_1" },
+        { "name": "invoice", "path": "/api/invoices/:id", "method": "PATCH", "field": "memo", "victimId": "inv_b_1", "ownId": "inv_a_1" },
+        { "name": "settings", "path": "/api/settings/:id", "method": "PATCH", "field": "theme", "victimId": "set_b_1", "ownId": "set_a_1" },
+        { "name": "draft", "path": "/api/drafts/:id", "method": "DELETE", "victimId": "draft_b_tmp", "ownId": "draft_a_tmp", "disposable": true }
+      ] }
+    }
+  },
+  "mustFind": [
+    { "id": "project-rename", "check": "authz-write", "where": "/api/projects/proj_b_1", "state": "proven", "minSeverity": "critical", "why": "Account A renames account B's project; B's own read shows it." },
+    { "id": "draft-delete", "check": "authz-write", "where": "/api/drafts/draft_b_tmp", "state": "proven", "minSeverity": "critical", "why": "Account A deletes account B's (disposable) draft." }
+  ],
+  "mustNotFlag": [
+    { "id": "invoice-scoped", "check": "authz-write", "where": "/api/invoices", "forbid": "any", "why": "The update is scoped to the caller's tenant: 404 for B's invoice." },
+    { "id": "settings-silent-200", "check": "authz-write", "where": "/api/settings", "forbid": "any", "why": "200 for everyone, but B's settings never change. A status-only oracle calls this a leak." }
+  ]
+}

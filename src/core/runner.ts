@@ -41,7 +41,7 @@ export async function run(
     stagingUrl: config.scope.stagingUrl,
   });
 
-  const checks = checksOverride ?? resolveChecks(config.checks);
+  const checks = checksOverride ?? resolveChecks(config.checks, config.options);
   const log = (msg: string) => {
     if (opts.verbose) process.stderr.write(`  ${msg}\n`);
   };
@@ -61,6 +61,8 @@ export async function run(
 
   for (const check of checks) {
     try {
+      // A check that writes never runs without allowActiveTesting, whatever it does inside.
+      if (!check.readOnly) scope.assertActiveAllowed(check.name);
       const out = await check.run(ctx);
       findings.push(...out);
       checksRun.push(check.name);

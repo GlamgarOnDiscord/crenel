@@ -1,6 +1,7 @@
 # Checks
 
-Crenel runs 39 checks. Each is deterministic and read-only by default, and marks every
+Crenel runs 40 checks. Each is deterministic and read-only by default (the
+[active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -49,6 +50,7 @@ empty list runs every read-only check.
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
+| authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
 ## exposed-secrets
 
@@ -547,6 +549,89 @@ bundle is one, so anyone who opened the site can call the function; with
 skipped. A check done in a shared module is invisible from the function's
 files, hence a lead.
 
+## Active mode
+
+Some flaws only show when something is written: account A renaming account
+B's project, a user making themselves admin through their own profile update,
+a coupon redeemed twice by two requests at once. AI code review misses them
+most (the ownership check lives in another file, or nowhere), and no read can
+prove them. The active-mode checks send those writes, under rules that do not
+bend:
+
+- **Staging, test accounts, declared objects.** Run them only on a staging
+  deployment you own, with test accounts you created for this. They touch only
+  the routes and ids you list in their options; an id discovered in a response
+  is never written to.
+- **Opt-in twice.** `scope.allowActiveTesting: true` and the check's own
+  `options.<check>.enabled: true`. Enabled without allowActiveTesting, the run
+  stops with a scope error before anything is sent; the scoped client refuses
+  POST, PUT, PATCH and DELETE on its own too.
+- **Budgets.** At most 10 targets and 150 requests per check and run (lower it
+  with `maxRequests`). A target's worst case, restores included, is reserved
+  before its first request, so the budget never stops a run between a write and
+  the write that undoes it. No loop, no retry.
+- **Restore, and say so.** Every write is recorded. Each check emits a
+  `<check>:writes` finding (info) listing every request it sent, its answer,
+  and whether the previous value was put back. What could not be restored is
+  in its title and description: fix those objects by hand before the next run.
+- **Proof is the state, not the status.** A finding is proven only when a read
+  shows the change (the owner's own read for authz-write), with a control that
+  shows the declaration is right.
+- **Console.** In the agent, these checks run as one step, `active.writes`,
+  listing every write. In *Ask* mode it always asks, even for a host you
+  allowed "always" earlier; *Read-only* never sends it; *Bypass* sends it and
+  writes it to the audit as unattended. A write cannot be replayed without
+  writing again, so `validate.claims` does not resend it: the check's own
+  observation is the validator (`in-check-observation:<check>`).
+
+Test accounts can be declared once under `options.authz-matrix.accounts` (`a`
+and `b` with `token`); each active check reads them from there unless it has
+its own `accounts`.
+
+## authz-write
+
+Active mode. For each declared target:
+
+```yaml
+options:
+  authz-write:
+    enabled: true
+    targets:
+      - name: project
+        path: /api/projects/:id      # the write route
+        readPath: /api/projects/:id  # optional, default path
+        method: PATCH                # PATCH (default), PUT, POST, DELETE
+        field: name                  # dotted path of a field to put a canary in
+        victimId: proj_b_test        # an object of account B
+        ownId: proj_a_test           # an object of account A (control)
+      - name: draft
+        path: /api/drafts/:id
+        method: DELETE
+        victimId: draft_b_tmp        # throwaway objects you created
+        ownId: draft_a_tmp
+        disposable: true             # DELETE is refused without it
+```
+
+1. **Control:** A writes `crenel-canary-<nonce>` into `field` on its own object
+   and reads it back, then writes the old value back. If A cannot change its
+   own object, the declaration is wrong and B's object is never touched.
+2. B reads its object (value before).
+3. The same write without a token, then with A's token; B reads after each.
+4. B's read showing the canary is **proven** (critical), whatever status the
+   write returned. B then writes the old value back and reads it to confirm.
+
+PUT sends the object as B just read it, with only the field changed. POST is
+restored by POST, then PATCH. DELETE goes only to ids marked `disposable`; the
+control deletes A's throwaway object, and nothing deleted is restored (the
+receipt says which ids to recreate). A and B must be different identities
+(same token or same JWT `sub` sends nothing).
+
+What it writes, at most, per PATCH/PUT/POST target: 1 canary and its restore on
+A's object, 2 canaries (anonymous, then A) and their restores on B's (a POST
+restore may take a second try by PATCH). The generated regression test
+sends the same write as A and without a token, expects 401, 403 or 404, and
+checks B's field did not move.
+
 ## What goes out
 
 Every check uses one HTTP client (`src/core/net.ts`), which refuses any method
@@ -562,3 +647,7 @@ provably a read.
 
 Batched GraphQL or JSON-RPC arrays are refused. A refused request is written to
 the journal like any other.
+
+With `allowActiveTesting`, the [active mode](#active-mode) checks you enabled
+send POST, PUT, PATCH and DELETE to the routes and ids you declared, and list
+each one in their `<check>:writes` finding.

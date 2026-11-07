@@ -12,8 +12,8 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-39-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-279%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Checks](https://img.shields.io/badge/checks-40-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Tests](https://img.shields.io/badge/tests-293%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -29,7 +29,7 @@ Apps shipped fast, often with AI, keep making the same mistakes: a server key in
 - **Proof, not noise.** A finding is `proven` only when a deterministic validator replays it. Everything else is a `lead`. Only proven findings fail your build.
 - **Authorization done right.** Two test accounts, a declarative matrix, and a response-body oracle with a negative control. A `200` alone is never a leak.
 - **Fixed stays fixed.** Every proven flaw becomes a test in your CI.
-- **Scope in code, not in a prompt.** Crenel only reaches hosts you declare. Active probes are opt-in and nothing destructive is ever sent.
+- **Scope in code, not in a prompt.** Crenel only reaches hosts you declare. Active probes are opt-in. Writes (active mode) go only to staging objects you declare, and each one is restored or reported.
 
 ## Quick start
 
@@ -54,6 +54,7 @@ pnpm crenel generate-tests     # one regression test per finding
 | --- | --- |
 | **Secrets** | `exposed-secrets` server keys in the bundle (Stripe, AWS, OpenAI, Anthropic, Supabase `service_role`…) · `live-bundle` the same on every JS chunk your live site serves · `git-history` keys deleted from the code but not from the history · `public-env` · `committed-env` · `committed-credentials` · `sourcemaps` |
 | **Authorization** | `authz-matrix` account A reaching account B's objects, anonymous access, proven live on staging |
+| **Active mode** (opt-in, staging only) | `authz-write` account A changing or deleting account B's objects, proven by B's own read, then restored |
 | **BaaS & storage** | `baas-exposure` Supabase or Firebase tables readable with the public key (missing RLS) · `supabase-rpc` functions that return data to anonymous visitors · `supabase-functions` Edge Functions acting as service role for anyone · `storage-buckets` S3, R2, GCS buckets anyone can list |
 | **Supply chain** | `dependency-risk` known-malware versions, install hooks · `ci-hardening` · `dockerfile` · `mcp-surface` |
 | **Server code** | `webhook-signature` unverified Stripe, GitHub or Clerk webhooks · `ssrf` fetching a URL from the request · `business-logic` prices, plans or roles the browser sends (hypotheses) |
@@ -88,7 +89,7 @@ Uploads SARIF to GitHub code scanning. JUnit and JSON outputs too: [`docs/USAGE.
 
 ## Safety
 
-Every request goes through a scoped client that refuses undeclared hosts, private addresses and unsafe methods, and re-checks each redirect. Point Crenel only at systems you own or are authorised to test. It is a hardening tool, not an attack tool. [`SECURITY.md`](SECURITY.md)
+Every request goes through a scoped client that refuses undeclared hosts, private addresses and unsafe methods, and re-checks each redirect. The [active mode](docs/CHECKS.md#active-mode) checks write, so they need `allowActiveTesting` and their own `enabled: true`, touch only declared staging objects with test accounts, and list every write and whether it was restored. Point Crenel only at systems you own or are authorised to test. It is a hardening tool, not an attack tool. [`SECURITY.md`](SECURITY.md)
 
 Optional toolbox: `crenel tools build` then `crenel tools nuclei|katana|trufflehog` runs those tools in a Docker container whose only network exit is a proxy applying the same perimeter (their results stay leads until a Crenel validator replays them). What it filters, and what it cannot filter over HTTPS: [`docs/TOOLBOX.md`](docs/TOOLBOX.md).
 

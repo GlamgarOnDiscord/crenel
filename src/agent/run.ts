@@ -27,6 +27,7 @@ import { reviewBundle } from "./bundle-review.js";
 import { scanBaas, storageBuckets, rtdbUrls, type FirebaseConfig } from "../checks/baas-exposure.js";
 import { Journal } from "./journal.js";
 import { authorize, type GateDecision, type Judge, type Mode, type PlannedRequest } from "./gate.js";
+import { plannedWrites } from "../checks/authz-write.js";
 import { authzUrl, claimFor, validateClaim, type AuthzOptions, type Claim, type ClaimVerdict } from "./validators.js";
 import { fence, untrusted, UNTRUSTED_PREAMBLE } from "./untrusted.js";
 import { estimateTokens, type Llm } from "./llm.js";
@@ -61,7 +62,14 @@ const TOOL_CHECKS: Record<string, string[]> = {
   "scan.baas": ["baas-exposure", "supabase-rpc"],
   "scan.web": ["headers", "live-bundle", "exposed-files", "graphql", "open-redirect", "next-middleware", "transport", "subdomain-takeover", "email-dns", "dev-server", "ai-infra", "vercel-preview", "cache-deception", "auth-config", "auth-variants", "next-image", "api-docs", "cache-poisoning"],
 };
+// Active mode: checks that write to staging, each opt-in in its own options.
+// They are their own validator (a write cannot be replayed without writing
+// again): the proof is the owner's read before and after, with a control.
+const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: string) => PlannedRequest[]> = {
+  "authz-write": plannedWrites,
+};
 const LABEL: Record<string, string> = {
+  "active.writes": "Écritures actives sur staging (opt-in, valeurs restaurées)",
   "scan.secrets": "Chercher des secrets dans le bundle",
   "scan.repo": "Fouiller le dépôt",
   "scan.deps": "Auditer les dépendances",
@@ -243,14 +251,15 @@ export class AgentRun {
     const authzOn = (authz.resources ?? []).length > 0 && (enabled.has("authz-matrix") || this.deps.config.checks.length === 0);
     const scan = ["scan.secrets", "scan.repo", "scan.deps", "scan.baas", "scan.web"].filter(has);
     const tail = ["validate.claims", "tests.generate"];
-    if (intent === "authz") return authzOn ? ["authz.matrix", ...tail] : [];
+    const active = this.activeChecks().length ? ["active.writes"] : [];
+    if (intent === "authz") return authzOn || active.length ? [...(authzOn ? ["authz.matrix"] : []), ...active, ...tail] : [];
     if (intent === "secrets") return [...["scan.secrets", "scan.baas"].filter(has), "validate.claims"];
     if (intent === "tests") return this.deps.store.findings().items.length ? ["tests.generate"] : [...scan, ...tail];
     // The optional toolbox: in a full scan when options.toolbox.enabled, always on /tools.
     const tools = ["tools.trufflehog", ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
     if (intent === "tools") return [...tools, ...tail];
     const review = this.deps.llm && this.scope.stagingUrl && scan.includes("scan.web") ? ["review.bundle"] : [];
-    return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...tail];
+    return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...active, ...tail];
   }
 
   /** One pass of the plan. Returns the findings it produced, validated. */
@@ -278,6 +287,7 @@ export class AgentRun {
       }
       if (tool === "tests.generate") continue; // done in finish()
       if (tool === "authz.matrix") { claims.push(...(await this.authzTool(found, ran))); continue; }
+      if (tool === "active.writes") { toolFound.push(...(await this.activeTool(ran))); continue; }
       if (tool === "review.bundle") { toolFound.push(...(await this.reviewTool())); ran.add("bundle-review"); continue; }
       if (tool.startsWith("tools.")) {
         const out = await this.toolboxTool(tool.slice(6) as ToolName);
@@ -292,6 +302,54 @@ export class AgentRun {
     }
     if (steps.includes("tests.generate") && !this.aborted) return this.finish([], ran, true);
     return [];
+  }
+
+  /** Active checks the user switched on (options.<check>.enabled: true) among this run's checks. */
+  private activeChecks(): Check[] {
+    const opts = this.deps.config.options;
+    return this.checks.filter((c) => !c.readOnly && c.name in ACTIVE_PLANS && (opts[c.name] as { enabled?: unknown } | undefined)?.enabled === true);
+  }
+
+  /**
+   * Active mode. The gate sees every write the checks may send (declared
+   * routes and ids only) and, in "ask" mode, always asks. Each check proves on
+   * its own observation (owner's read before and after, control) and records
+   * every write with its restore; nothing is replayed by validate.claims,
+   * which would write again.
+   */
+  private async activeTool(ran: Set<string>): Promise<{ f: Finding; v?: ClaimVerdict }[]> {
+    const checks = this.activeChecks();
+    const base = this.scope.stagingUrl;
+    const t0 = Date.now();
+    const args = checks.map((c) => c.name).join(", ");
+    const opts = this.deps.config.options;
+    const reqs = base ? checks.flatMap((c) => ACTIVE_PLANS[c.name]!(opts, base)) : [];
+    const input = JSON.stringify({ checks: checks.map((c) => c.name), ecritures: reqs.filter((r) => r.method !== "GET").length }, null, 2);
+    const uid = this.ui({ kind: "tool", tool: "active.writes", args, input, lines: ["…"], dur: "" });
+    if (!base || !reqs.length || !(await this.gated("active.writes", reqs))) {
+      this.uiUpdate(uid, { kind: "tool", tool: "active.writes", args, input, lines: [!base ? "Pas de stagingUrl: aucune écriture." : "non lancé (écritures refusées)"], dur: ms(Date.now() - t0) });
+      return [];
+    }
+    const out: { f: Finding; v?: ClaimVerdict }[] = [];
+    const lines: string[] = [];
+    for (const c of checks) {
+      if (this.aborted) break;
+      try {
+        const fs = await c.run(this.ctx(this.scope));
+        ran.add(c.name);
+        for (const f of fs) {
+          out.push({ f, v: f.state === "proven" ? { claimId: `claim:${f.id}`, state: "proven", validator: `in-check-observation:${c.name}`, reason: f.proof?.method ?? "observed state change" } : undefined });
+          if (f.id.endsWith(":writes")) lines.push(`${c.name}: ${f.title}`);
+        }
+      } catch (err) {
+        lines.push(`${c.name}: échec (${(err as Error).message})`);
+      }
+    }
+    this.unattended = false;
+    const proven = out.filter((x) => x.f.state === "proven").length;
+    lines.unshift(`${proven} prouvé(s) par observation de l'état (lecture du propriétaire avant et après, témoin)`);
+    this.uiUpdate(uid, { kind: "tool", tool: "active.writes", args, input, lines, findings: out.slice(0, 8).map(({ f }) => ({ sev: SEV[f.severity], text: f.title, state: webState(f.state), id: uidOf(f.id) })), dur: ms(Date.now() - t0) });
+    return out;
   }
 
   private toolboxEnabled(): boolean {
@@ -359,7 +417,7 @@ export class AgentRun {
 
   private reasoning(intent: Intent, steps: string[]): string {
     const cfg = this.deps.config.scope;
-    const net = steps.some((s) => ["scan.web", "scan.baas", "authz.matrix"].includes(s));
+    const net = steps.some((s) => ["scan.web", "scan.baas", "authz.matrix", "active.writes"].includes(s));
     const mode = this.opts.mode === "readonly" ? "Mode lecture seule: aucune requête ne sortira." : this.opts.mode === "bypass" ? "Mode bypass: je n'interromps pas pour demander, le périmètre reste appliqué et chaque sonde est inscrite à l'audit." : "Je demanderai votre accord avant toute requête vers un hôte.";
     return `Plan déterministe pour « ${intent} ». D'abord ce qui se lit sans réseau (bundle, dépôt, lockfile). ` +
       (net ? `Ensuite les vérifications réseau, seulement vers ${cfg.allowedHosts.join(", ") || "(aucun hôte déclaré)"}; ${cfg.allowActiveTesting ? "les sondes actives sont permises par la config" : "les sondes actives sont coupées dans la config (allowActiveTesting: false)"}. ` : "") +
