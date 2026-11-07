@@ -73,6 +73,18 @@ function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string
   return { _, flags, warnings };
 }
 
+// Run the checks, turning a scope/config error (e.g. a stagingUrl not in
+// allowedHosts, which the Scope constructor rejects) into a clean message and a
+// null result the caller reports as exit 2, instead of an uncaught "Fatal:".
+async function runGuarded(config: Parameters<typeof run>[0], configPath: string, verbose: boolean) {
+  try {
+    return await run(config, configPath, { verbose });
+  } catch (err) {
+    process.stderr.write(`Erreur de périmètre ou de configuration: ${(err as Error).message}\n`);
+    return null;
+  }
+}
+
 async function main(): Promise<number> {
   const { _, flags, warnings } = parseFlags(process.argv.slice(2));
   for (const w of warnings) process.stderr.write(`Attention: ${w}\n`);
@@ -107,7 +119,8 @@ async function main(): Promise<number> {
       process.stderr.write(`${(err as Error).message}\n`);
       return 2;
     }
-    const result = await run(config, configPath, { verbose: !!flags.verbose });
+    const result = await runGuarded(config, configPath, !!flags.verbose);
+    if (!result) return 2;
     if (flags.json) {
       process.stdout.write(renderJson(result) + "\n");
     } else {
@@ -176,7 +189,8 @@ async function main(): Promise<number> {
       process.stderr.write(`${(err as Error).message}\n`);
       return 2;
     }
-    const result = await run(config, configPath, { verbose: !!flags.verbose });
+    const result = await runGuarded(config, configPath, !!flags.verbose);
+    if (!result) return 2;
     const content = generateRegressionFile(result.findings);
     const out = typeof flags.out === "string" ? flags.out : "crenel.regression.test.ts";
     writeFileSync(out, content);
@@ -195,7 +209,8 @@ async function main(): Promise<number> {
       process.stderr.write(`${(err as Error).message}\n`);
       return 2;
     }
-    const result = await run(config, configPath, { verbose: !!flags.verbose });
+    const result = await runGuarded(config, configPath, !!flags.verbose);
+    if (!result) return 2;
     const model = typeof flags.model === "string" ? flags.model : "opus";
     const max = typeof flags.max === "string" ? Number(flags.max) : 3;
     process.stdout.write(`Triage de ${Math.min(max, result.findings.filter((f) => f.state === "unproven").length)} lead(s) via claude -p (${model})...\n\n`);
