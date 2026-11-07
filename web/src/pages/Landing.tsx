@@ -11,8 +11,8 @@ import "../styles/landing.css";
 // The engine's real check list (src/core/registry.ts), grouped for reading.
 const CHECK_GROUPS: { name: string; ids: string[] }[] = [
   { name: "Secrets", ids: ["exposed-secrets", "live-bundle", "public-env", "sourcemaps", "committed-env", "committed-credentials", "git-history"] },
-  { name: "Autorisation", ids: ["authz-matrix", "auth-variants", "auth-config", "jwt-config", "baas-exposure", "storage-buckets", "webhook-signature"] },
-  { name: "Site en ligne", ids: ["headers", "exposed-files", "graphql", "open-redirect", "next-middleware", "cache-deception", "dev-server", "ai-infra", "mcp-surface", "vercel-preview", "ssrf"] },
+  { name: "Autorisation", ids: ["authz-matrix", "auth-variants", "auth-config", "jwt-config", "baas-exposure", "supabase-rpc", "supabase-functions", "storage-buckets", "webhook-signature", "business-logic"] },
+  { name: "Site en ligne", ids: ["headers", "exposed-files", "graphql", "open-redirect", "next-middleware", "cache-deception", "dev-server", "ai-infra", "mcp-surface", "vercel-preview", "ssrf", "next-image", "cache-poisoning", "api-docs"] },
   { name: "Infra et DNS", ids: ["subdomain-takeover", "email-dns", "transport", "cloudflare-audit", "dockerfile"] },
   { name: "Chaîne d'appro.", ids: ["dependency-risk", "ci-hardening", "tls-verification"] },
 ];
@@ -83,8 +83,8 @@ export function Landing() {
 
       <section className="ln-wrap ln-stats" aria-label="En chiffres">
         <div><b>{CHECK_COUNT}</b><span>checks déterministes</span></div>
-        <div><b>14/14</b><span>failles trouvées sur notre banc</span></div>
-        <div><b>0/14</b><span>leurres signalés à tort</span></div>
+        <div><b>22/22</b><span>failles trouvées sur notre banc</span></div>
+        <div><b>0/28</b><span>leurres signalés à tort</span></div>
         <div><b>GET</b><span>par défaut, imposé par le client HTTP</span></div>
       </section>
 
