@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { FolderClosed, Plus, Globe } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
@@ -6,7 +7,7 @@ import { targets } from "../data/mock.ts";
 export function Targets() {
   return (
     <>
-      <Topbar crumb="Espace de travail" title="Cibles" actions={<Button><Plus size={15} /> Ajouter une cible</Button>} />
+      <Topbar crumb="Espace de travail" title="Cibles" actions={<Link to="/app/onboarding"><Button><Plus size={15} /> Ajouter une cible</Button></Link>} />
       <div className="content">
         <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>Une cible est un site ou un dépôt que vous possédez. Chaque cible a son propre dossier de scans, findings et tests. Crenel ne teste que des hôtes que vous avez déclarés.</p>
         <section className="folders">
@@ -24,9 +25,9 @@ export function Targets() {
               <div className="faint mono" style={{ fontSize: 11 }}>dernier scan · {t.lastScan}</div>
             </a>
           ))}
-          <button className="folder" style={{ alignItems: "center", justifyContent: "center", color: "var(--fg-faint)", borderStyle: "dashed", cursor: "pointer" }}>
+          <Link to="/app/onboarding" className="folder" style={{ alignItems: "center", justifyContent: "center", color: "var(--fg-faint)", borderStyle: "dashed" }}>
             <Plus size={22} /><span style={{ fontSize: 13 }}>Ajouter une cible</span>
-          </button>
+          </Link>
         </section>
       </div>
     </>

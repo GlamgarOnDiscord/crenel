@@ -7,6 +7,7 @@ import { FindingDetail } from "./pages/FindingDetail.tsx";
 import { Scans } from "./pages/Scans.tsx";
 import { ScanRun } from "./pages/ScanRun.tsx";
 import { Targets } from "./pages/Targets.tsx";
+import { Onboarding } from "./pages/Onboarding.tsx";
 import { Secrets } from "./pages/Secrets.tsx";
 import { Authorization } from "./pages/Authorization.tsx";
 import { Tests } from "./pages/Tests.tsx";
@@ -26,6 +27,7 @@ export const routes: RouteObject[] = [
       { path: "scans", element: <Scans /> },
       { path: "scan/run", element: <ScanRun /> },
       { path: "targets", element: <Targets /> },
+      { path: "onboarding", element: <Onboarding /> },
       { path: "secrets", element: <Secrets /> },
       { path: "authz", element: <Authorization /> },
       { path: "tests", element: <Tests /> },
