@@ -41,29 +41,41 @@ options:
       b: { owns: { project: [] } }  # ids that belong to account B
 `;
 
-function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean> } {
+// Flags that never take a value, so they do not swallow the following token
+// (e.g. `bastion --verbose scan` must keep `scan` as the command).
+const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help"]);
+// Flags that require a value; a missing one is an error, not a silent skip.
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max"]);
+
+function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
   const flags: Record<string, string | boolean> = {};
+  const warnings: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next && !next.startsWith("--")) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-    } else {
-      _.push(a);
+    if (!a.startsWith("--")) { _.push(a); continue; }
+    const body = a.slice(2);
+    const eq = body.indexOf("=");
+    if (eq >= 0) { // --key=value
+      flags[body.slice(0, eq)] = body.slice(eq + 1);
+      continue;
+    }
+    const key = body;
+    if (!BOOLEAN_FLAGS.has(key) && !VALUE_FLAGS.has(key)) warnings.push(`flag inconnu ignoré: --${key}`);
+    if (BOOLEAN_FLAGS.has(key)) { flags[key] = true; continue; }
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith("-")) { flags[key] = next; i++; }
+    else { // value flag with no value
+      flags[key] = true;
+      if (VALUE_FLAGS.has(key)) warnings.push(`--${key} attend une valeur, ignoré`);
     }
   }
-  return { _, flags };
+  return { _, flags, warnings };
 }
 
 async function main(): Promise<number> {
-  const { _, flags } = parseFlags(process.argv.slice(2));
+  const { _, flags, warnings } = parseFlags(process.argv.slice(2));
+  for (const w of warnings) process.stderr.write(`Attention: ${w}\n`);
   const cmd = _[0] ?? "help";
 
   if (cmd === "list") {
