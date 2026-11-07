@@ -15,15 +15,24 @@ import { isAbsolute, join } from "node:path";
 import type { Check, CheckContext, Finding, Severity } from "../core/types.js";
 
 interface Trace { kind: string; file: string; line: number; scope?: string; description?: string }
+// Matches skills/security-audit/report-schema.json: an array of per-verdict
+// objects. remediation is an OBJECT ({ strategy, code_changes }), not a string.
 interface CfFinding {
   verdict: "confirmed" | "needs_validation" | "rejected";
   fingerprint: string;
   title: string;
   description?: string;
   root_cause?: string;
-  remediation?: string;
+  remediation?: { strategy?: string; code_changes?: { file_name: string; fixed_code: string }[] };
   trace?: Trace[];
   severity?: { overall_severity?: "informational" | "low" | "medium" | "high" | "critical" };
+}
+
+function remediationText(r: CfFinding): string {
+  const strat = r.remediation?.strategy;
+  const files = r.remediation?.code_changes?.map((c) => c.file_name).filter(Boolean) ?? [];
+  if (strat) return files.length ? `${strat} (fichiers: ${files.join(", ")})` : strat;
+  return "Voir le rapport détaillé du skill (FINDINGS-DETAIL.md).";
 }
 
 function mapSeverity(s?: string): Severity {
@@ -82,7 +91,7 @@ export const cloudflareAudit: Check = {
         state: proven ? "proven" : "unproven",
         location: locationOf(r.trace),
         description: r.description ?? r.root_cause ?? r.title,
-        remediation: r.remediation ?? "Voir le rapport détaillé du skill (FINDINGS-DETAIL.md).",
+        remediation: remediationText(r),
         proof: proven && r.trace?.length
           ? { method: "trace source du skill security-audit", replay: r.trace.map((t) => `${t.kind} ${t.file}:${t.line}`).join(" -> ") }
           : undefined,

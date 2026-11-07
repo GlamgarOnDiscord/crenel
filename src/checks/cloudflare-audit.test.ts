@@ -12,7 +12,7 @@ function ctx(projectDir: string, report?: string): CheckContext {
 }
 
 const sample = [
-  { verdict: "confirmed", fingerprint: "fp1", title: "SQLi dans la recherche", description: "d", remediation: "paramétrer la requête", severity: { overall_severity: "high" }, trace: [{ kind: "entrypoint", file: "a.ts", line: 1 }, { kind: "sink", file: "db.ts", line: 42 }] },
+  { verdict: "confirmed", fingerprint: "fp1", title: "SQLi dans la recherche", description: "d", remediation: { strategy: "paramétrer la requête", code_changes: [{ file_name: "db.ts", fixed_code: "db.query(sql, [id])" }] }, severity: { overall_severity: "high" }, trace: [{ kind: "entrypoint", file: "a.ts", line: 1 }, { kind: "sink", file: "db.ts", line: 42 }] },
   { verdict: "needs_validation", fingerprint: "fp2", title: "Peut-être un IDOR", trace: [{ kind: "sink", file: "api.ts", line: 7 }] },
   { verdict: "rejected", fingerprint: "fp3", title: "faux positif" },
 ];
@@ -27,6 +27,8 @@ test("imports confirmed as proven and needs_validation as lead, drops rejected",
     assert.equal(confirmed.state, "proven");
     assert.equal(confirmed.severity, "high");
     assert.equal(confirmed.location, "db.ts:42"); // sink preferred
+    assert.match(confirmed.remediation, /paramétrer la requête/); // strategy string extracted from the object
+    assert.doesNotMatch(confirmed.remediation, /\[object Object\]/);
     const lead = out.find((f) => f.id.endsWith("fp2"))!;
     assert.equal(lead.state, "unproven");
     assert.equal(out.find((f) => f.id.endsWith("fp3")), undefined);
