@@ -11,7 +11,8 @@
     ".": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "toolbox"
   ],
   "scripts": {
     "build": "tsup",
