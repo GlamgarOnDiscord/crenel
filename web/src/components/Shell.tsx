@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutGrid, ShieldAlert, Radar, FolderClosed, KeyRound, LockKeyhole,
   Plug, FileCheck2, BookOpen, Settings, Search,
@@ -12,14 +12,14 @@ import { CommandPalette } from "./CommandPalette.tsx";
 const nav = [
   { group: "Sécurité", items: [
     { to: "/app/overview", icon: LayoutGrid, label: "Vue d'ensemble" },
-    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: 14 },
+    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: 7 },
     { to: "/app/scans", icon: Radar, label: "Scans" },
     { to: "/app/targets", icon: FolderClosed, label: "Cibles", count: 3 },
   ]},
   { group: "Analyses", items: [
     { to: "/app/secrets", icon: KeyRound, label: "Secrets", count: 3 },
     { to: "/app/authz", icon: LockKeyhole, label: "Autorisation" },
-    { to: "/app/tests", icon: FileCheck2, label: "Tests générés", count: 9 },
+    { to: "/app/tests", icon: FileCheck2, label: "Tests générés", count: 4 },
   ]},
   { group: "Réglages", items: [
     { to: "/app/integrations", icon: Plug, label: "Intégrations" },
@@ -29,6 +29,8 @@ const nav = [
 
 export function Shell() {
   const [palette, setPalette] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
@@ -36,6 +38,9 @@ export function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // Reset scroll to the top of the content on every route change, so a new page
+  // does not open at the previous page's scroll offset.
+  useEffect(() => { mainRef.current?.scrollTo(0, 0); }, [pathname]);
   return (
     <div className="app">
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
@@ -58,7 +63,7 @@ export function Shell() {
           <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} /> Documentation</a>
         </div>
       </aside>
-      <main className="main"><Outlet /></main>
+      <main className="main" ref={mainRef}><Outlet /></main>
     </div>
   );
 }

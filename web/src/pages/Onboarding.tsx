@@ -15,9 +15,9 @@ export function Onboarding() {
           <p className="muted" style={{ margin: 0, maxWidth: "44ch" }}>Un dépôt ou un site que vous possédez. Crenel lance un premier scan et vous montre ce qui est prouvé en moins de deux minutes.</p>
         </div>
 
-        <div className="seg" role="tablist">
-          <button className={mode === "url" ? "on" : ""} onClick={() => setMode("url")}>Site</button>
-          <button className={mode === "repo" ? "on" : ""} onClick={() => setMode("repo")}>Dépôt GitHub</button>
+        <div className="seg" role="tablist" aria-label="Type de cible">
+          <button role="tab" aria-selected={mode === "url"} className={mode === "url" ? "on" : ""} onClick={() => setMode("url")}>Site</button>
+          <button role="tab" aria-selected={mode === "repo"} className={mode === "repo" ? "on" : ""} onClick={() => setMode("repo")}>Dépôt GitHub</button>
         </div>
 
         <div className="card" style={{ width: "100%", padding: 18, display: "grid", gap: 14, textAlign: "left" }}>
@@ -26,7 +26,7 @@ export function Onboarding() {
               <span className="muted" style={{ fontSize: 13 }}>URL du site (staging de préférence)</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--well)", border: "1px solid var(--line-strong)", borderRadius: "var(--r-control)", padding: "10px 12px" }}>
                 <Globe size={15} className="faint" />
-                <input placeholder="staging.acme.app" defaultValue="staging.acme.app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
+                <input key="url" placeholder="staging.acme.app" defaultValue="staging.acme.app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
               </div>
             </label>
           ) : (
@@ -34,7 +34,7 @@ export function Onboarding() {
               <span className="muted" style={{ fontSize: 13 }}>Dépôt</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--well)", border: "1px solid var(--line-strong)", borderRadius: "var(--r-control)", padding: "10px 12px" }}>
                 <Github size={15} className="faint" />
-                <input placeholder="acme/acme-app" defaultValue="acme/acme-app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
+                <input key="repo" placeholder="acme/acme-app" defaultValue="acme/acme-app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
               </div>
             </label>
           )}

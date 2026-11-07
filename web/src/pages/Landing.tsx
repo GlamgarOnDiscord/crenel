@@ -33,9 +33,10 @@ export function Landing() {
             <div className="bar"><i /><i /><i /><span className="mono faint" style={{ fontSize: 12, marginLeft: 6 }}>crenel</span></div>
             <pre><span className="p">$</span> npx crenel scan --target acme-app{"\n\n"}
   <span className="cr">CRIT</span>  clé Stripe dans le bundle      dist/app.js:5      <span className="ok">prouvé</span>{"\n"}
+  <span className="cr">CRIT</span>  clé privée PEM commitée        infra/key.pem:1    <span className="ok">prouvé</span>{"\n"}
   <span className="cr">CRIT</span>  paquet malveillant verrouillé  @tanstack@1.169.5  <span className="ok">prouvé</span>{"\n"}
   HIGH  autorisation inter-tenant      /api/projects/:id  lead{"\n\n"}
-  <span className="ok">→</span> 2 critiques prouvés · test de régression généré{"\n"}
+  <span className="ok">→</span> 3 critiques prouvés · test de régression généré{"\n"}
   la CI échoue sur un nouveau prouvé high ou critique
 </pre>
           </div>

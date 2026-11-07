@@ -2,12 +2,13 @@ import { useState } from "react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
 
-function Toggle({ on: initial }: { on: boolean }) {
+function Toggle({ on: initial, label }: { on: boolean; label: string }) {
   const [on, setOn] = useState(initial);
   return (
     <button
       role="switch"
       aria-checked={on}
+      aria-label={label}
       onClick={() => setOn((v) => !v)}
       style={{ width: 38, height: 22, borderRadius: 999, background: on ? "var(--brand)" : "var(--line-strong)", position: "relative", border: 0, padding: 0, flex: "none", cursor: "pointer" }}
     >
@@ -32,10 +33,10 @@ export function Settings() {
       <div className="content" style={{ maxWidth: 820 }}>
         <section className="card">
           <div className="hd"><h2>Politique</h2><span className="meta">ce qui bloque la CI</span></div>
-          <Row title="Bloquer sur critique prouvé" desc="Un nouveau critique prouvé fait échouer la CI." control={<Toggle on />} />
-          <Row title="Bloquer sur high prouvé" desc="Un nouveau high prouvé fait échouer la CI." control={<Toggle on />} />
-          <Row title="Bloquer sur les leads" desc="Déconseillé: les leads ne sont pas prouvés." control={<Toggle on={false} />} />
-          <Row title="Tester les scripts d'install" desc="Installer avec --ignore-scripts en CI." control={<Toggle on />} />
+          <Row title="Bloquer sur critique prouvé" desc="Un nouveau critique prouvé fait échouer la CI." control={<Toggle on label="Bloquer sur critique prouvé" />} />
+          <Row title="Bloquer sur high prouvé" desc="Un nouveau high prouvé fait échouer la CI." control={<Toggle on label="Bloquer sur high prouvé" />} />
+          <Row title="Bloquer sur les leads" desc="Déconseillé: les leads ne sont pas prouvés." control={<Toggle on={false} label="Bloquer sur les leads" />} />
+          <Row title="Refuser les scripts d'install en CI" desc="Installe avec --ignore-scripts (recommandé)." control={<Toggle on label="Refuser les scripts d'install en CI" />} />
         </section>
 
         <section className="card">

@@ -1,7 +1,7 @@
 import type { Activity, Finding, ScanStep, Target } from "../lib/types.ts";
 
 export const targets: Target[] = [
-  { id: "acme-app", name: "acme-app", url: "staging.acme.app", env: "staging", findings: 14, proven: 2, lastScan: "il y a 12 min" },
+  { id: "acme-app", name: "acme-app", url: "staging.acme.app", env: "staging", findings: 7, proven: 3, lastScan: "il y a 12 min" },
   { id: "inboxly", name: "inboxly", url: "app.inboxly.io", env: "production", findings: 3, proven: 0, lastScan: "il y a 3 h" },
   { id: "pagefold", name: "pagefold", url: "staging.pagefold.dev", env: "staging", findings: 7, proven: 1, lastScan: "hier" },
 ];
@@ -60,8 +60,8 @@ export const findings: Finding[] = [
 export const activity: Activity[] = [
   { kind: "bad", title: "Clé Stripe prouvée dans le bundle", meta: "dist/app.js:5 · critique" },
   { kind: "brand", title: "Test de régression généré pour l'isolation projet", meta: "authz-matrix · il y a 11 min" },
-  { kind: "good", title: "Correctif vérifié: clé Google retirée", meta: "re-scan vert · il y a 2 h" },
-  { kind: "info", title: "Scan planifié lancé sur acme-app", meta: "14 findings · il y a 12 min" },
+  { kind: "info", title: "Clé API Google à vérifier (lead)", meta: "dist/app.js:7 · high" },
+  { kind: "info", title: "Scan planifié lancé sur acme-app", meta: "7 findings · il y a 12 min" },
 ];
 
 // Barres empilées: prouvés (bas) + leads (haut), 14 jours.

@@ -22,14 +22,14 @@ export function Overview() {
       <div className="content">
         <section className="grid4">
           <div className="kpi alive">
-            <div className="top"><span className="ic32"><ShieldAlert size={16} /></span><span className="dp up">1 corrigé</span></div>
-            <span className="lab">Critiques prouvés</span><span className="fig crit">2</span>
-            <div className="spark"><Sparkline points={[2,2,3,2,3,4,3]} color="var(--crit)" /></div>
+            <div className="top"><span className="ic32"><ShieldAlert size={16} /></span><span className="dp flat">stable</span></div>
+            <span className="lab">Critiques prouvés</span><span className="fig crit">3</span>
+            <div className="spark"><Sparkline points={[1,2,2,3,2,3,3]} color="var(--crit)" /></div>
           </div>
           <div className="kpi">
-            <div className="top"><span className="ic32"><Clock size={16} /></span><span className="dp down">+3</span></div>
-            <span className="lab">Findings ouverts</span><span className="fig">14</span>
-            <div className="spark"><Sparkline points={[9,8,11,10,12,11,14]} /></div>
+            <div className="top"><span className="ic32"><Clock size={16} /></span><span className="dp down">+2</span></div>
+            <span className="lab">Findings ouverts</span><span className="fig">7</span>
+            <div className="spark"><Sparkline points={[4,5,5,6,6,7,7]} /></div>
           </div>
           <div className="kpi">
             <div className="top"><span className="ic32"><CheckCheck size={16} /></span><span className="dp up">▼ 0,4 j</span></div>
