@@ -55,3 +55,18 @@ Trois recherches web à jour (Sonnet en parallèle, synthèse Opus), dans `/root
 - Les garde-fous sont tous justifiés par des incidents 2026 (TanStack pour la supply chain, série de CVE SSRF d'agents pour le client HTTP à périmètre). J'ai ancré dans les tests les IP de métadonnées cloud exactes visées par ces CVE (déjà bloquées).
 
 Pistes concrètes dans la synthèse: pousser l'authz inter-tenant comme coeur produit, ajouter un contrôle d'âge/éditeur des dépendances (slopsquatting), ne pas concurrencer la détection de secrets, soigner la sortie SARIF/JSON pour les agents de code.
+
+## Trois revues indépendantes + corrections (07/11, fin de nuit)
+
+Trois reviewers Sonnet ont tourné: mon diff, l'app web, puis le coeur du moteur. Toutes les vraies trouvailles sont corrigées (28 commits au total).
+
+Correctifs marquants:
+- **Fail-open corrigé (le plus important)**: un check qui plantait faisait sortir le scan en 0 avec un SARIF vide. Désormais exit non-zéro, erreurs affichées, SARIF `executionSuccessful=false`, et la baseline ne classe plus « corrigé » un finding dont le check a planté.
+- **App web**: bug React de l'onboarding (input gardant l'ancienne valeur), fuite d'intervalle de la console agent, palette de commandes rendue réellement modale, `<button>` dans `<a>` éliminés, données mock rendues cohérentes, interrupteurs Settings nommés.
+- **CLI**: parseur robuste (flag booléen n'avale plus la commande, `--key=value`, flags inconnus signalés); erreurs de périmètre/config rapportées proprement au lieu d'un « Fatal: ».
+- **Sécurité**: garde SSRF élargi (6to4, NAT64, site-local, multicast, v4-compatible, IPv4 réservées; hex v4-mapped); config stricte (faute de frappe de clé rejetée, hôtes vides refusés); triage qui clôture le contenu des findings comme donnée non fiable.
+- **Robustesse**: baseline corrompue → échec propre au lieu d'écrasement; SARIF ne découpe plus les URL, empreintes stables; audit consigne le scope.
+
+Deux points de conception laissés en suivi assumé (notés en roadmap): fenêtre résiduelle de rebinding DNS, et gating baseline « seulement les nouveaux ».
+
+État: 44 tests moteur verts, typecheck et builds propres, demo inchangé, self-scan sans fuite réelle.
