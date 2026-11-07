@@ -7,3 +7,6 @@ bastion-report.json
 # local screenshot artifacts
 web/shots/
 .crenel/
+
+# agent worktrees
+.claude/
