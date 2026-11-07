@@ -15,7 +15,9 @@
 //     report any that did not return 401/403/404 as PROVEN broken authorization.
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
+import { authzOracle } from "../agent/validators.js";
 
 interface ResourceSpec {
   /** e.g. "project" */
@@ -32,14 +34,15 @@ interface AccountSpec {
   token?: string;
   /** Resource ids that belong to this account, keyed by resource name. */
   owns?: Record<string, string[]>;
+  /** A string only B's objects contain (an email, an org id): proof the body is B's. */
+  marker?: string;
 }
 
 interface AuthzOptions {
   resources?: ResourceSpec[];
-  accounts?: { a?: AccountSpec; b?: AccountSpec };
+  accounts?: { a?: AccountSpec; b?: AccountSpec; c?: AccountSpec };
 }
 
-const DENY = new Set([401, 403, 404]);
 
 export const authzMatrix: Check = {
   name: "authz-matrix",
@@ -101,45 +104,62 @@ export const authzMatrix: Check = {
     ctx.scope.assertActiveAllowed("authz-matrix (live probe)");
     const base = ctx.stagingUrl!.replace(/\/$/, "");
     ctx.scope.assertUrlAllowed(base);
-    const tokenA = cfg.accounts!.a!.token!;
+    const accounts = cfg.accounts!;
+    const markers = [accounts.b?.marker ?? ""].filter(Boolean);
+    const get = (url: string, token?: string) =>
+      safeFetch(url, ctx.scope, { method: "GET", headers: token ? { authorization: `Bearer ${token}` } : {} })
+        .then((r) => ({ status: r.status, body: r.body }));
 
+    // Same oracle as the agent's validator: a 200 is not proof. The attacker's
+    // body must be the owner's object, and a negative control (an id that does
+    // not exist) must not answer the same way. Each case is tried with A's
+    // token, C's if declared, then with no token at all: a route can refuse a
+    // wrong token and still serve an anonymous caller.
+    const actors: { key: "a" | "c" | "anon"; who: string; token?: string }[] = [
+      { key: "a", who: "account A's token", token: accounts.a!.token },
+      ...(accounts.c?.token ? [{ key: "c" as const, who: "account C's token (another tenant)", token: accounts.c.token }] : []),
+      { key: "anon", who: "no token at all" },
+    ];
     for (const c of cases) {
+      if (c.method !== "GET") { ctx.log(`authz-matrix: ${c.method} ${c.resource.path} skipped, only GET is probed live`); continue; }
       const url = base + c.resource.path.replace(":id", encodeURIComponent(c.id));
+      const controlUrl = base + c.resource.path.replace(":id", `crenel-nonexistent-${randomBytes(6).toString("hex")}`);
       ctx.scope.assertUrlAllowed(url);
-      let status = 0;
       try {
-        const res = await safeFetch(url, ctx.scope, {
-          method: c.method,
-          headers: { authorization: `Bearer ${tokenA}` },
-        });
-        status = res.status;
+        const owner = accounts.b?.token ? await get(url, accounts.b.token) : undefined;
+        for (const actor of actors) {
+          const attacker = await get(url, actor.token);
+          const control = await get(controlUrl, actor.token);
+          const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
+          if (o.verdict === "denied") continue;
+          const proven = o.verdict === "leak";
+          const auth = actor.token ? ` -H 'authorization: Bearer <${actor.key.toUpperCase()}_TOKEN>'` : "";
+          findings.push({
+            id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}${actor.key === "a" ? "" : `:${actor.key}`}`,
+            check: "authz-matrix",
+            title: proven
+              ? `${actor.key === "anon" ? "An anonymous caller" : `Account ${actor.key.toUpperCase()}`} reached account B's ${c.resource.name} (${c.method} ${attacker.status})`
+              : `Possible cross-tenant access to ${c.resource.name} (${c.method} ${attacker.status}), not proven`,
+            severity: proven ? "critical" : "medium",
+            state: proven ? "proven" : "unproven",
+            location: url,
+            description: proven
+              ? `With ${actor.who}, a ${c.method} on a ${c.resource.name} owned by account B returned B's object: ${o.reason}. This is broken object-level authorization.`
+              : `With ${actor.who}, the server answered ${attacker.status} instead of denying, but the oracle could not prove the body is B's: ${o.reason}.`,
+            remediation:
+              `Enforce the ownership check at the data layer for ${c.resource.name}, for every caller including unauthenticated ones, ` +
+              `and add the generated regression test so it can never return.`,
+            proof: {
+              method: "live cross-tenant replay on staging: owner baseline, attacker, negative control",
+              replay: `curl -i -X ${c.method}${auth} '${url}'`,
+              evidence: `HTTP ${attacker.status}; control ${control.status}${owner ? `; owner ${owner.status}` : ""}. ${o.reason}`,
+            },
+            regressionHint: renderTestFile([c.resource]),
+          });
+          if (proven) break; // one proof per object is enough
+        }
       } catch (err) {
         ctx.log(`authz-matrix: ${c.method} ${url} failed: ${(err as Error).message}`);
-        continue;
-      }
-      const proven = !DENY.has(status) && status < 500;
-      if (proven) {
-        findings.push({
-          id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}`,
-          check: "authz-matrix",
-          title: `Account A reached account B's ${c.resource.name} (${c.method} ${status})`,
-          severity: "critical",
-          state: "proven",
-          location: url,
-          description:
-            `Test account A used its own token to ${c.method} a ${c.resource.name} owned by ` +
-            `account B and the server answered ${status} instead of denying (401/403/404). ` +
-            `This is broken object-level authorization.`,
-          remediation:
-            `Enforce the ownership check at the data layer for ${c.resource.name}, not only in the UI, ` +
-            `and add the generated regression test so it can never return.`,
-          proof: {
-            method: "live cross-tenant request on staging with account A's token",
-            replay: `curl -i -X ${c.method} -H 'authorization: Bearer <A_TOKEN>' '${url}'`,
-            evidence: `HTTP ${status} (expected 401/403/404)`,
-          },
-          regressionHint: renderTestFile([c.resource]),
-        });
       }
     }
 
