@@ -115,6 +115,33 @@ function testFor(f: Finding): string | null {
         `});`,
       ].join("\n");
     }
+    case "baas-exposure": {
+      // Only a proven read (a table or database root answered without auth)
+      // becomes a test; a lead has nothing concrete to assert yet.
+      if (f.state !== "proven") return null;
+      if (f.id.startsWith("baas-exposure:firebase-rtdb:")) {
+        return [
+          `test(${JSON.stringify(title)}, async () => {`,
+          `  // The Realtime Database root must not be readable without signing in.`,
+          `  const res = await fetch(${JSON.stringify(f.location.replace(/\/\.json$/, "") + "/.json?shallow=true")});`,
+          `  expect(res.status === 401 || res.status === 403 || (await res.json()) === null).toBe(true);`,
+          `});`,
+        ].join("\n");
+      }
+      const m = f.location.match(/^(.*)\/rest\/v1\/([A-Za-z0-9_]+)$/);
+      if (!m) return null;
+      return [
+        `test(${JSON.stringify(`the table ${m[2]} is not readable with the anon key`)}, async () => {`,
+        `  // Supabase RLS: the public key alone must never return a row.`,
+        `  const key = process.env.SUPABASE_ANON_KEY!;`,
+        `  const res = await fetch(${JSON.stringify(`${m[1]}/rest/v1/${m[2]}?select=*&limit=1`)}, {`,
+        "    headers: { apikey: key, authorization: `Bearer ${key}` },",
+        `  });`,
+        `  const rows = res.ok ? await res.json() : [];`,
+        `  expect(Array.isArray(rows) ? rows.length : 0).toBe(0);`,
+        `});`,
+      ].join("\n");
+    }
     default:
       return null;
   }

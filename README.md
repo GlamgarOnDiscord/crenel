@@ -35,11 +35,12 @@ pnpm crenel scan
 pnpm crenel scan --sarif crenel.sarif --out crenel-report.json   # for CI and code scanning
 ```
 
-## The 14 checks
+## The 15 checks
 
 | Check | Catches |
 | --- | --- |
-| `exposed-secrets` | Server keys and private keys in client code (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Slack, npm, SendGrid, Supabase, PEM). |
+| `exposed-secrets` | Server keys and private keys in client code (Stripe, AWS, Google, OpenAI, Anthropic, GitHub, Slack, npm, SendGrid, Supabase `service_role` and `sb_secret_`, PEM). |
+| `baas-exposure` | A Supabase or Firebase public key in the bundle: a lead to check RLS; with active testing on a declared host, proves which tables answer a one-row read without signing in. |
 | `dependency-risk` | A locked package whose exact version is known malware (OSV denylist), plus install hooks and non-registry deps. |
 | `authz-matrix` | One account reaching another account's objects. Generates the CI test; with a staging URL and two test accounts (opt-in), proves it live. |
 | `public-env` | A secret behind a client-exposed prefix (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`…). |

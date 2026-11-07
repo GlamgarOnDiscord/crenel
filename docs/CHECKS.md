@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs fourteen checks. Each is deterministic and read-only, and marks every
+Crenel runs fifteen checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -23,6 +23,7 @@ empty list runs every read-only check.
 | tls-verification | Code/config disabling TLS cert verification | no (leads) | no |
 | jwt-config | JWT config that defeats signature verification | no (leads) | no |
 | committed-credentials | Committed .npmrc/.pypirc/.netrc/... credentials | yes (file+field) | no |
+| baas-exposure | Supabase/Firebase public key in the bundle, tables readable without RLS | yes (one-row read, opt-in) | static no; live read yes + active gate |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -31,7 +32,9 @@ Scans text files under `projectDir` for distinctive secret shapes: Stripe
 (`sk_live_`/`rk_live_` critical, test keys a low note), AWS access key, Google
 API key and OAuth client secret, OpenAI (incl. `sk-proj-`), Anthropic, GitHub
 (classic, fine-grained, OAuth family), Slack, npm, SendGrid, Supabase
-service-role JWT, and PEM private-key blocks. A match is **proven** with a
+service-role JWT (the payload is decoded: only `role: service_role` counts) and
+`sb_secret_` keys, and PEM private-key blocks. A Google key inside a Firebase
+web config is public by design and left to `baas-exposure`. A match is **proven** with a
 `grep` you can replay. Fix: rotate the key and move it server-side; client code
 holds only publishable keys.
 
@@ -85,6 +88,32 @@ Flags committed `.env` files (excluding `.env.example`/`.sample`/`.template`). A
 `.env` conventionally holds secrets that no key-shape scanner would catch, so the
 committed file itself is the signal. Fix: gitignore it, rotate what it held,
 commit only an example.
+
+## baas-exposure
+
+Apps built fast on Supabase or Firebase ship the project URL and the public key
+to the browser. That is by design: the anon (or `sb_publishable_`) key is
+public, and row-level security is what stops a visitor from reading every row.
+This check finds the pair (`https://<ref>.supabase.co` with an anon JWT whose
+`ref` matches, `createClient(url, key)` for self-hosted, a Firebase web config,
+and Appwrite, PocketBase or Convex endpoints) and reports a **lead**: check RLS
+on every table.
+
+With `allowActiveTesting: true` **and** the BaaS host in `allowedHosts`, it
+proves it, through the scoped HTTP client: it reads the PostgREST OpenAPI
+schema (`GET /rest/v1/`) with the public key, then asks each table for one row
+(`GET /rest/v1/<table>?select=*&limit=1`). GET only, never more than one row,
+never an RPC call, and the row is dropped at once: the finding keeps the table
+name, the column count and "rows are readable without signing in". A table
+that answers is **proven**, critical when its column names look personal or
+secret (email, phone, token, password...), high otherwise. Firebase Realtime
+Database gets the same treatment with a shallow read of the root
+(`/.json?shallow=true`, keys only). Firestore needs a POST to list collections,
+which Crenel never sends, so it stays a lead. The generated regression test
+asserts that the table returns no row with the anon key.
+
+Secret keys (`service_role`, `sb_secret_`) are `exposed-secrets` findings,
+critical and proven on their own.
 
 ## authz-matrix
 
