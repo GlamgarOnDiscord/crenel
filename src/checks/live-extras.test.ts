@@ -93,3 +93,28 @@ test("auth-config: Better Auth's OpenAPI reference published is a low finding", 
   try { assert.deepEqual((await authConfig.run(ctx(base))).map((f) => f.id), ["auth-config:better-auth-openapi:/api/auth/reference"]); }
   finally { srv.close(); }
 });
+
+test("auth-variants: /dashboard redirects, /dashboard.rsc is served; an app that refuses every spelling is clean", async () => {
+  const { authVariants } = await import("./auth-variants.js");
+  const page = "<html>" + "Revenue for every customer. ".repeat(5) + "</html>";
+  const leaky = await serve((req, res) => {
+    if (req.url === "/dashboard") { res.writeHead(307, { location: "/login" }); return res.end(); }
+    if (req.url === "/dashboard.rsc") { res.writeHead(200); return res.end(page); }
+    res.writeHead(404); res.end();
+  });
+  const strict = await serve((req, res) => { if (req.url?.toLowerCase().includes("dashboard")) { res.writeHead(401); return res.end(); } res.writeHead(404); res.end(); });
+  try {
+    assert.deepEqual((await authVariants.run(ctx(leaky.base))).map((f) => f.id), ["auth-variants:/dashboard:trailing .rsc"]);
+    assert.equal((await authVariants.run(ctx(strict.base))).length, 0);
+  } finally { leaky.srv.close(); strict.srv.close(); }
+});
+
+test("auth-variants: a trailing-slash normalization redirect is not a bypass", async () => {
+  const { authVariants } = await import("./auth-variants.js");
+  const { srv, base } = await serve((req, res) => {
+    if (req.url === "/dashboard") { res.writeHead(308, { location: "/dashboard/" }); return res.end(); }
+    if (req.url === "/dashboard/") { res.writeHead(200); return res.end("<html>" + "public landing ".repeat(10) + "</html>"); }
+    res.writeHead(404); res.end();
+  });
+  try { assert.equal((await authVariants.run(ctx(base))).length, 0); } finally { srv.close(); }
+});

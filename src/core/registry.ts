@@ -35,8 +35,9 @@ import { aiInfra } from "../checks/ai-infra.js";
 import { vercelPreview } from "../checks/vercel-preview.js";
 import { cacheDeception } from "../checks/cache-deception.js";
 import { authConfig } from "../checks/auth-config.js";
+import { authVariants } from "../checks/auth-variants.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, devServer, aiInfra, vercelPreview, cacheDeception, authConfig, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, devServer, aiInfra, vercelPreview, cacheDeception, authConfig, authVariants, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

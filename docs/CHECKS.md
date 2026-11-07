@@ -41,6 +41,7 @@ empty list runs every read-only check.
 | vercel-preview | Vercel deployments served without the Vercel login wall | yes (200 without the wall) | one GET per declared *.vercel.app |
 | cache-deception | Private responses cached under a static-looking URL | yes (anonymous GET returns B's object) | GETs, needs allowActiveTesting and B's token |
 | auth-config | Supabase open sign-up without email confirmation, Better Auth OpenAPI published | yes (public settings) | GETs |
+| auth-variants | Protected route served through another spelling (.rsc, ?_rsc=, /_next/data, //, case) | yes (canonical refused, variant served) | GETs |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -384,3 +385,12 @@ email (or phone) auto-confirm means anyone can create a working account, which
 opens every RLS policy that only checks "signed in". Better Auth's OpenAPI
 reference (`/api/auth/reference`) answering in production publishes every auth
 route.
+
+## auth-variants
+
+For each usual protected route that refuses an anonymous visitor, a few
+spellings the framework routes to the same page: `.rsc` and `?_rsc=` with the
+RSC header, `/_next/data/<buildId>/<route>.json` (build id read from the page),
+a doubled or trailing slash, an upper-case letter, an encoded slash. A variant
+served with a real page, where the canonical path redirected or refused, is the
+proof. A canonical redirect *to* the variant (URL normalization) is ignored.
