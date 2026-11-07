@@ -50,3 +50,34 @@ test("a declared staging probe is refused unless active testing is enabled", asy
     /active/i,
   );
 });
+
+test("live probe: a non-denied cross-tenant response is proven, a 403 is not", async () => {
+  const http = await import("node:http");
+  // A tiny staging stand-in: /api/projects/leak returns 200 (broken authz),
+  // /api/projects/safe returns 403 (correctly denied).
+  const server = http.createServer((req, res) => {
+    if (req.url?.endsWith("/leak")) { res.writeHead(200); res.end("B's project"); }
+    else { res.writeHead(403); res.end("denied"); }
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true });
+    const options = {
+      "authz-matrix": {
+        resources: [{ name: "project", path: "/api/projects/:id", methods: ["GET"] }],
+        accounts: { a: { label: "A", token: "tok" }, b: { label: "B", owns: { project: ["leak", "safe"] } } },
+      },
+    };
+    const found = await authzMatrix.run({
+      scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {},
+    });
+    const proven = found.filter((f) => f.state === "proven");
+    assert.equal(proven.length, 1, "only the 200 case is proven");
+    assert.match(proven[0]!.id, /:leak$/);
+    assert.equal(proven[0]!.severity, "critical");
+    assert.ok(!found.some((f) => f.id.endsWith(":safe")), "the 403 case is not a finding");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
