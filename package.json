@@ -17,13 +17,16 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "demo": "tsx src/cli.ts scan --config examples/bastion.config.yaml"
+    "demo": "tsx src/cli.ts scan --config examples/bastion.config.yaml",
+    "sync-denylist": "node scripts/sync-denylist.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "license": "MIT",
   "dependencies": {
