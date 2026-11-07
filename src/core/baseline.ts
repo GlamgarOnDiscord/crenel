@@ -45,15 +45,24 @@ export function toBaseline(result: RunResult): Baseline {
   };
 }
 
+/**
+ * Returns the baseline, or null only when the file does not exist. A file that
+ * exists but is corrupt or malformed THROWS, so the caller never silently treats
+ * it as "no baseline" and overwrites it (which would mask a regression).
+ */
 export function loadBaseline(path: string): Baseline | null {
   if (!existsSync(path)) return null;
+  let data: unknown;
   try {
-    const data = JSON.parse(readFileSync(path, "utf8")) as Baseline;
-    if (!Array.isArray(data.findings)) return null;
-    return data;
+    data = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    return null;
+    throw new Error(`Baseline illisible (JSON invalide): ${path}`);
   }
+  const d = data as Baseline;
+  if (!d || typeof d !== "object" || !Array.isArray(d.findings) || d.findings.some((e) => !e || typeof e.id !== "string")) {
+    throw new Error(`Baseline malformée (champ findings invalide): ${path}`);
+  }
+  return d;
 }
 
 export function saveBaseline(path: string, result: RunResult): void {

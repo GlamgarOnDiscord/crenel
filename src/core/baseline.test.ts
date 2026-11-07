@@ -45,3 +45,22 @@ test("a proven finding whose check did not run is NOT reported as fixed", () => 
   const d = diff(now, base);
   assert.equal(d.fixed.length, 0, "a crashed check must not read as a fix");
 });
+
+test("loadBaseline: absent is null, corrupt throws, valid loads", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { loadBaseline } = await import("./baseline.js");
+  const dir = mkdtempSync(join(tmpdir(), "crenel-base-"));
+  try {
+    assert.equal(loadBaseline(join(dir, "nope.json")), null);
+    writeFileSync(join(dir, "bad.json"), "{ not json");
+    assert.throws(() => loadBaseline(join(dir, "bad.json")), /illisible/);
+    writeFileSync(join(dir, "mal.json"), JSON.stringify({ savedAt: "x", findings: [{ no: "id" }] }));
+    assert.throws(() => loadBaseline(join(dir, "mal.json")), /malformée/);
+    writeFileSync(join(dir, "ok.json"), JSON.stringify({ savedAt: "x", findings: [] }));
+    assert.deepEqual(loadBaseline(join(dir, "ok.json"))?.findings, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

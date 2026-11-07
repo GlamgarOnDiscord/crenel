@@ -132,24 +132,34 @@ async function main(): Promise<number> {
     // Baseline: diff against a saved snapshot, and/or update it.
     const baselinePath = typeof flags.baseline === "string" ? flags.baseline : undefined;
     let regressed = false;
+    let baselineBroken = false;
     if (baselinePath) {
-      const base = loadBaseline(baselinePath);
+      let base;
+      try {
+        base = loadBaseline(baselinePath);
+      } catch (err) {
+        // Do not silently treat a corrupt baseline as absent (and then overwrite
+        // it): report it and fail, so a real regression cannot be masked.
+        process.stderr.write(`${(err as Error).message}\n`);
+        baselineBroken = true;
+      }
       if (base && !flags.json) {
         const d = diff(result, base);
         process.stdout.write("\n" + renderDiff(d));
         regressed = hasRegression(d);
-      } else if (!base) {
+      } else if (!base && !baselineBroken) {
         process.stderr.write(`Pas de baseline à ${baselinePath} (utilise --update-baseline pour en créer une).\n`);
       }
     }
-    if (flags["update-baseline"] && baselinePath) {
+    // Never overwrite a baseline we could not read.
+    if (flags["update-baseline"] && baselinePath && !baselineBroken) {
       saveBaseline(baselinePath, result);
       process.stdout.write(`Baseline écrite dans ${baselinePath}.\n`);
     }
 
-    // Exit non-zero on a proven high/critical, on a regression vs baseline, or
-    // when a check failed (a partial run must not pass as clean: fail closed).
-    const errExit = result.errors.length > 0 ? 2 : 0;
+    // Exit non-zero on a proven high/critical, on a regression vs baseline, when
+    // a check failed, or when the baseline was unreadable (fail closed).
+    const errExit = result.errors.length > 0 || baselineBroken ? 2 : 0;
     return Math.max(exitCode(result), regressed ? 1 : 0, errExit);
   }
 
