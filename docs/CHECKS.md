@@ -127,6 +127,14 @@ into CI). With a `stagingUrl`, two tokens, and active testing enabled for an
 owned host, it replays each cross-tenant request and reports any that did not
 return 401/403/404 as a **proven** broken-authorization finding.
 
+
+**From an OpenAPI file.** `options.authz-matrix.openapi: api.yaml` (path relative
+to the config) adds every GET route with exactly one path parameter as a
+resource (`/projects/{projectId}` becomes `/projects/:id`, with the server's
+path prefix). An operation with `security: []` is imported as public by design
+and never probed. Hand-declared resources win on a name clash. You still list
+the ids account B owns: the matrix never guesses objects.
+
 ## sourcemaps
 
 Looks under `projectDir` for `.map` files and for `sourceMappingURL` comments

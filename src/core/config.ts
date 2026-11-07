@@ -3,6 +3,8 @@
 // typo fails loudly instead of silently widening scope.
 
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { loadOpenApi } from "./openapi.js";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -42,5 +44,24 @@ export function loadConfig(path: string): Config {
       .join("\n");
     throw new Error(`Invalid config (${path}):\n${issues}`);
   }
-  return result.data;
+  return withOpenApi(result.data, path);
+}
+
+// options.authz-matrix.openapi: a spec file (relative to the config) whose GET
+// object routes are added to the declared resources. Declared ones win on a
+// name clash, so a hand-written entry can always override the import.
+function withOpenApi(config: Config, configPath: string): Config {
+  const authz = config.options["authz-matrix"] as { openapi?: unknown; resources?: { name: string }[] } | undefined;
+  if (!authz || typeof authz.openapi !== "string") return config;
+  const file = resolve(dirname(configPath), authz.openapi);
+  let imported;
+  try {
+    imported = loadOpenApi(file);
+  } catch (err) {
+    throw new Error(`Cannot read options.authz-matrix.openapi (${file}): ${(err as Error).message}`);
+  }
+  const declared = authz.resources ?? [];
+  const taken = new Set(declared.map((r) => r.name));
+  const resources = [...declared, ...imported.filter((r) => !taken.has(r.name))];
+  return { ...config, options: { ...config.options, "authz-matrix": { ...authz, resources } } };
 }

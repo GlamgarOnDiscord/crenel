@@ -26,6 +26,8 @@ interface ResourceSpec {
   path: string;
   /** HTTP methods to test for isolation. GET only by default (read-only). */
   methods?: string[];
+  /** Public by design (a trust boundary): never probed, never reported. */
+  public?: boolean;
 }
 
 interface AccountSpec {
@@ -62,6 +64,7 @@ export const authzMatrix: Check = {
     const b = cfg.accounts?.b;
     const cases: { resource: ResourceSpec; method: string; id: string }[] = [];
     for (const r of resources) {
+      if (r.public) continue;
       const methods = r.methods ?? ["GET"];
       const ids = b?.owns?.[r.name] ?? [];
       for (const method of methods) {
