@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Topbar } from "../components/Shell.tsx";
 import { Button, SeverityChip, StateBadge } from "../components/ui.tsx";
@@ -8,20 +9,35 @@ const sorted = [...findings].sort((a, b) =>
   (a.state === "proven" ? 0 : 1) - (b.state === "proven" ? 0 : 1) || SEV_RANK[a.sev] - SEV_RANK[b.sev],
 );
 
+type Filter = "all" | "proven" | "lead" | "fixed";
+
 export function Findings() {
+  const [filter, setFilter] = useState<Filter>("all");
+  const counts = {
+    all: sorted.length,
+    proven: sorted.filter((f) => f.state === "proven").length,
+    lead: sorted.filter((f) => f.state === "lead").length,
+    fixed: sorted.filter((f) => f.state === "fixed").length,
+  };
+  const rows = filter === "all" ? sorted : sorted.filter((f) => f.state === filter);
+  const tabs: [Filter, string][] = [["all", "Tous"], ["proven", "Prouvés"], ["lead", "Leads"], ["fixed", "Corrigés"]];
   return (
     <>
       <Topbar crumb="acme-app · staging" title="Findings" actions={<Button variant="ghost" size="sm">Exporter SARIF</Button>} />
       <div className="content">
         <div className="seg" style={{ width: "fit-content" }}>
-          <button className="on">Tous (7)</button><button>Prouvés (3)</button><button>Leads (4)</button><button>Corrigés</button>
+          {tabs.map(([key, label]) => (
+            <button key={key} className={filter === key ? "on" : ""} onClick={() => setFilter(key)}>
+              {label} ({counts[key]})
+            </button>
+          ))}
         </div>
         <section className="card">
           <div style={{ overflowX: "auto" }}>
             <table className="table">
               <thead><tr><th>Sév.</th><th>Intitulé</th><th className="hide-sm">Emplacement</th><th className="hide-sm">Check</th><th>État</th><th className="hide-sm">Vu</th><th /></tr></thead>
               <tbody>
-                {sorted.map((f) => (
+                {rows.map((f) => (
                   <tr key={f.id}>
                     <td><SeverityChip sev={f.sev} /></td>
                     <td className="t-title">{f.title}</td>
