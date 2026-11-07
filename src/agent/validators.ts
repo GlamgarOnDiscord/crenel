@@ -239,7 +239,45 @@ const replayValidator: Validator = {
   },
 };
 
-export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator];
+/* ---------------- check.replay-file ---------------- */
+
+// A lead from an external tool that points at a file (trufflehog: "a secret in
+// dist/app.js"). The tool's word is not taken: an offline deterministic check
+// runs again on the disk, and the claim is proven only if that check itself
+// proves a finding in the same file. Only offline checks are accepted here.
+const FILE_REPLAY_CHECKS = new Set(["exposed-secrets", "committed-credentials", "committed-env", "public-env"]);
+const fileReplayValidator: Validator = {
+  class: "check.replay-file",
+  name: "deterministic-check-replay-on-file",
+  async validate(claim, env) {
+    const checkName = String(claim.detail.check ?? "");
+    const file = String(claim.detail.file ?? "").replace(/\\/g, "/");
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (!FILE_REPLAY_CHECKS.has(checkName)) return no(`${checkName} is not an offline check that can replay a file`);
+    if (!file || file.includes("..")) return no("no file to replay");
+    const check = env.checks.find((c) => c.name === checkName);
+    if (!check) return no(`no check named ${checkName}`);
+    const offline: CheckContext = { scope: env.scope, projectDir: env.projectDir, options: env.options, log: () => {} };
+    const line = Number(claim.detail.line ?? 0) || 0;
+    // Same file, and the same line when the check reports one: another secret
+    // elsewhere in the file does not confirm this lead.
+    const hits = (await check.run(offline)).filter((f) => {
+      if (f.state !== "proven" || !f.proof) return false;
+      const m = f.location.replace(/\\/g, "/").match(/^(.*?)(?::(\d+))?$/);
+      if (!m || m[1] !== file) return false;
+      return m[2] === undefined || !line || Number(m[2]) === line;
+    });
+    if (hits.length === 0) return no(`${checkName} proves nothing at ${file}${line ? `:${line}` : ""}: the tool's lead is not confirmed`);
+    const f = hits[0]!;
+    return {
+      claimId: claim.id, state: "proven", validator: `${this.name}:${checkName}`,
+      reason: `${checkName} replayed on the disk: ${f.title} at ${f.location}`,
+      evidence: { request: f.proof!.replay, response: f.proof!.evidence ?? "(match)" },
+    };
+  },
+};
+
+export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator];
 
 /** Route a claim to its validator. No validator: unproven, labelled. A validator that throws: unproven. */
 export async function validateClaim(claim: Claim, env: ValidatorEnv, validators = VALIDATORS): Promise<ClaimVerdict> {

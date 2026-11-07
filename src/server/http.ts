@@ -207,7 +207,9 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
         const file = fd ? generateRegressionFile([fd]) : "";
         return { ...t, code: file.includes("test(") ? file.slice(file.indexOf("test(")).trim() : undefined };
       }),
-      audit: store.audit().slice(-200),
+      // Egress events of the toolbox proxy can number thousands per run: they
+      // are served by /api/toolbox and /api/audit, not mixed into the state.
+      audit: store.audit().filter((e) => e.kind !== "egress").slice(-200),
     };
   }
 
@@ -317,6 +319,18 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       return send(res, 200, store.tests());
     }
     if (p === "/api/audit") return send(res, 200, store.audit());
+    // Optional toolbox: read-only status for the console. Enabling it is a
+    // config change (options.toolbox.enabled), through PUT /api/config.
+    if (p === "/api/toolbox" && method === "GET") {
+      const { dockerStatus, relayMode } = await import("../toolbox/docker.js");
+      const { toolboxOptions, TOOL_NAMES } = await import("../toolbox/run.js");
+      let options: unknown = null;
+      let optionsError: string | undefined;
+      try { options = toolboxOptions(config()); } catch (err) { optionsError = (err as Error).message; }
+      const st = await dockerStatus((options as { image?: string } | null)?.image);
+      const egress = store.audit().filter((e) => e.kind === "egress").slice(-200);
+      return send(res, 200, { ...st, relay: relayMode(), tools: TOOL_NAMES, options, optionsError, egress });
+    }
     throw new HttpError(404, "not found");
   }
 
