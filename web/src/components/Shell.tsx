@@ -1,34 +1,127 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  LayoutGrid, ShieldAlert, Radar, FolderClosed, KeyRound, LockKeyhole,
-  Plug, FileCheck2, BookOpen, Settings, Search,
+  House, ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
+  Plug, ShieldCheck, BookOpen, Settings, Search, Menu, X, ChevronsUpDown, Globe, FolderGit2, SquarePen, TerminalSquare,
 } from "lucide-react";
 import { Mark, Wordmark } from "../brand/Logo.tsx";
 import { cn } from "../lib/cn.ts";
 import { DOCS_URL } from "../lib/links.ts";
+import { WorkspaceProvider, useWorkspace } from "../lib/workspace.tsx";
+import { findings, guardedCount, secrets, targets, tasks } from "../data/mock.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
+import { Picker } from "./ui.tsx";
+
+const proven = findings.filter((f) => f.state === "proven").length;
+const waiting = tasks.filter((t) => t.status === "waiting" || t.status === "running").length;
 
 const nav = [
+  { group: null, items: [
+    { to: "/app/overview", icon: House, label: "Accueil" },
+    { to: "/app/agent", icon: TerminalSquare, label: "Agent", live: true },
+    { to: "/app/scans", icon: ListTodo, label: "Tâches", count: waiting || undefined },
+  ]},
   { group: "Sécurité", items: [
-    { to: "/app/overview", icon: LayoutGrid, label: "Vue d'ensemble" },
-    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: 12 },
-    { to: "/app/scans", icon: Radar, label: "Scans" },
-    { to: "/app/targets", icon: FolderClosed, label: "Cibles", count: 3 },
-  ]},
-  { group: "Analyses", items: [
-    { to: "/app/secrets", icon: KeyRound, label: "Secrets", count: 3 },
+    { to: "/app/findings", icon: ShieldAlert, label: "Findings", count: proven, danger: true },
+    { to: "/app/secrets", icon: KeyRound, label: "Secrets", count: secrets.length },
     { to: "/app/authz", icon: LockKeyhole, label: "Autorisation" },
-    { to: "/app/tests", icon: FileCheck2, label: "Tests générés", count: 7 },
+    { to: "/app/tests", icon: ShieldCheck, label: "Tests gardés", count: guardedCount, guard: true },
   ]},
-  { group: "Réglages", items: [
+  { group: "Espace", items: [
+    { to: "/app/targets", icon: FolderClosed, label: "Cibles", count: targets.length },
     { to: "/app/integrations", icon: Plug, label: "Intégrations" },
     { to: "/app/settings", icon: Settings, label: "Paramètres" },
   ]},
 ];
 
+function TargetSwitcher() {
+  const ws = useWorkspace();
+  const Icon = ws.target.kind === "repo" ? FolderGit2 : Globe;
+  return (
+    <Picker
+      label="Cible active" value={ws.target.id} onChange={ws.setTargetId} className="tswitch" buttonClassName="tswitch-btn"
+      options={targets.map((t) => ({
+        value: t.id, label: t.name, desc: t.url,
+        icon: t.kind === "repo" ? <FolderGit2 size={15} /> : <Globe size={15} />,
+        aside: t.proven ? <span className="pop-badge">{t.proven}</span> : undefined,
+      }))}
+      footer={<Link to="/app/onboarding" className="pop-link">+ Ajouter une cible</Link>}
+    >
+      <span className="tswitch-ic"><Icon size={15} /></span>
+      <span className="tswitch-tx"><span className="tswitch-n">{ws.target.name}</span><span className="tswitch-u">{ws.target.url}</span></span>
+      <ChevronsUpDown size={14} className="faint" />
+    </Picker>
+  );
+}
+
+function SideContent({ onSearch }: { onSearch: () => void }) {
+  return (
+    <>
+      <Link to="/" className="brand"><Mark /><Wordmark /></Link>
+      <TargetSwitcher />
+      <div className="side-actions">
+        <Link to="/app/overview" state={{ fresh: Date.now() }} className="newtask"><SquarePen size={15} /> Nouvelle tâche</Link>
+        <button type="button" className="search" onClick={onSearch} aria-label="Rechercher (Ctrl K)"><Search size={15} /><span className="kbd">⌘K</span></button>
+      </div>
+      {nav.map((g, gi) => (
+        <div key={gi} className="navgroup">
+          {g.group && <div className="navlabel">{g.group}</div>}
+          {g.items.map((it) => (
+            <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
+              <it.icon size={16} aria-hidden="true" /> {it.label}
+              {"live" in it && it.live && <span className="live" aria-label="un run attend votre accord" />}
+              {"count" in it && it.count !== undefined && (
+                <span className={cn("count", "danger" in it && it.danger && "danger", "guard" in it && it.guard && "guard")}>{it.count}</span>
+              )}
+            </NavLink>
+          ))}
+        </div>
+      ))}
+      <div className="spacer" />
+      <div className="foot">
+        <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden="true" /> Documentation</a>
+        <div className="me"><span className="av">T</span><span>Tom</span><span className="faint mono me-r">propriétaire</span></div>
+      </div>
+    </>
+  );
+}
+
+function Drawer({ open, onClose, onSearch }: { open: boolean; onClose: () => void; onSearch: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLElement>("button, a")?.focus();
+    return () => prev?.focus?.();
+  }, [open]);
+  if (!open) return null;
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+    if (e.key === "Tab") {
+      const els = ref.current?.querySelectorAll<HTMLElement>('a, button, [tabindex]:not([tabindex="-1"])');
+      if (!els?.length) return;
+      const first = els[0]!, last = els[els.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  return (
+    <div className="drawer-overlay" onMouseDown={onClose}>
+      <div ref={ref} className="drawer" role="dialog" aria-modal="true" aria-label="Menu" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+        <button type="button" className="drawer-close" aria-label="Fermer le menu" onClick={onClose}><X size={18} /></button>
+        <SideContent onSearch={() => { onClose(); onSearch(); }} />
+      </div>
+    </div>
+  );
+}
+
 export function Shell() {
+  return <WorkspaceProvider><ShellInner /></WorkspaceProvider>;
+}
+
+function ShellInner() {
   const [palette, setPalette] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
   useEffect(() => {
@@ -38,44 +131,36 @@ export function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // Reset scroll to the top of the content on every route change, so a new page
-  // does not open at the previous page's scroll offset.
-  useEffect(() => { mainRef.current?.scrollTo(0, 0); }, [pathname]);
+  // New page opens at the top, and the mobile drawer closes on navigation.
+  useEffect(() => { mainRef.current?.scrollTo(0, 0); setDrawer(false); }, [pathname]);
   return (
     <div className="app">
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
-      <aside className="side">
-        <NavLink to="/" className="brand"><Mark /><Wordmark /></NavLink>
-        <button className="search" onClick={() => setPalette(true)}><Search size={15} /> Rechercher <span className="kbd">⌘K</span></button>
-        {nav.map((g) => (
-          <div key={g.group} className="navgroup">
-            <div className="navlabel">{g.group}</div>
-            {g.items.map((it) => (
-              <NavLink key={it.to} to={it.to} className={({ isActive }) => cn("nav", isActive && "active")}>
-                <it.icon size={16} /> {it.label}
-                {it.count !== undefined && <span className="count">{it.count}</span>}
-              </NavLink>
-            ))}
-          </div>
-        ))}
-        <div className="spacer" />
-        <div className="foot">
-          <a className="nav" href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen size={16} /> Documentation</a>
-        </div>
-      </aside>
-      <main className="main" ref={mainRef}><Outlet /></main>
+      <aside className="side" aria-label="Navigation principale"><SideContent onSearch={() => setPalette(true)} /></aside>
+      <header className="mbar">
+        <Link to="/app/overview" className="brand"><Mark size={26} /><Wordmark /></Link>
+        <span className="sp" />
+        <button type="button" className="iconbtn" aria-label="Rechercher" onClick={() => setPalette(true)}><Search size={18} /></button>
+        <button type="button" className="iconbtn" aria-label="Ouvrir le menu" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu size={19} /></button>
+      </header>
+      <Drawer open={drawer} onClose={() => setDrawer(false)} onSearch={() => setPalette(true)} />
+      <main className="main" ref={mainRef} id="main"><Outlet /></main>
     </div>
   );
 }
 
-export function Topbar({ crumb, title, actions }: { crumb?: string; title: string; actions?: React.ReactNode }) {
-  // Keep the document title in sync with the page, so a route change is a real
-  // navigation a screen reader announces (and browser history is legible).
+// Page header. `scoped` prefixes the crumb with the active target, so the
+// target picker visibly drives every scoped page.
+export function Topbar({ crumb, title, actions, scoped, compact }: {
+  crumb?: string; title: string; actions?: React.ReactNode; scoped?: boolean; compact?: boolean;
+}) {
+  const { target } = useWorkspace();
   useEffect(() => { document.title = `${title} · Crenel`; }, [title]);
+  const parts = [scoped ? `${target.name} · ${target.env}` : null, crumb].filter(Boolean);
   return (
-    <header className="topbar">
-      <div>
-        {crumb && <div className="crumb">{crumb}</div>}
+    <header className={cn("topbar", compact && "compact")}>
+      <div className="tb-l">
+        {parts.length > 0 && <div className="crumb">{parts.join("  /  ")}</div>}
         <h1>{title}</h1>
       </div>
       {actions && <div className="right">{actions}</div>}

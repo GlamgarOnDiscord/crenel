@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  LayoutGrid, ShieldAlert, Radar, FolderClosed, KeyRound, LockKeyhole,
-  FileCheck2, Plug, Settings, Plus, Sparkles, Search,
+  House, ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
+  ShieldCheck, Plug, Settings, Plus, TerminalSquare, Search, SquarePen,
 } from "lucide-react";
 
 interface Cmd { label: string; hint: string; to: string; icon: typeof Search; }
 
 const COMMANDS: Cmd[] = [
-  { label: "Nouveau scan", hint: "lancer l'agent", to: "/app/scan/run", icon: Plus },
-  { label: "Vue d'ensemble", hint: "aller à", to: "/app/overview", icon: LayoutGrid },
+  { label: "Nouvelle tâche", hint: "composer", to: "/app/overview", icon: SquarePen },
+  { label: "Agent", hint: "console", to: "/app/agent", icon: TerminalSquare },
+  { label: "Accueil", hint: "aller à", to: "/app/overview", icon: House },
+  { label: "Tâches", hint: "historique", to: "/app/scans", icon: ListTodo },
   { label: "Findings", hint: "aller à", to: "/app/findings", icon: ShieldAlert },
-  { label: "Agent", hint: "console", to: "/app/scan/run", icon: Sparkles },
-  { label: "Scans", hint: "historique", to: "/app/scans", icon: Radar },
-  { label: "Cibles", hint: "dossiers", to: "/app/targets", icon: FolderClosed },
   { label: "Secrets", hint: "analyse", to: "/app/secrets", icon: KeyRound },
   { label: "Autorisation", hint: "matrice", to: "/app/authz", icon: LockKeyhole },
-  { label: "Tests générés", hint: "régression", to: "/app/tests", icon: FileCheck2 },
+  { label: "Tests gardés", hint: "régression", to: "/app/tests", icon: ShieldCheck },
+  { label: "Cibles", hint: "dossiers", to: "/app/targets", icon: FolderClosed },
   { label: "Intégrations", hint: "réglages", to: "/app/integrations", icon: Plug },
   { label: "Paramètres", hint: "réglages", to: "/app/settings", icon: Settings },
   { label: "Ajouter une cible", hint: "onboarding", to: "/app/onboarding", icon: Plus },
@@ -86,8 +86,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         <div className="cmdk-list">
           {results.length === 0 && <div className="cmdk-empty">Aucun résultat</div>}
           {results.map((c, idx) => (
-            <button key={c.label + c.to} className={`cmdk-item${idx === i ? " on" : ""}`} onMouseEnter={() => setI(idx)} onClick={() => go(c)}>
-              <c.icon size={16} className="faint" />
+            <button type="button" key={c.label + c.to} className={`cmdk-item${idx === i ? " on" : ""}`} onMouseEnter={() => setI(idx)} onClick={() => go(c)}>
+              <c.icon size={16} className="faint" aria-hidden="true" />
               <span>{c.label}</span>
               <span className="cmdk-hint">{c.hint}</span>
             </button>

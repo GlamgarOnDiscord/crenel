@@ -1,32 +1,46 @@
-import { Link } from "react-router-dom";
-import { FolderClosed, Plus, Globe } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { FolderGit2, Globe, Plus } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button } from "../components/ui.tsx";
 import { targets } from "../data/mock.ts";
+import { cn } from "../lib/cn.ts";
+import { useWorkspace } from "../lib/workspace.tsx";
 
 export function Targets() {
+  const ws = useWorkspace();
+  const navigate = useNavigate();
   return (
     <>
-      <Topbar crumb="Espace de travail" title="Cibles" actions={<Button to="/app/onboarding"><Plus size={15} /> Ajouter une cible</Button>} />
+      <Topbar crumb="Espace" title="Cibles" actions={<Button to="/app/onboarding"><Plus size={15} /> Ajouter une cible</Button>} />
       <div className="content">
-        <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>Une cible est un site ou un dépôt que vous possédez. Chaque cible a son propre dossier de scans, findings et tests. Crenel ne teste que des hôtes que vous avez déclarés.</p>
+        <p className="lede">Un site ou un dépôt que vous possédez. Chaque cible a ses tâches, findings et tests. Crenel ne parle qu'aux hôtes déclarés.</p>
         <section className="folders">
-          {targets.map((t) => (
-            <a key={t.id} className="folder" href="#/app/overview">
-              <div className="fh">
-                <span className="fi"><FolderClosed size={18} /></span>
-                <div><div className="nm">{t.name}</div><div className="url"><Globe size={10} style={{ verticalAlign: -1, marginRight: 4 }} />{t.url}</div></div>
+          {targets.map((t) => {
+            const Icon = t.kind === "repo" ? FolderGit2 : Globe;
+            const active = ws.target.id === t.id;
+            return (
+              <div key={t.id} className={cn("folder", active && "active")}>
+                <div className="fh">
+                  <span className={cn("sq", active ? "amber" : "slate")} aria-hidden="true"><Icon size={18} /></span>
+                  <div>
+                    <button type="button" className="nm stretched" onClick={() => { ws.setTargetId(t.id); navigate("/app/overview"); }}>
+                      {t.name}<span className="sr-only">, ouvrir cette cible</span>
+                    </button>
+                    <div className="url mono">{t.url}</div>
+                  </div>
+                  {active && <span className="pill amber">active</span>}
+                </div>
+                <div className="stat">
+                  <span><b>{t.findings}</b> findings</span>
+                  <span><b className={t.proven ? "crit-ink" : ""}>{t.proven}</b> prouvé{t.proven > 1 ? "s" : ""}</span>
+                  <span className="faint">{t.env}</span>
+                </div>
+                <div className="faint mono small">dernier scan · {t.lastScan}</div>
               </div>
-              <div className="stat">
-                <span><b>{t.findings}</b> findings</span>
-                <span><b style={{ color: t.proven ? "var(--crit-ink)" : "var(--low-ink)" }}>{t.proven}</b> prouvés</span>
-                <span className="faint">{t.env}</span>
-              </div>
-              <div className="faint mono" style={{ fontSize: 11 }}>dernier scan · {t.lastScan}</div>
-            </a>
-          ))}
-          <Link to="/app/onboarding" className="folder" style={{ alignItems: "center", justifyContent: "center", color: "var(--fg-faint)", borderStyle: "dashed" }}>
-            <Plus size={22} /><span style={{ fontSize: 13 }}>Ajouter une cible</span>
+            );
+          })}
+          <Link to="/app/onboarding" className="folder add">
+            <Plus size={22} aria-hidden="true" /><span>Ajouter une cible</span>
           </Link>
         </section>
       </div>

@@ -1,50 +1,49 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Github, Globe, ArrowRight, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Github, Globe, ArrowRight } from "lucide-react";
 import { Mascot } from "../brand/Logo.tsx";
-import { Button } from "../components/ui.tsx";
+import { cn } from "../lib/cn.ts";
 
 export function Onboarding() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<"repo" | "url">("url");
+  const [url, setUrl] = useState("staging.acme.app");
+  const [repo, setRepo] = useState("acme/acme-app");
+  const [owner, setOwner] = useState(false);
+  useEffect(() => { document.title = "Ajouter une cible · Crenel"; }, []);
+  const value = mode === "url" ? url : repo;
+  const ok = owner && value.trim().length > 2;
+
   return (
-    <div style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 520, display: "grid", gap: 20, justifyItems: "center", textAlign: "center" }}>
-        <Mascot size={96} />
-        <div style={{ display: "grid", gap: 8 }}>
-          <h1 style={{ fontFamily: "var(--f-display)", fontSize: 28 }}>Ajoutez une cible</h1>
-          <p className="muted" style={{ margin: 0, maxWidth: "44ch" }}>Un dépôt ou un site que vous possédez. Crenel lance un premier scan et vous montre ce qui est prouvé en moins de deux minutes.</p>
+    <div className="onb">
+      <div className="onb-in">
+        <div className="halo"><Mascot size={112} /></div>
+        <div className="onb-hd">
+          <h1>Ajoutez une cible</h1>
+          <p className="muted">Un site ou un dépôt que vous possédez. Crenel lance un premier scan et vous montre ce qui est prouvé en moins de deux minutes.</p>
         </div>
 
         <div className="seg" role="tablist" aria-label="Type de cible">
-          <button role="tab" aria-selected={mode === "url"} className={mode === "url" ? "on" : ""} onClick={() => setMode("url")}>Site</button>
-          <button role="tab" aria-selected={mode === "repo"} className={mode === "repo" ? "on" : ""} onClick={() => setMode("repo")}>Dépôt GitHub</button>
+          <button type="button" role="tab" aria-selected={mode === "url"} className={mode === "url" ? "on" : ""} onClick={() => setMode("url")}>Site</button>
+          <button type="button" role="tab" aria-selected={mode === "repo"} className={mode === "repo" ? "on" : ""} onClick={() => setMode("repo")}>Dépôt GitHub</button>
         </div>
 
-        <div className="card" style={{ width: "100%", padding: 18, display: "grid", gap: 14, textAlign: "left" }}>
-          {mode === "url" ? (
-            <label style={{ display: "grid", gap: 7 }}>
-              <span className="muted" style={{ fontSize: 13 }}>URL du site (staging de préférence)</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--well)", border: "1px solid var(--line-strong)", borderRadius: "var(--r-control)", padding: "10px 12px" }}>
-                <Globe size={15} className="faint" />
-                <input key="url" placeholder="staging.acme.app" defaultValue="staging.acme.app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
-              </div>
-            </label>
-          ) : (
-            <label style={{ display: "grid", gap: 7 }}>
-              <span className="muted" style={{ fontSize: 13 }}>Dépôt</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--well)", border: "1px solid var(--line-strong)", borderRadius: "var(--r-control)", padding: "10px 12px" }}>
-                <Github size={15} className="faint" />
-                <input key="repo" placeholder="acme/acme-app" defaultValue="acme/acme-app" style={{ background: "transparent", border: 0, outline: "none", flex: 1, fontFamily: "var(--f-mono)", fontSize: 13 }} />
-              </div>
-            </label>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--fg-muted)" }}>
-            <ShieldCheck size={15} className="faint" /> Je déclare posséder cette cible ou être autorisé à la tester.
-          </div>
-          <Button to="/app/scan/run" style={{ width: "100%", justifyContent: "center" }}>Lancer le premier scan <ArrowRight size={15} /></Button>
-        </div>
+        <form className="card onb-card" onSubmit={(e) => { e.preventDefault(); if (ok) navigate("/app/agent", { state: { prompt: `Premier scan de ${value.trim()}` } }); }}>
+          <label className="field">
+            <span>{mode === "url" ? "URL du site (staging de préférence)" : "Dépôt"}</span>
+            <div className="inputbox">
+              {mode === "url" ? <Globe size={15} aria-hidden="true" /> : <Github size={15} aria-hidden="true" />}
+              <input key={mode} value={value} onChange={(e) => (mode === "url" ? setUrl : setRepo)(e.target.value)} placeholder={mode === "url" ? "staging.acme.app" : "acme/acme-app"} />
+            </div>
+          </label>
+          <label className={cn("checkrow", owner && "on")}>
+            <input type="checkbox" checked={owner} onChange={(e) => setOwner(e.target.checked)} />
+            <span>Je possède cette cible, ou je suis autorisé à la tester.</span>
+          </label>
+          <button type="submit" className="btn block" disabled={!ok}>Lancer le premier scan <ArrowRight size={15} /></button>
+        </form>
 
-        <Link to="/app/overview" className="muted" style={{ fontSize: 13 }}>Passer, voir une démo</Link>
+        <Link to="/app/overview" className="muted small">Passer, voir une démo</Link>
       </div>
     </div>
   );

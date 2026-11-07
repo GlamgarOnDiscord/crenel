@@ -1,4 +1,6 @@
 export type Severity = "crit" | "high" | "med" | "low" | "info";
+// proven: a replayable request proves it (danger). lead: a "piste", not proven.
+// fixed: corrected. "Gardé" (a regression test in CI) is tracked separately.
 export type FindingState = "proven" | "lead" | "fixed";
 
 export interface Finding {
@@ -13,35 +15,49 @@ export interface Finding {
   remediation: string;
   proof?: { method: string; replay: string; evidence?: string };
   regression?: string;
+  guarded?: boolean;
 }
 
 export interface Target {
   id: string;
   name: string;
   url: string;
+  kind: "site" | "repo";
   env: string;
   findings: number;
   proven: number;
   lastScan: string;
 }
 
-export interface Activity {
-  kind: "bad" | "good" | "brand" | "info";
+export type TaskStatus = "running" | "waiting" | "done" | "stopped";
+export interface Task {
+  id: string;
   title: string;
-  meta: string;
+  target: string;
+  when: string;
+  trigger: string;
+  dur?: string;
+  status: TaskStatus;
+  proven?: number;
+  guarded?: number;
+  leads?: number;
+  fixed?: number;
+  archived?: boolean;
 }
 
-export type StepKind = "think" | "tool" | "assistant";
-export interface ScanStep {
-  kind: StepKind;
-  label: string;
-  dur?: string;
-  tool?: string;
-  body?: string;
-  status?: "ok" | "run";
-}
+export interface InlineFinding { sev: Severity; text: string; state: FindingState; id?: string }
+
+export type AgentEvent =
+  | { kind: "user"; text: string }
+  | { kind: "say"; text: string }
+  | { kind: "tool"; tool: string; args: string; lines: string[]; findings?: InlineFinding[]; dur: string }
+  | { kind: "permission"; tool: string; host: string; requests: string[] }
+  | { kind: "note"; text: string; tone?: "warn" | "muted" };
 
 export const SEV_LABEL: Record<Severity, string> = {
-  crit: "crit", high: "high", med: "med", low: "low", info: "info",
+  crit: "crit", high: "haute", med: "moy.", low: "basse", info: "info",
+};
+export const SEV_NAME: Record<Severity, string> = {
+  crit: "critique", high: "haute", med: "moyenne", low: "basse", info: "information",
 };
 export const SEV_RANK: Record<Severity, number> = { crit: 0, high: 1, med: 2, low: 3, info: 4 };

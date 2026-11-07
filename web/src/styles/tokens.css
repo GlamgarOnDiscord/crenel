@@ -1,58 +1,65 @@
 /*
- * Crenel design tokens. Structure and finesse are ported from our admin console
- * DA (three depth layers + a well, hairlines, four text steps, a type scale and
- * radii), re-skinned to the Crenel identity: an amber-gold accent (the jackdaw's
- * stolen key, a treasure hue, deliberately not the green/cyan of every security
- * tool) on a blue-black ink. Single dark theme by design.
+ * Crenel design tokens. Amber-gold accent (the jackdaw's stolen key) on a
+ * blue-black ink. Deliberately no green and no cyan anywhere: amber means
+ * "guarded" (Crenel's colour = protected), red means "proven" (danger),
+ * slate means "lead" or "fixed". Single dark theme by design.
  */
 :root {
-  /* Depth */
-  --bg: #0B0C10;
-  --panel: #12141B;
-  --panel-raised: #191C25;
-  --well: #0D0E13;
-  --hover: #1A1D27;
-  --active: #222632;
+  /* Depth, blue-black ink */
+  --bg: #090B11;
+  --panel: #10131B;
+  --panel-raised: #171B26;
+  --panel-top: #1A1F2C;
+  --well: #0B0D13;
+  --hover: #181C28;
+  --active: #212635;
 
   /* Hairlines */
-  --line: #1E2130;
-  --line-soft: #171A24;
-  --line-strong: #30364A;
+  --line: #1D2130;
+  --line-soft: #161925;
+  --line-strong: #2E3447;
 
-  /* Text, four steps on --panel */
-  --fg: #ECEDF2;
-  --fg-muted: #9EA3B2;
-  --fg-faint: #8A90A1;
-  --fg-ghost: #6B7183;
+  /* Text, four steps (AA on --panel down to --fg-faint) */
+  --fg: #EEEFF4;
+  --fg-muted: #A4A9B8;
+  --fg-faint: #8C92A4;
+  --fg-ghost: #737A8E;
 
-  /* Brand: amber-gold. Fill for what is selected or alive; ink for text. */
+  /* Brand: amber-gold. Fill for what is selected, alive or guarded. */
   --brand: #F2B01E;
   --brand-ink: #F7C84E;
   --brand-deep: #B5810C;
-  --brand-soft: color-mix(in oklab, var(--brand) 15%, transparent);
+  --brand-soft: color-mix(in oklab, var(--brand) 14%, transparent);
   --brand-ring: color-mix(in oklab, var(--brand) 55%, transparent);
-  --brand-wash: color-mix(in oklab, var(--brand) 9%, transparent);
+  --brand-wash: color-mix(in oklab, var(--brand) 8%, transparent);
+  --grad-amber: linear-gradient(180deg, #FFD866 0%, #F6A821 52%, #E9770E 100%);
+  --on-amber: #1A1204;
 
-  /* Severity, distinct from the accent and always paired with a labeled chip. */
-  --crit: #F2555A; --crit-ink: #FF7E83;
-  --high: #FF8A3D; --high-ink: #FFA869;
-  --med:  #C9B23E; --med-ink:  #E4D16A;
-  --low:  #35B57F; --low-ink:  #57D29E;
-  --info: #4C8DF5; --info-ink: #86B2FF;
+  /* Slate: neutral states (lead, fixed, draft) */
+  --slate: #8E97AD;
+  --slate-ink: #B4BBCC;
 
-  --shadow-pop: 0 0 0 1px var(--line-strong), 0 18px 50px rgba(0,0,0,.6);
+  /* Severity, no green, no cyan. Always paired with a text label. */
+  --crit: #F2555A; --crit-ink: #FF8287;
+  --high: #FF8A3D; --high-ink: #FFAA6E;
+  --med:  #D2B07A; --med-ink:  #E6CC9F;
+  --low:  #8A98FF; --low-ink:  #B0BAFF;
+  --info: #7D8497; --info-ink: #AEB3C2;
 
-  /* Type: display Space Grotesk (stand-in for Mona Sans), UI Instrument Sans,
-     mono JetBrains Mono (stand-in for Commit Mono). */
+  /* Surfaces: soft gradient, top sheen, soft shadow */
+  --sheen: inset 0 1px 0 rgba(255,255,255,.05);
+  --surface: linear-gradient(180deg, #141824 0%, #10131B 100%);
+  --shadow-soft: 0 1px 2px rgba(0,0,0,.35), 0 12px 32px -14px rgba(0,0,0,.65);
+  --shadow-pop: 0 0 0 1px var(--line-strong), 0 24px 60px -10px rgba(0,0,0,.7);
+
   --f-display: "Mona Sans", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --f-ui: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --t-meta: 12px; --t-label: 13px; --t-body: 14px; --t-title: 16px;
-  --t-h2: 20px; --t-h1: 30px; --t-kpi: 40px;
+  --t-h2: 20px; --t-h1: 28px;
 
-  --r-card: 14px; --r-inner: 10px; --r-control: 8px; --r-pill: 9999px;
-  --sp: 4px;
+  --r-card: 18px; --r-inner: 12px; --r-control: 10px; --r-pill: 9999px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
 }

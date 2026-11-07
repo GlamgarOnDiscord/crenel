@@ -5,7 +5,7 @@ import { Overview } from "./pages/Overview.tsx";
 import { Findings } from "./pages/Findings.tsx";
 import { FindingDetail } from "./pages/FindingDetail.tsx";
 import { Scans } from "./pages/Scans.tsx";
-import { ScanRun } from "./pages/ScanRun.tsx";
+import { Agent } from "./pages/Agent.tsx";
 import { Targets } from "./pages/Targets.tsx";
 import { Onboarding } from "./pages/Onboarding.tsx";
 import { Secrets } from "./pages/Secrets.tsx";
@@ -25,7 +25,8 @@ export const routes: RouteObject[] = [
       { path: "findings", element: <Findings /> },
       { path: "findings/:id", element: <FindingDetail /> },
       { path: "scans", element: <Scans /> },
-      { path: "scan/run", element: <ScanRun /> },
+      { path: "agent", element: <Agent /> },
+      { path: "scan/run", element: <Navigate to="/app/agent" replace /> },
       { path: "targets", element: <Targets /> },
       { path: "onboarding", element: <Onboarding /> },
       { path: "secrets", element: <Secrets /> },

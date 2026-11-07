@@ -1,39 +1,32 @@
+import { Link } from "react-router-dom";
+import { FileCode2, GitPullRequest } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
-import { Button } from "../components/ui.tsx";
-
-const tests = [
-  { name: "A ne peut pas lire le projet de B", check: "authz-matrix", status: "en CI", when: "il y a 11 min" },
-  { name: "Le bundle ne contient pas sk_live_", check: "exposed-secrets", status: "en CI", when: "il y a 2 h" },
-  { name: "Le lockfile ne contient pas @tanstack@1.169.5", check: "dependency-risk", status: "en CI", when: "il y a 12 min" },
-  { name: "Aucune var NEXT_PUBLIC_ nommée comme un secret", check: "public-env", status: "en CI", when: "il y a 12 min" },
-  { name: "Aucun fichier .env commité", check: "committed-env", status: "en CI", when: "il y a 12 min" },
-  { name: "Aucune source map dans le bundle", check: "sourcemaps", status: "en CI", when: "il y a 12 min" },
-  { name: "A ne peut pas lire le rendu de B", check: "authz-matrix", status: "brouillon", when: "il y a 11 min" },
-];
+import { Button, GuardBadge } from "../components/ui.tsx";
+import { guardedCount, tests } from "../data/mock.ts";
 
 export function Tests() {
+  const drafts = tests.length - guardedCount;
   return (
     <>
-      <Topbar crumb="Correctifs" title="Tests générés" actions={<Button variant="ghost" size="sm">Ouvrir la PR</Button>} />
-      <div className="content">
-        <p className="muted" style={{ margin: 0, maxWidth: "64ch" }}>Chaque finding prouvé devient un test de régression. Une fois en CI, la faille ne peut plus revenir sans casser le build.</p>
-        <section className="card">
-          <div style={{ overflowX: "auto" }}>
-            <table className="table">
-              <thead><tr><th>Test</th><th className="hide-sm">Check</th><th>Statut</th><th className="hide-sm">Généré</th></tr></thead>
-              <tbody>
-                {tests.map((t, i) => (
-                  <tr key={i}>
-                    <td className="t-title">{t.name}</td>
-                    <td className="hide-sm mono faint">{t.check}</td>
-                    <td><span className={`chip ${t.status === "en CI" ? "low" : "med"}`}>{t.status}</span></td>
-                    <td className="hide-sm mono faint">{t.when}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <Topbar scoped title="Tests gardés" actions={<Button size="sm"><GitPullRequest size={14} /> Ouvrir la PR des brouillons</Button>} />
+      <div className="content mid">
+        <div className="guardhero">
+          <div className="gh-n"><span className="gh-big">{guardedCount}</span><span>failles gardées en CI</span></div>
+          <div className="gh-n quiet"><span className="gh-big">{drafts}</span><span>brouillon à fusionner</span></div>
+          <p>Chaque faille prouvée devient un test de régression. Une fois en CI, elle ne peut plus revenir sans casser le build.</p>
+        </div>
+        <ul className="tlist">
+          {tests.map((t) => (
+            <li key={t.name} className="tcase">
+              <span className={t.status === "ci" ? "sq amber" : "sq slate"} aria-hidden="true"><FileCode2 size={16} /></span>
+              <div className="tcase-main">
+                <Link to={`/app/findings/${t.finding}`} className="tcase-t stretched">{t.name}</Link>
+                <div className="mono faint tcase-m"><span>{t.check}</span><span>{t.when}</span></div>
+              </div>
+              {t.status === "ci" ? <GuardBadge label="en CI" /> : <span className="draft">brouillon</span>}
+            </li>
+          ))}
+        </ul>
       </div>
     </>
   );

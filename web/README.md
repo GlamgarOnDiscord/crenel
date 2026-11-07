@@ -23,14 +23,17 @@ src/
     base.css      the design system: shell, cards, table, chips, console, cmdk…
   brand/Logo.tsx  Mark, Wordmark, Mascot (the jackdaw)
   components/
-    Shell.tsx     sidebar + topbar + Outlet, Cmd/Ctrl-K palette
+    Shell.tsx     sidebar (mobile: top bar + drawer), Topbar, Cmd/Ctrl-K palette
+    Composer.tsx  prompt composer shared by Home and Agent (target, mode,
+                  model, effort pickers, slash menu, attachments)
     CommandPalette.tsx
-    ui.tsx        Button, Card, Kpi parts, SeverityChip, Sparkline, Bars, …
-  pages/          Overview, Findings, FindingDetail, Scans, ScanRun (agent),
-                  Targets, Onboarding, Secrets, Authorization, Tests,
-                  Integrations, Settings, Landing
+    ui.tsx        Button, Card, Picker (listbox popover), SeverityChip,
+                  StateBadge, GuardBadge, CopyButton, Toggle, TaskList, …
+  pages/          Overview (home composer), Agent (transcript), Scans (tasks),
+                  Findings, FindingDetail, Targets, Onboarding, Secrets,
+                  Authorization, Tests, Integrations, Settings, Landing
   data/mock.ts    demo data (no backend)
-  lib/            types, cn, links
+  lib/            types, cn, links, workspace (shared composer choices)
 ```
 
 ## Conventions
