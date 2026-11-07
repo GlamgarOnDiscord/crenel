@@ -23,8 +23,9 @@ import { ssrf } from "../checks/ssrf.js";
 import { liveBundle } from "../checks/live-bundle.js";
 import { exposedFiles } from "../checks/exposed-files.js";
 import { graphql } from "../checks/graphql.js";
+import { openRedirect } from "../checks/open-redirect.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, authzMatrix];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, authzMatrix];
 
 export function resolveChecks(names: string[]): Check[] {
   if (names.length === 0) {

@@ -29,6 +29,7 @@ empty list runs every read-only check.
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path |
+| open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -264,3 +265,12 @@ host (or `options.graphql.paths`). A response carrying `__schema` proves
 introspection is open: the whole API map, admin mutations included, is public.
 Servers that accept GraphQL over POST only are not tested (Crenel never sends
 POST), and the log says so.
+
+## open-redirect
+
+Requests `/`, `/login`, `/signin`, `/logout`, `/auth/callback`, `/redirect` with
+the usual parameters (`redirect`, `redirect_uri`, `next`, `returnTo`,
+`callbackUrl`, `continue`, `url`…) set to a sentinel URL under `.invalid` (a TLD
+that never resolves), reads the redirect without following it, and proves the
+flaw when `Location` (or a meta refresh) points at the sentinel. Override the
+lists with `options.open-redirect.paths` and `.params`.

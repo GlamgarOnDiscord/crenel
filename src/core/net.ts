@@ -98,7 +98,7 @@ export interface SafeResponse {
 export async function safeFetch(
   url: string,
   scope: Scope,
-  init: { method?: string; headers?: Record<string, string>; maxBytes?: number } = {},
+  init: { method?: string; headers?: Record<string, string>; maxBytes?: number; followRedirects?: boolean } = {},
 ): Promise<SafeResponse> {
   // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
   const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
@@ -125,7 +125,8 @@ export async function safeFetch(
     }
     scope.onRequest?.({ method, url: current, status: res.status });
 
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+    // followRedirects: false returns the 3xx itself, so a check can read where it points without going there.
+    if (res.status >= 300 && res.status < 400 && res.headers.get("location") && init.followRedirects !== false) {
       const next = new URL(res.headers.get("location")!, current).toString();
       current = next; // re-validated at the top of the next iteration
       continue;
