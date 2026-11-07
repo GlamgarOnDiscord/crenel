@@ -43,8 +43,8 @@ open("guide/01-planche.html","w").write(f'''<html><head>{CSS}</head><body>
 <div class="p" style="height:440px;background:#8697EC;display:grid;place-items:center;border-color:#8697EC"><img class="ic" src="../icon.svg" width="300" style="box-shadow:0 24px 60px -18px rgba(20,24,50,.6)"></div></div>
 <div class="p" style="height:300px;margin-top:22px;border-color:#F6A821">{pat}</div>
 <div class="row"><div class="p" style="height:430px;background:#F6F5F1;display:grid;place-items:center;border-color:#F6F5F1"><div style="position:relative"><img class="ic" src="../icon.svg" width="250"><div style="position:absolute;right:-30px;top:-30px;width:78px;height:78px;border-radius:50%;background:#F2393A;color:#fff;font:600 44px Switzer;display:grid;place-items:center;border:5px solid #F6F5F1">3</div></div></div>
-<div class="p" style="height:430px"><img class="photo" src="../mockups/mock-home.png"></div></div>
-<div class="p" style="height:480px;margin-top:22px"><img class="photo" src="../mockups/mock-desk.png"></div>
+<div class="p" style="height:430px"><img class="photo" src="../mockups/mock-flat.png" style="object-position:50% 45%"></div></div>
+<div class="p" style="height:560px;margin-top:22px"><img class="photo" src="../mockups/mock-laptop.png"></div>
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:22px">{sw}</div>
 </body></html>''')
 def box(u,inner,ratio):
@@ -100,7 +100,9 @@ open("guide/04-typo.html","w").write(f'''<html><head>{CSS}</head><body style="pa
 <img src="../typo/pairs-10.png" style="width:100%;border-radius:20px;border:1px solid #1E2130">
 </body></html>''')
 open("guide/05-mockups.html","w").write(f'''<html><head>{CSS}</head><body>
-<div class="p" style="height:640px"><img class="photo" src="../mockups/mock-desk.png"></div>
-<div class="row"><div class="p" style="height:560px"><img class="photo" src="../mockups/mock-hand.png" style="object-position:40% 50%"></div><div class="p" style="height:560px"><img class="photo" src="../mockups/mock-home.png"></div></div>
+<div class="p" style="height:680px"><img class="photo" src="../mockups/mock-laptop.png"></div>
+<div class="row"><div class="p" style="height:640px"><img class="photo" src="../mockups/mock-hand.png"></div><div class="p" style="height:640px"><img class="photo" src="../mockups/mock-flat.png"></div></div>
+<div class="p" style="aspect-ratio:4/3;margin-top:22px"><img class="photo" src="../mockups/studio-phones.png"></div>
+<div class="row"><div class="p" style="aspect-ratio:4/3"><img class="photo" src="../mockups/studio-icon-phone.png"></div><div class="p" style="aspect-ratio:4/3"><img class="photo" src="../mockups/studio-laptop.png"></div></div>
 </body></html>''')
 print("ok")
