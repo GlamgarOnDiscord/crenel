@@ -17,6 +17,9 @@ const ADVISORIES = process.argv.slice(2).length
   : [
       "GHSA-g7cv-rxg3-hmpx", // @tanstack/* malware (May 2026)
       "MAL-2026-3744", // node-ipc malicious releases (OSV)
+      "MAL-2025-47141", // @ctrl/tinycolor (Shai-Hulud, Sept 2025)
+      "MAL-2025-46969", // chalk 5.6.1 (Sept 2025 npm compromise)
+      "MAL-2025-46974", // debug 4.4.2 (Sept 2025 npm compromise)
     ];
 
 // OSV MAL-* ids live on osv.dev; GHSA ids on github.com/advisories.

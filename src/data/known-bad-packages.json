@@ -2,9 +2,24 @@
   "_comment": "Seed denylist of npm packages known to have shipped malware at a specific version. Deterministic, offline match against the lockfile. Sync from OSV / GitHub advisories in CI; this is a starter set, not exhaustive.",
   "_sources": [
     "https://github.com/advisories/GHSA-g7cv-rxg3-hmpx",
-    "https://osv.dev/vulnerability/MAL-2026-3744"
+    "https://osv.dev/vulnerability/MAL-2026-3744",
+    "https://osv.dev/vulnerability/MAL-2025-47141",
+    "https://osv.dev/vulnerability/MAL-2025-46969",
+    "https://osv.dev/vulnerability/MAL-2025-46974"
   ],
   "packages": [
+    {
+      "name": "@ctrl/tinycolor",
+      "version": "4.1.1",
+      "advisory": "MAL-2025-47141",
+      "note": "Malicious code in @ctrl/tinycolor (npm)"
+    },
+    {
+      "name": "@ctrl/tinycolor",
+      "version": "4.1.2",
+      "advisory": "MAL-2025-47141",
+      "note": "Malicious code in @ctrl/tinycolor (npm)"
+    },
     {
       "name": "@tanstack/arktype-adapter",
       "version": "1.166.12",
@@ -508,6 +523,18 @@
       "version": "1.166.15",
       "advisory": "GHSA-g7cv-rxg3-hmpx",
       "note": "Malware in @tanstack/* packages exfiltrates cloud credentials, GitHub tokens, and SSH keys"
+    },
+    {
+      "name": "chalk",
+      "version": "5.6.1",
+      "advisory": "MAL-2025-46969",
+      "note": "Malicious code in chalk (npm)"
+    },
+    {
+      "name": "debug",
+      "version": "4.4.2",
+      "advisory": "MAL-2025-46974",
+      "note": "Malicious code in debug (npm)"
     },
     {
       "name": "node-ipc",
