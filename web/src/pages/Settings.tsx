@@ -29,7 +29,7 @@ export function Settings() {
   const [confirm, setConfirm] = useState(false);
   return (
     <>
-      <Topbar crumb="Espace" title="Paramètres" insight={<>La CI ne casse que sur une faille <b>prouvée</b>, haute ou critique.</>} />
+      <Topbar width="narrow" crumb="Espace" title="Paramètres" insight={<>La CI ne casse que sur une faille <b>prouvée</b>, haute ou critique.</>} />
       <div className="content narrow">
         <Card title="Utilisation ce mois-ci" meta="forfait Équipe">
           <div className="pad">

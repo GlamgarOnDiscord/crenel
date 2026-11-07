@@ -16,7 +16,7 @@ export function FindingDetail() {
   const f = findings.find((x) => x.id === id);
   if (!f) return (
     <>
-      <Topbar title="Finding introuvable" />
+      <Topbar width="narrow" title="Finding introuvable" />
       <div className="content">
         <EmptyState icon={<Mascot size={96} />} title="Introuvable" action={<Button variant="ghost" size="sm" to="/app/findings">Tous les findings</Button>}>Ce finding n'existe pas ou plus.</EmptyState>
       </div>
@@ -33,7 +33,7 @@ export function FindingDetail() {
 
   return (
     <>
-      <Topbar scoped crumb="Findings" title={f.title} actions={
+      <Topbar width="narrow" scoped crumb="Findings" title={f.title} actions={
         <>
           <Button variant="ghost" size="sm" to="/app/agent" state={{ prompt: `/explain ${f.id}: ${f.title}` }}><TerminalSquare size={14} /> Demander à l'agent</Button>
           {f.state === "fixed"

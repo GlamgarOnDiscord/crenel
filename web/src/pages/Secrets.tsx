@@ -21,7 +21,7 @@ export function Secrets() {
 
   return (
     <>
-      <Topbar scoped title="Secrets" insight={<><b>{active} secret{active > 1 ? "s" : ""} actif{active > 1 ? "s" : ""}</b> lisible{active > 1 ? "s" : ""} par n'importe qui. Révoquez d'abord, déplacez ensuite.</>} />
+      <Topbar width="mid" scoped title="Secrets" insight={<><b>{active} secret{active > 1 ? "s" : ""} actif{active > 1 ? "s" : ""}</b> lisible{active > 1 ? "s" : ""} par n'importe qui. Révoquez d'abord, déplacez ensuite.</>} />
       <div className="content mid">
         <div className="metrics">
           <MetricCard label="Exposés" value={secrets.length - revoked.length} context="dans le bundle et le dépôt" change={revoked.length ? `−${revoked.length}` : undefined} />

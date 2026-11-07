@@ -171,9 +171,10 @@ function ShellInner() {
 // Page header, two parts like the admin references: a thin sticky crumb bar
 // (target, page, optional controls such as the period) and the page head
 // (30 px title, one sentence that says the one thing that matters, actions).
-// `scoped` prefixes the crumb with the active target.
-export function Topbar({ crumb, title, insight, actions, bar, scoped, compact }: {
-  crumb?: string; title: string; insight?: React.ReactNode; actions?: React.ReactNode; bar?: React.ReactNode; scoped?: boolean; compact?: boolean;
+// `scoped` prefixes the crumb with the active target. `width` matches the page
+// head to a narrower `.content` so the actions line up with the cards below.
+export function Topbar({ crumb, title, insight, actions, bar, scoped, compact, width }: {
+  crumb?: string; title: string; insight?: React.ReactNode; actions?: React.ReactNode; bar?: React.ReactNode; scoped?: boolean; compact?: boolean; width?: "mid" | "narrow";
 }) {
   const { target } = useWorkspace();
   useEffect(() => { document.title = `${title} · Crenel`; }, [title]);
@@ -188,7 +189,7 @@ export function Topbar({ crumb, title, insight, actions, bar, scoped, compact }:
         {(bar || (compact && actions)) && <div className="right">{bar}{compact && actions}</div>}
       </div>
       {!compact && (
-        <header className="pagehead">
+        <header className={cn("pagehead", width)}>
           <div className="ph-l">
             <h1>{title}</h1>
             {insight && <p className="insight">{insight}</p>}

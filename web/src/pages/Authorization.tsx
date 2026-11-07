@@ -20,7 +20,7 @@ export function Authorization() {
 
   return (
     <>
-      <Topbar scoped title="Autorisation" insight={<>Le compte A <b>lit les projets du compte B</b>. Les 10 autres requêtes sont refusées.</>} actions={<Button size="sm" to="/app/agent" state={{ prompt: "/authz" }}><TerminalSquare size={14} /> Rejouer la matrice</Button>} />
+      <Topbar width="mid" scoped title="Autorisation" insight={<>Le compte A <b>lit les projets du compte B</b>. Les 10 autres requêtes sont refusées.</>} actions={<Button size="sm" to="/app/agent" state={{ prompt: "/authz" }}><TerminalSquare size={14} /> Rejouer la matrice</Button>} />
       <div className="content mid">
         <div className="metrics">
           <MetricCard label="Requêtes rejouées" value={total} context="compte A, admin et anonyme" />
