@@ -3,3 +3,6 @@ node_modules
 *.log
 .DS_Store
 bastion-report.json
+
+# local screenshot artifacts
+web/shots/
