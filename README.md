@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/readme-banner.png" alt="Crenel" width="800"></p>
+
 # Bastion
 
 > Product/UI working name: **Crenel** (Bastion is taken). Brand, mascot and web
