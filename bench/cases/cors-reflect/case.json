@@ -1,0 +1,9 @@
+{
+  "title": "CORS echoes any origin with credentials",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    { "id": "cors-reflect", "check": "headers", "text": "reflects any origin", "state": "proven", "minSeverity": "high", "why": "Any site can read a signed-in user's responses." }
+  ],
+  "mustNotFlag": []
+}
