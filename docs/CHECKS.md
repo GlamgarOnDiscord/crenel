@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs ten checks. Each is deterministic and read-only, and marks every
+Crenel runs eleven checks. Each is deterministic and read-only, and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
 you point `projectDir` at and, where noted, a `stagingUrl` you declared you own.
@@ -19,6 +19,7 @@ empty list runs every read-only check.
 | dockerfile | Container hardening in your Dockerfile(s) | no (leads) | no |
 | committed-env | Committed `.env` files | no (leads) | no |
 | sourcemaps | Source maps shipped with the client bundle | no (leads) | no |
+| public-env | A secret behind a client-exposed env prefix | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 
 ## exposed-secrets
@@ -97,4 +98,13 @@ that point at an external (non-`data:`) map. A shipped source map hands anyone
 the original, unminified source. Leads (some teams ship maps for error tracking).
 Fix: upload maps to your error tracker at build time and strip them from the
 public bundle.
+
+## public-env
+
+Flags an env var that carries a framework "public" prefix (`NEXT_PUBLIC_`,
+`VITE_`, `REACT_APP_`, `PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`, `VUE_APP_`,
+`NUXT_PUBLIC_`) and is named like a secret (`...SECRET`, `...TOKEN`, `...KEY`,
+`...PASSWORD`). Those prefixes are inlined into the client bundle by design, so
+such a var leaks its value to the browser whatever its shape. Fix: drop the
+public prefix and read the secret server-side only.
 
