@@ -126,3 +126,11 @@ test("live: no stagingUrl yields a single lead", async () => {
   assert.equal(found[0]!.id, "headers:no-staging");
   assert.equal(found[0]!.state, "unproven");
 });
+
+test("a reflected sentinel origin with credentials is high; reflected without credentials is low; an allowlist echo of another origin is nothing", async () => {
+  const { analyzeReflectedCors } = await import("./headers.js");
+  const h = (o: Record<string, string>) => new Headers(o);
+  assert.equal(analyzeReflectedCors(h({ "access-control-allow-origin": "https://crenel-cors-check.invalid", "access-control-allow-credentials": "true" }), "https://s/")!.severity, "high");
+  assert.equal(analyzeReflectedCors(h({ "access-control-allow-origin": "https://crenel-cors-check.invalid" }), "https://s/")!.severity, "low");
+  assert.equal(analyzeReflectedCors(h({ "access-control-allow-origin": "https://app.example.com", "access-control-allow-credentials": "true" }), "https://s/"), null);
+});

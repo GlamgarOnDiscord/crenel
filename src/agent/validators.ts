@@ -228,7 +228,10 @@ const replayValidator: Validator = {
     const check = env.checks.find((c) => c.name === checkName);
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
     if (!check) return no(`no check named ${checkName}`);
-    const offline: CheckContext = { scope: env.scope, projectDir: env.projectDir, options: env.options, log: () => {} };
+    // The check runs again with the same inputs, staging URL included: a check
+    // that proved something on the live site (a served .env, an open redirect)
+    // must be able to prove it again, through the same scoped client.
+    const offline: CheckContext = { scope: env.scope, projectDir: env.projectDir, stagingUrl: env.stagingUrl, options: env.options, log: () => {} };
     const again = (await check.run(offline)).find((f) => f.id === findingId);
     if (!again) return no("the finding did not reproduce");
     if (again.state !== "proven" || !again.proof) return no(`${checkName} reports it as a lead, without a replayable proof`);

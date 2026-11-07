@@ -110,3 +110,17 @@ test("check.replay re-runs the check itself; a finding that does not reproduce i
     assert.equal((await validateClaim(claimFor(f!), e)).state, "unproven");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("check.replay hands the staging URL to the check, so a live proof can reproduce", async () => {
+  const { validateClaim } = await import("./validators.js");
+  const { Scope } = await import("../core/scope.js");
+  const seen: (string | undefined)[] = [];
+  const check = { name: "live-thing", title: "t", readOnly: true, run: async (c: { stagingUrl?: string }) => {
+    seen.push(c.stagingUrl);
+    return [{ id: "live-thing:x", check: "live-thing", title: "x", severity: "high" as const, state: "proven" as const, location: "https://s/x", description: "", remediation: "", proof: { method: "m", replay: "r" } }];
+  } };
+  const v = await validateClaim({ id: "c", source: "check", class: "check.replay", detail: { check: "live-thing", findingId: "live-thing:x" } },
+    { scope: new Scope({ allowedHosts: ["s"] }), projectDir: ".", stagingUrl: "https://s/", options: {}, checks: [check] } as never);
+  assert.equal(v.state, "proven");
+  assert.deepEqual(seen, ["https://s/"]);
+});
