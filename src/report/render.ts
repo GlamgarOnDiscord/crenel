@@ -48,6 +48,11 @@ export function renderText(result: RunResult): string {
   if (unproven.length > 0) lines.push(pc.dim(`Leads (unproven): ${unproven.length}`));
   lines.push("");
 
+  if (result.findings.length === 0 && result.errors.length === 0) {
+    lines.push(pc.green("No findings. Nothing proven, no leads."));
+    lines.push("");
+  }
+
   for (const f of sortFindings(result.findings)) {
     const tag = f.state === "proven" ? colorSev(f.severity, f.severity.toUpperCase()) : pc.dim("LEAD");
     lines.push(`${tag}  ${pc.bold(f.title)}`);
