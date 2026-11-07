@@ -1,0 +1,321 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Crenel is working</title>
+  <style>
+.mx,.my,.sq,.tilt,.crest,.fr,.fl,.ft,.wing,.face,.key,.keyswing,.beak,.halo{transform-box:view-box}
+.sq{transform-origin:430px 1024px}
+.tilt{transform-origin:440px 1000px}
+.fr{transform-origin:545px 172px}
+.fl{transform-origin:418px 172px}
+.ft{transform-origin:470px 162px}
+.wing{transform-origin:335px 612px}
+.keyswing{transform-origin:590px 540px}
+.beak{transform-origin:640px 424px}
+.eye,.lid,.iris,.glint,.tw,.sheen{transform-box:fill-box;transform-origin:center}
+.eye{transform-origin:50% 60%}
+.lid{transform-origin:50% 92%}
+@keyframes wtilt{0%{transform:translateY(22.183px) rotate(-4deg)}26.471%{transform:translateY(22.183px) rotate(-4deg);animation-timing-function:cubic-bezier(.65,0,.35,1)}40%{transform:translateY(35.689px) rotate(4.6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}45.588%{transform:translateY(31.042px) rotate(4deg)}73.529%{transform:translateY(31.042px) rotate(4deg);animation-timing-function:cubic-bezier(.65,0,.35,1)}87.059%{transform:translateY(25.503px) rotate(-4.6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}92.647%{transform:translateY(22.183px) rotate(-4deg)}100%{transform:translateY(22.183px) rotate(-4deg)}}
+@keyframes wface{0%{transform:translate(-8px,0px)}27.941%{transform:translate(-8px,0px);animation-timing-function:cubic-bezier(.65,0,.35,1)}34.706%{transform:translate(0px,6px);animation-timing-function:cubic-bezier(.65,0,.35,1)}41.765%{transform:translate(8px,0px)}75%{transform:translate(8px,0px);animation-timing-function:cubic-bezier(.65,0,.35,1)}81.765%{transform:translate(0px,6px);animation-timing-function:cubic-bezier(.65,0,.35,1)}88.824%{transform:translate(-8px,0px)}100%{transform:translate(-8px,0px)}}
+@keyframes wcrest{0%{transform:translate(4px,0)}30.882%{transform:translate(4px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}45.588%{transform:translate(-4px,0)}77.941%{transform:translate(-4px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}92.647%{transform:translate(4px,0)}100%{transform:translate(4px,0)}}
+@keyframes wiris{0%{transform:translate(-8px,0)}23.529%{transform:translate(-8px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}32.941%{transform:translate(8px,0)}70.588%{transform:translate(8px,0);animation-timing-function:cubic-bezier(.65,0,.35,1)}80%{transform:translate(-8px,0)}100%{transform:translate(-8px,0)}}
+@keyframes wsq{0%{transform:none}40%{transform:none;animation-timing-function:cubic-bezier(.2,.8,.3,1)}42.941%{transform:scale(1.006,.986);animation-timing-function:cubic-bezier(.37,0,.63,1)}50%{transform:none}87.059%{transform:none;animation-timing-function:cubic-bezier(.2,.8,.3,1)}90%{transform:scale(1.006,.986);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:none}}
+@keyframes wfr{0%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}27.941%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}30.735%{transform:rotate(-5.6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}34.926%{transform:rotate(3.08deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}40.515%{transform:rotate(-1.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}47.5%{transform:rotate(0.448deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}50.294%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}75%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}77.794%{transform:rotate(5.6deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}81.985%{transform:rotate(-3.08deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}87.574%{transform:rotate(1.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}94.559%{transform:rotate(-0.448deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}97.353%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes wft{0%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}29.118%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}31.912%{transform:rotate(-8deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}36.103%{transform:rotate(4.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}41.691%{transform:rotate(-2deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}48.676%{transform:rotate(0.64deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}51.471%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}76.176%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}78.971%{transform:rotate(8deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}83.162%{transform:rotate(-4.4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}88.75%{transform:rotate(2deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}95.735%{transform:rotate(-0.64deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}98.529%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes wfl{0%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}30%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}32.794%{transform:rotate(-10deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}36.985%{transform:rotate(5.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}42.574%{transform:rotate(-2.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}49.559%{transform:rotate(0.8deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}52.353%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}77.059%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}79.853%{transform:rotate(10deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}84.044%{transform:rotate(-5.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}89.632%{transform:rotate(2.5deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}96.618%{transform:rotate(-0.8deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}99.412%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes wkey{0%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}28.824%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}31.618%{transform:rotate(-4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}35.809%{transform:rotate(2.2deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}41.397%{transform:rotate(-1deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}48.382%{transform:rotate(0.32deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}51.176%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}75.882%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}78.676%{transform:rotate(4deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}82.868%{transform:rotate(-2.2deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}88.456%{transform:rotate(1deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}95.441%{transform:rotate(-0.32deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}98.235%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}100%{transform:rotate(0deg);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes wwing{0%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}6.471%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}8.529%{transform:translate(9px,-15px) rotate(5deg);animation-timing-function:cubic-bezier(.2,.8,.3,1)}12.059%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}13.529%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}15.588%{transform:translate(9px,-15px) rotate(5deg);animation-timing-function:cubic-bezier(.2,.8,.3,1)}19.118%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}53.529%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}55.588%{transform:translate(9px,-15px) rotate(5deg);animation-timing-function:cubic-bezier(.2,.8,.3,1)}59.118%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}60.588%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}62.647%{transform:translate(9px,-15px) rotate(5deg);animation-timing-function:cubic-bezier(.2,.8,.3,1)}66.176%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}100%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}}
+@keyframes wblink{0%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}14.706%{transform:none;animation-timing-function:cubic-bezier(.55,0,.85,.35)}15.735%{transform:scaleY(0.06)}16.324%{transform:scaleY(0.06);animation-timing-function:cubic-bezier(.2,.8,.3,1)}18.088%{transform:none}100%{transform:none}}
+@keyframes wpulse{0%,100%{transform:scale(.86);opacity:.7}50%{transform:scale(1.04);opacity:1}}
+.tilt{animation:wtilt 3.4s linear infinite}
+.face{animation:wface 3.4s linear infinite}
+.crest{animation:wcrest 3.4s linear infinite}
+.iris{animation:wiris 3.4s linear infinite}
+.sq{animation:wsq 3.4s linear infinite}
+.fr{animation:wfr 3.4s linear infinite}
+.ft{animation:wft 3.4s linear infinite}
+.fl{animation:wfl 3.4s linear infinite}
+.keyswing{animation:wkey 3.4s linear infinite}
+.wing{animation:wwing 3.4s linear infinite}
+.eye{animation:wblink 6.8s linear infinite}
+.tw{animation:wpulse 1.7s cubic-bezier(.37,0,.63,1) infinite}
+.tw-key-ring-star{animation-delay:0s}
+.tw-key-shaft-star{animation-delay:-.27s}
+.tw-small-yellow-star{animation-delay:-.53s}
+.tw-large-yellow-star{animation-delay:-.8s}
+.tw-white-background-star{animation-delay:-1.07s}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+  </style>
+  <defs>
+    <radialGradient id="background-color" cx="46%" cy="43%" r="78%">
+      <stop offset="0" stop-color="#8290e3"/>
+      <stop offset=".63" stop-color="#8697ec"/>
+      <stop offset="1" stop-color="#8798ed"/>
+    </radialGradient>
+    <linearGradient id="rear-crest-color" x1="484" y1="112" x2="575" y2="111" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202742"/>
+      <stop offset=".55" stop-color="#354174"/>
+      <stop offset=".88" stop-color="#535b9b"/>
+      <stop offset="1" stop-color="#9a96ec"/>
+    </linearGradient>
+    <linearGradient id="left-crest-color" x1="284" y1="182" x2="383" y2="117" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#181e35"/>
+      <stop offset=".65" stop-color="#293257"/>
+      <stop offset="1" stop-color="#414a80"/>
+    </linearGradient>
+    <linearGradient id="tall-crest-color" x1="352" y1="99" x2="450" y2="14" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1c233e"/>
+      <stop offset=".5" stop-color="#2e375f"/>
+      <stop offset=".85" stop-color="#575b96"/>
+      <stop offset="1" stop-color="#9b98e7"/>
+    </linearGradient>
+    <radialGradient id="bird-base" cx="51%" cy="50%" r="67%">
+      <stop stop-color="#191e32"/>
+      <stop offset=".43" stop-color="#1c223a"/>
+      <stop offset=".72" stop-color="#293255"/>
+      <stop offset=".9" stop-color="#4c5785"/>
+      <stop offset="1" stop-color="#7c82bd"/>
+    </radialGradient>
+    <radialGradient id="bird-left-light" cx="0" cy=".5" r="1" gradientTransform="translate(140 378) rotate(24) scale(242 344)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8c97bd" stop-opacity=".65"/>
+      <stop offset=".36" stop-color="#7d88b2" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#465781" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bird-top-light" cx="0" cy="0" r="1" gradientTransform="translate(639 180) rotate(39) scale(302 111)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6b6bb0" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#515a99" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="body-shade" cx="0" cy="0" r="1" gradientTransform="translate(301 895) rotate(-24) scale(439 303)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#141a2d" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#171d32" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="right-rim" x1="534" y1="576" x2="839" y2="553" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b7a6ff" stop-opacity="0"/>
+      <stop offset=".68" stop-color="#ada2ff" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#c7b0ff" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="crest-rim" x1="343" y1="19" x2="541" y2="158" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a9a6f6" stop-opacity=".25"/>
+      <stop offset=".35" stop-color="#c6b5ff"/>
+      <stop offset="1" stop-color="#918be0" stop-opacity=".1"/>
+    </linearGradient>
+    <linearGradient id="wing-base" x1="8" y1="915" x2="375" y2="613" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2d365f"/>
+      <stop offset=".45" stop-color="#303a6b"/>
+      <stop offset=".77" stop-color="#37427d"/>
+      <stop offset="1" stop-color="#4a5195"/>
+    </linearGradient>
+    <radialGradient id="wing-shade" cx="0" cy="0" r="1" gradientTransform="translate(143 848) rotate(-57) scale(311 177)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#222b51" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#27325d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wing-rim" x1="169" y1="644" x2="412" y2="705" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7778c3" stop-opacity="0"/>
+      <stop offset=".66" stop-color="#9690ec" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#7978c7" stop-opacity=".15"/>
+    </linearGradient>
+    <radialGradient id="eye-gold" cx=".37" cy=".32" r=".82">
+      <stop stop-color="#ffda00"/>
+      <stop offset=".7" stop-color="#ffd000"/>
+      <stop offset="1" stop-color="#f5b900"/>
+    </radialGradient>
+    <linearGradient id="key-gold" x1="704" y1="548" x2="729" y2="742" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe735"/>
+      <stop offset=".18" stop-color="#ffd500"/>
+      <stop offset=".53" stop-color="#ffc900"/>
+      <stop offset=".8" stop-color="#ffd20a"/>
+      <stop offset="1" stop-color="#efb500"/>
+    </linearGradient>
+    <radialGradient id="ring-rounding" cx="0" cy="0" r="1" gradientTransform="translate(595 631) rotate(85) scale(126 123)" gradientUnits="userSpaceOnUse">
+      <stop offset=".49" stop-color="#e9a000"/>
+      <stop offset=".58" stop-color="#ffce00"/>
+      <stop offset=".66" stop-color="#ffdf20"/>
+      <stop offset=".78" stop-color="#ffd707"/>
+      <stop offset=".91" stop-color="#ffc300"/>
+      <stop offset="1" stop-color="#f4b100"/>
+    </radialGradient>
+    <linearGradient id="shaft-rounding" x1="810" y1="579" x2="822" y2="646" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff34c"/>
+      <stop offset=".18" stop-color="#ffe52a"/>
+      <stop offset=".47" stop-color="#ffd000"/>
+      <stop offset=".79" stop-color="#ffc600"/>
+      <stop offset="1" stop-color="#f3b400"/>
+    </linearGradient>
+    <linearGradient id="teeth-rounding" x1="814" y1="657" x2="934" y2="686" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f4b400"/>
+      <stop offset=".22" stop-color="#ffd009"/>
+      <stop offset=".44" stop-color="#ffd516"/>
+      <stop offset=".57" stop-color="#efb100"/>
+      <stop offset=".77" stop-color="#ffd20a"/>
+      <stop offset="1" stop-color="#ffc800"/>
+    </linearGradient>
+    <linearGradient id="key-top-shade" x1="600" y1="540" x2="583" y2="578" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#be8000" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#edaf00" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="beak-color" x1="603" y1="422" x2="624" y2="573" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#505995"/>
+      <stop offset=".32" stop-color="#414c86"/>
+      <stop offset=".69" stop-color="#343e70"/>
+      <stop offset="1" stop-color="#2c355e"/>
+    </linearGradient>
+    <radialGradient id="beak-light" cx="0" cy="0" r="1" gradientTransform="translate(701 464) rotate(44) scale(88 53)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7673bb" stop-opacity=".62"/>
+      <stop offset="1" stop-color="#6163a6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beak-rim" x1="558" y1="420" x2="753" y2="536" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7d7ec3" stop-opacity=".05"/>
+      <stop offset=".61" stop-color="#9991e1" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#7477b3" stop-opacity=".12"/>
+    </linearGradient>
+    <filter id="soft-glow" x="-100%" y="-70%" width="300%" height="240%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="small-glow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <filter id="edge-softness" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.3"/>
+    </filter>
+    <path id="bird-outline" d="M143 624 C126 582 117 537 119 493 C119 380 170 276 254 222 C305 186 356 168 408 160 C468 149 520 153 571 164 C670 186 751 240 796 335 C827 400 840 458 836 519 C833 585 819 651 790 704 C775 730 776 740 779 768 C793 865 776 962 744 1024 L0 1024 L0 822 C32 756 82 680 143 624 Z"/>
+    <clipPath id="bird-clip">
+      <use href="#bird-outline"/>
+    </clipPath>
+    <path id="key-outline" fill-rule="evenodd" d="M520 527 C483 550 465 592 473 642 C481 701 530 750 589 754 C651 759 703 722 716 657 L809 644 L816 693 C818 711 831 722 847 718 C863 715 873 701 869 683 L866 665 C865 659 867 655 872 655 C877 654 880 659 881 666 L884 682 C887 697 900 705 914 701 C929 699 938 686 935 671 L929 625 C946 622 957 608 954 589 C951 573 939 563 923 565 L713 594 L701 567 L520 527 Z M593 561 C627 559 652 583 660 615 C670 651 651 687 619 696 C584 705 550 687 536 655 C518 614 536 574 573 563 C580 561 586 560 593 561 Z"/>
+    <clipPath id="key-clip">
+      <use href="#key-outline"/>
+    </clipPath>
+    <path id="large-sparkle" d="M959 43 C954 91 954 100 903 109 C953 115 954 124 959 171 C965 125 966 116 1014 109 C965 102 964 94 959 43 Z"/>
+    <path id="key-sparkle" d="M497 509 C494 572 492 582 440 590 C490 596 493 609 497 666 C502 608 505 598 550 590 C505 585 502 573 497 509 Z"/>
+    <linearGradient id="skirt-fill" gradientUnits="userSpaceOnUse" x1="-400" y1="0" x2="760" y2="0"><stop offset="0.0000" stop-color="#6a70a4"/><stop offset="0.3457" stop-color="#696fa3"/><stop offset="0.4310" stop-color="#485079"/><stop offset="0.5603" stop-color="#293251"/><stop offset="0.6897" stop-color="#252d4c"/><stop offset="0.8190" stop-color="#2f385c"/><stop offset="0.9310" stop-color="#46517d"/><stop offset="0.9784" stop-color="#596294"/><stop offset="1.0000" stop-color="#5d6699"/></linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fffbe0" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#fffbe0" stop-opacity=".75"/>
+      <stop offset="1" stop-color="#fffbe0" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="key-glow" x="-30%" y="-40%" width="160%" height="180%"><feGaussianBlur stdDeviation="14"/></filter>
+  </defs>
+  <g id="periwinkle-background">
+    <path fill="url(#background-color)" d="M0 0H1024V1024H0Z"/>
+  </g>
+  <g class="mx"><g class="my"><g class="sq"><g class="tilt">
+  <g class="crest">
+  <g id="bird-crest">
+    <g class="fr">
+      <path id="rear-upright-feather" d="M484 110 C480 84 493 46 515 50 C546 48 565 99 574 165 L527 179 Z" fill="url(#rear-crest-color)"/>
+      <path d="M508 50 C542 40 565 100 574 164" fill="none" stroke="#c0afff" stroke-opacity=".65" stroke-width="2"/>
+    </g>
+    <g class="fl">
+      <path id="left-small-feather" d="M306 195 C283 186 270 171 271 151 C272 132 286 121 307 118 C333 114 359 121 385 132 L431 175 Z" fill="url(#left-crest-color)"/>
+      <path d="M272 143 C283 111 329 110 381 131" fill="none" stroke="#8185ce" stroke-opacity=".45" stroke-width="1.5"/>
+    </g>
+    <g class="ft">
+      <path id="tall-swept-feather" d="M382 131 C354 102 318 71 328 38 C334 17 351 9 371 11 C414 13 455 51 482 98 C494 119 511 140 533 158 L421 177 Z" fill="url(#tall-crest-color)"/>
+      <path d="M336 24 C347 10 362 9 377 12 C418 19 455 53 482 98" fill="none" stroke="url(#crest-rim)" stroke-width="2"/>
+    </g>
+  </g>
+  </g>
+  <g id="body-skirt">
+    <path d="M24 828 L0 822 C-28 880 -84 1000 -160 1330 L708 1330 L716 1170 C726 1092 740 1036 752 1000 L24 1000 Z" fill="url(#skirt-fill)"/>
+    <path d="M744 1023 C730 1070 718 1150 708 1330" fill="none" stroke="url(#right-rim)" stroke-width="2.6"/>
+  </g>
+  <g id="bird-head-and-body">
+    <use href="#bird-outline" fill="url(#bird-base)"/>
+    <g clip-path="url(#bird-clip)">
+      <path d="M0 100H940V1024H0Z" fill="url(#bird-left-light)"/>
+      <path d="M0 100H940V1024H0Z" fill="url(#bird-top-light)"/>
+      <path d="M0 420H900V1024H0Z" fill="url(#body-shade)"/>
+      <path d="M569 164 C671 187 752 240 797 336 C829 401 840 460 836 519 C833 588 818 654 790 705 C775 730 776 740 779 768 C792 865 776 964 744 1024" fill="none" stroke="#a79aef" stroke-opacity=".3" stroke-width="9" filter="url(#edge-softness)"/>
+    </g>
+    <path id="illuminated-right-edge" d="M552 160 C654 178 746 230 793 328 C827 396 841 458 836 519 C833 585 819 652 790 705 C775 730 776 740 779 768 C792 865 776 963 744 1024" fill="none" stroke="url(#right-rim)" stroke-width="2.6"/>
+  </g>
+  <g class="wing">
+  <g id="left-wing">
+    <path d="M3 816 C-17 856 -37 906 -54 966 L-26 970 L3 954 Z" fill="#17203b"/>
+    <path d="M3 856 C-17 900 -33 940 -46 966 C-30 968 -12 970 3 970.5 Z" fill="url(#wing-base)"/>
+    <path id="wing-dark-leading-edge" d="M0 820 C50 718 121 620 209 581 C234 570 256 567 280 567 C206 598 115 718 72 816 L0 951 Z" fill="#17203b"/>
+    <path id="wing-surface" d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-base)"/>
+    <path d="M0 861 C31 781 98 667 173 608 C206 581 234 565 267 565 C315 559 357 582 382 622 C409 664 413 709 400 758 C382 831 326 892 257 931 C186 972 88 991 30 977 C16 975 7 972 0 969 Z" fill="url(#wing-shade)"/>
+    <path id="wing-soft-highlight" d="M210 583 C236 567 256 563 278 565 C325 564 360 586 382 622 C408 664 413 710 400 757 C393 784 381 808 366 829" fill="none" stroke="url(#wing-rim)" stroke-width="2"/>
+  </g>
+  </g>
+  <g class="face">
+  <g id="golden-eyes">
+    <g class="eye eye-l"><g class="lid">
+      <ellipse cx="438" cy="437" rx="31" ry="34" fill="#111a2d" opacity=".6"/>
+      <g class="iris">
+      <path id="left-eye" d="M467 438 C467 455 455 469 439 469 C423 470 410 459 409 442 C407 425 414 409 430 405 C449 399 466 415 467 438 Z" fill="url(#eye-gold)" stroke="#ffe157" stroke-opacity=".7" stroke-width="1.2"/>
+      <g class="glint">
+      <ellipse id="left-eye-reflection" cx="449" cy="421" rx="8.5" ry="9.5" transform="rotate(-24 449 421)" fill="#fffff6"/>
+      </g></g>
+    </g></g>
+    <g class="eye eye-r"><g class="lid">
+      <ellipse cx="709" cy="385" rx="28" ry="32" fill="#111a2d" opacity=".7"/>
+      <g class="iris">
+      <path id="right-eye" d="M735 379 C739 397 728 413 713 415 C697 417 685 405 683 390 C679 374 688 356 702 354 C719 351 732 364 735 379 Z" fill="url(#eye-gold)" stroke="#ffe458" stroke-opacity=".65" stroke-width="1.2"/>
+      <g class="glint">
+      <ellipse id="right-eye-reflection" cx="719" cy="370" rx="8.4" ry="9.5" transform="rotate(-27 719 370)" fill="#fffff8"/>
+      </g></g>
+    </g></g>
+  </g>
+  <use class="halo" href="#key-outline" fill="#ffe14d" filter="url(#key-glow)" opacity="0"/>
+  <g class="key"><g class="keyswing">
+  <g id="gold-key">
+    <use href="#key-outline" fill="url(#key-gold)"/>
+    <g clip-path="url(#key-clip)">
+      <ellipse id="ring-rounded-surface" cx="595" cy="631" rx="125" ry="126" fill="url(#ring-rounding)"/>
+      <path id="key-teeth" d="M805 618 L928 603 L944 703 L888 728 L812 736 Z" fill="url(#teeth-rounding)"/>
+      <path id="key-shaft" d="M700 596 L921 565 C938 562 951 572 954 588 C959 607 946 622 929 625 L710 658 Z" fill="url(#shaft-rounding)"/>
+      <path d="M509 526 L710 565 L717 598 L516 562 Z" fill="url(#key-top-shade)"/>
+      <path id="shaft-top-highlight" d="M710 596 L924 566 C936 564 945 571 949 578" fill="none" stroke="#fff650" stroke-opacity=".6" stroke-width="3" filter="url(#edge-softness)"/>
+      <path id="ring-bottom-highlight" d="M478 650 C491 705 536 748 591 752 C646 757 689 727 706 683" fill="none" stroke="#ffe13a" stroke-opacity=".8" stroke-width="2.5"/>
+      <path id="ring-inner-bevel" d="M531 612 C536 581 558 562 586 560 C621 557 648 580 659 610 C669 639 661 667 641 686" fill="none" stroke="#bd8500" stroke-opacity=".5" stroke-width="2"/>
+      <path d="M544 673 C568 708 613 713 642 689" fill="none" stroke="#ffed40" stroke-opacity=".6" stroke-width="7" filter="url(#small-glow)"/>
+    </g>
+  </g>
+  <g clip-path="url(#key-clip)"><g transform="rotate(18 700 640)"><rect class="sheen" x="330" y="380" width="70" height="520" fill="url(#sheen)" opacity="0"/></g></g>
+  </g></g>
+  <g class="beak">
+  <g id="bird-beak">
+    <path id="beak-surface" d="M522 527 C509 524 510 508 518 488 C529 459 548 436 572 427 C606 413 634 426 662 442 C697 463 728 490 743 518 C752 534 757 554 743 566 C737 572 727 573 716 570 L522 527 Z" fill="url(#beak-color)"/>
+    <path d="M522 527 C509 524 510 508 518 488 C529 459 548 436 572 427 C606 413 634 426 662 442 C697 463 728 490 743 518 C752 534 757 554 743 566 C737 572 727 573 716 570 L522 527 Z" fill="url(#beak-light)"/>
+    <path id="beak-upper-rim" d="M546 443 C567 423 591 418 615 424 C658 433 716 477 739 510 C750 527 754 541 749 552" fill="none" stroke="url(#beak-rim)" stroke-width="2"/>
+  </g>
+  </g>
+  <g class="key"><g class="keyswing" id="key-sparkles">
+    <g id="key-ring-star">
+      <g class="tw tw-key-ring-star">
+      <use href="#key-sparkle" fill="#ffda25" opacity=".65" filter="url(#soft-glow)"/>
+      <use href="#key-sparkle" fill="#fffadb"/>
+      <path d="M497 534 C494 575 490 585 457 590 C489 596 494 606 497 641 C500 605 506 596 536 590 C506 586 501 575 497 534 Z" fill="#fff"/>
+      </g>
+    </g>
+    <g id="key-shaft-star">
+      <g class="tw tw-key-shaft-star">
+      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#ffffb7" opacity=".6" filter="url(#small-glow)"/>
+      <path d="M866 562 C863 585 861 589 839 594 C862 597 863 602 866 623 C869 601 871 598 894 594 C871 590 869 585 866 562 Z" fill="#fffff4"/>
+      </g>
+    </g>
+  </g></g>
+  </g>
+  </g></g></g></g>
+  <g id="sparkle-highlights">
+    <g id="large-yellow-star" transform="translate(-72 48)">
+      <g class="tw tw-large-yellow-star">
+      <use href="#large-sparkle" fill="#fff34f" opacity=".55" filter="url(#soft-glow)"/>
+      <use href="#large-sparkle" fill="#fff75a"/>
+      <path d="M959 56 C955 98 951 103 918 109 C952 114 955 123 959 157 C963 120 968 114 998 109 C966 104 962 98 959 56 Z" fill="#fff764"/>
+      </g>
+    </g>
+    <g id="small-yellow-star" transform="translate(-62 74)">
+      <g class="tw tw-small-yellow-star">
+      <path d="M859 152 C855 175 854 178 830 183 C854 187 855 191 859 213 C863 191 864 187 887 183 C864 179 863 175 859 152 Z" fill="#fff56c" opacity=".6" filter="url(#small-glow)"/>
+      <path d="M859 152 C855 175 854 178 830 183 C854 187 855 191 859 213 C863 191 864 187 887 183 C864 179 863 175 859 152 Z" fill="#fff76c"/>
+      </g>
+    </g>
+    <g id="white-background-star">
+      <g class="tw tw-white-background-star">
+      <path d="M984 252 C980 271 979 274 959 279 C979 283 980 287 984 305 C988 287 990 283 1008 279 C989 275 988 271 984 252 Z" fill="#eae9ff" opacity=".5" filter="url(#small-glow)"/>
+      <path d="M984 252 C980 271 979 274 959 279 C979 283 980 287 984 305 C988 287 990 283 1008 279 C989 275 988 271 984 252 Z" fill="#fff"/>
+      </g>
+    </g>
+  </g>
+</svg>

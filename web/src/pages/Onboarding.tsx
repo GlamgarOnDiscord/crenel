@@ -41,7 +41,7 @@ export function Onboarding() {
   return (
     <div className="onb">
       <div className="onb-in t-reveal">
-        <div className="halo"><Mascot size={104} /></div>
+        <div className="halo"><Mascot size={104} mood="hello" /></div>
         <div className="onb-hd">
           <h1>Ajoutez une cible</h1>
           <p className="muted">Un premier scan, lecture seule, en moins de deux minutes.</p>

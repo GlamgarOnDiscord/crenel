@@ -10,11 +10,16 @@ function iconFile(px: number): string {
   return `crenel-icon-${size}.png`;
 }
 
+// Animated scenes rigged from the same artwork (brand/motion). `found` and
+// `hello` play once and settle into idle; the others loop.
+export type Mood = "idle" | "working" | "found" | "hello" | "loader";
+
 // App-icon mark: the square artwork clipped to a squircle-like radius.
-export function Mark({ size = 30 }: { size?: number }) {
+export function Mark({ size = 30, mood }: { size?: number; mood?: Mood }) {
   return (
     <img
-      src={iconFile(size)}
+      key={mood}
+      src={mood ? `crenel-${mood}.svg` : iconFile(size)}
       width={size}
       height={size}
       alt=""
@@ -34,10 +39,11 @@ export function Wordmark() {
 }
 
 // The same character, larger, for the landing hero, onboarding and empty states.
-export function Mascot({ size = 120 }: { size?: number }) {
+export function Mascot({ size = 120, mood = "idle" }: { size?: number; mood?: Mood }) {
   return (
     <img
-      src={iconFile(size)}
+      key={mood}
+      src={`crenel-${mood}.svg`}
       width={size}
       height={size}
       alt="Crenel, le choucas qui a trouvé une clé"

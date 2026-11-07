@@ -47,7 +47,7 @@ export function Landing() {
           <div className="install"><code><span className="k" aria-hidden="true">$</span> npx crenel scan</code><Tooltip content="Copier la commande"><span><CopyButton text="npx crenel scan" /></span></Tooltip></div>
         </div>
         <div className="lp-mascot" aria-hidden="false">
-          <div className="halo big"><Mascot size={280} /></div>
+          <div className="halo big"><Mascot size={280} mood="hello" /></div>
           <span className="float f1"><i className="fd red" />sk_live_ prouvée</span>
           <span className="float f2"><i className="fd amber" />gardée en CI</span>
         </div>

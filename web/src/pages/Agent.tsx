@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Check, CircleDashed, Copy, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
-import { Mark } from "../brand/Logo.tsx";
+import { Mark, type Mood } from "../brand/Logo.tsx";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { Topbar } from "../components/Shell.tsx";
 import { Composer } from "../components/Composer.tsx";
@@ -181,6 +181,11 @@ export function Agent() {
   }
 
   const busy = phase === "running" || phase === "waiting" || !!stream;
+  // While the run works, a live mascot sits under the conversation: it searches,
+  // and celebrates once when the last tool proved a finding.
+  const lastTool = [...events].reverse().find((e) => e.kind === "tool");
+  const justProved = lastTool?.kind === "tool" && !!lastTool.findings?.some((f) => f.state === "proven");
+  const mood: Mood = phase === "running" || stream ? (justProved ? "found" : "working") : "idle";
   const tokens = 1800 + events.reduce((n, e) => n + (e.kind === "tool" ? 2300 : e.kind === "permission" ? 600 : 420 + ("text" in e ? e.text.length * 3 : 0)), 0);
   const effort = effortOf(ws.effort);
   const model = modelOf(ws.model);
@@ -358,8 +363,10 @@ export function Agent() {
               </div>
             );
           })}
-          {phase === "running" && events[lastIdx]?.kind !== "tool" && events[lastIdx]?.kind !== "think" && (
-            <ThinkingBar className="fade-up" text="Crenel réfléchit" onStop={interrupt} stopLabel="Interrompre" />
+          {phase === "running" && (
+            <ThinkingBar className="fade-up" icon={<Mark size={26} mood={mood} />}
+              text={justProved ? "Crenel a trouvé une faille" : events[lastIdx]?.kind === "tool" ? "Crenel fouille" : "Crenel réfléchit"}
+              onStop={interrupt} stopLabel="Interrompre" />
           )}
           {events.some((e) => e.kind === "think") && (
             <Steps defaultOpen={false} className="trace">
