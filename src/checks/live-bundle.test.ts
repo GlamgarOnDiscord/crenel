@@ -54,3 +54,9 @@ test("an undeclared host is never fetched", async () => {
   assert.equal(files.length, 0);
   assert.deepEqual(skipped, ["elsewhere.example.net"]);
 });
+
+test("extracts API routes from client code, ids normalised to :id, multi-id routes left out", async () => {
+  const { extractEndpoints } = await import("./live-bundle.js");
+  const js = 'fetch(`/api/projects/${id}`);a("/api/projects");b("/v1/invoices/123/pdf");c(`/api/orgs/${o}/members/${m}`);d("/api/users/3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e?x=1");e("/static/x.png")';
+  assert.deepEqual(extractEndpoints(js), ["/api/projects", "/api/projects/:id", "/api/users/:id", "/v1/invoices/:id/pdf"]);
+});

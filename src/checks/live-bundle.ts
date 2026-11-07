@@ -53,6 +53,24 @@ export function extractAssetUrls(body: string, base: string, kind: "html" | "js"
   return [...out];
 }
 
+/**
+ * API routes written in client code (the method of LinkFinder and jsluice): string
+ * and template literals that look like "/api/..." or "/v1/...". A template
+ * placeholder or an id-shaped segment becomes ":id", so the route can go
+ * straight into the authorization matrix. Routes with one placeholder only.
+ */
+export function extractEndpoints(js: string): string[] {
+  const out = new Set<string>();
+  const lit = /["'`](\/(?:api|v\d|rest|graphql|trpc|internal|admin)\/[A-Za-z0-9_\-./${}:?=&]{1,160})["'`]/g;
+  for (const m of js.matchAll(lit)) {
+    let p = m[1]!.split("?")[0]!.replace(/\/+$/, "");
+    p = p.replace(/\$\{[^}]*\}/g, ":id").replace(/\/(?:[0-9]+|[0-9a-f]{8}-[0-9a-f-]{27})(?=\/|$)/gi, "/:id").replace(/:\w+/g, ":id");
+    if (/[{}$]/.test(p) || (p.match(/:id/g) ?? []).length > 1) continue;
+    out.add(p);
+  }
+  return [...out].sort();
+}
+
 const kindOf = (url: string, contentType: string): "html" | "js" | "map" =>
   /\.map(\?|$)/.test(url) ? "map" : /javascript|ecmascript/.test(contentType) || /\.m?js(\?|$)/.test(url) ? "js" : "html";
 
@@ -159,6 +177,22 @@ export const liveBundle: Check = {
           remediation: "Stop uploading .map files to the public host (keep them for your error tracker only), or block *.map at the edge.",
           proof: { method: "GET of the map referenced by the bundle returned a source map", replay: `curl -sI '${f.url}'`, evidence: "HTTP 200, \"sources\" present" },
           regressionHint: `CI: after deploy, expect ${new URL(f.url).pathname} to return 403 or 404.`,
+        });
+      }
+      // API routes the client code calls: object routes are matrix candidates.
+      const routes = [...new Set(fetched.filter((f) => f.kind !== "html").flatMap((f) => extractEndpoints(f.body)))];
+      const objectRoutes = routes.filter((r) => r.endsWith(":id") || r.includes(":id/"));
+      if (routes.length) {
+        findings.push({
+          id: `live-bundle:routes:${new URL(ctx.stagingUrl).host}`,
+          check: "live-bundle",
+          title: `${routes.length} API route(s) in the served JavaScript, ${objectRoutes.length} with an object id`,
+          severity: "info",
+          state: "unproven",
+          location: ctx.stagingUrl,
+          description: `Routes the client calls: ${routes.slice(0, 25).join(", ")}${routes.length > 25 ? "…" : ""}. Every route with an object id should be in options.authz-matrix.resources, so Crenel can prove another account cannot reach it.`,
+          remediation: "Add the object routes to the authorization matrix: " + objectRoutes.slice(0, 10).map((r) => `{ name: ${r.split("/").filter((s) => s && s !== ":id").pop()}, path: ${r} }`).join("; "),
+          proof: { method: "route literals extracted from the served chunks", replay: `curl -s '${ctx.stagingUrl}' # then the chunks it loads` },
         });
       }
       ctx.log(`live-bundle: ${fetched.length} file(s) fetched (${Math.round(total / 1024)} KB), ${findings.length} finding(s)`);

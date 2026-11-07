@@ -2,7 +2,7 @@
 
 Not done yet, in rough order:
 
-- **Authorization**: import routes from the JS bundle (or `review-bundle`'s endpoints) to fill the matrix; replay GraphQL global ids leaked in responses; an admin role with an expected "allow"; old and new objects per resource in generated tests. Action-level BOLA (update or delete someone else's object) stays off by default: later, only with declared test accounts, a throwaway object Crenel creates, and a separate opt-in.
+- **Authorization**: add the routes `live-bundle` and `review-bundle` list to the matrix automatically (today they are suggested); replay GraphQL global ids leaked in responses; an admin role with an expected "allow"; old and new objects per resource in generated tests. Action-level BOLA (update or delete someone else's object) stays off by default: later, only with declared test accounts, a throwaway object Crenel creates, and a separate opt-in.
 - **Secrets**: rotation paths per provider; liveness for AWS (needs a signed request) and Google keys.
 - **BaaS**: anonymous writes on Supabase (a separate opt-in, on a throwaway row Crenel creates), Firestore rules (needs a POST, never sent today).
 - **Dependencies**: maintainer and publisher changes between versions (needs a history the registry does not expose directly).
