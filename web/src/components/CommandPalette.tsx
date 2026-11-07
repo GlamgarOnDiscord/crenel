@@ -27,6 +27,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [i, setI] = useState(0);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
 
   const results = useMemo(
     () => COMMANDS.filter((c) => (c.label + " " + c.hint).toLowerCase().includes(q.toLowerCase())),
@@ -34,7 +36,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   );
 
   useEffect(() => {
-    if (open) { setQ(""); setI(0); setTimeout(() => inputRef.current?.focus(), 0); }
+    if (open) {
+      restoreRef.current = document.activeElement as HTMLElement | null;
+      setQ(""); setI(0);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    } else {
+      // Give focus back to whatever opened the palette.
+      restoreRef.current?.focus?.();
+    }
   }, [open]);
   useEffect(() => { setI(0); }, [q]);
 
@@ -42,21 +51,34 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   function go(c: Cmd) { navigate(c.to); onClose(); }
 
+  // Escape and a minimal focus trap at the dialog level, so they work no matter
+  // which element inside holds focus.
+  function onDialogKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+    if (e.key === "Tab") {
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('input, button, [href], [tabindex]:not([tabindex="-1"])');
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0]!, last = focusable[focusable.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   return (
     <div className="cmdk-overlay" onMouseDown={onClose}>
-      <div className="cmdk" role="dialog" aria-label="Palette de commandes" onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="cmdk" role="dialog" aria-modal="true" aria-label="Palette de commandes" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onDialogKeyDown}>
         <div className="cmdk-input">
-          <Search size={16} className="faint" />
+          <Search size={16} className="faint" aria-hidden="true" />
           <input
             ref={inputRef}
             value={q}
+            aria-label="Rechercher une commande"
             placeholder="Aller à une page, lancer une action…"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => Math.min(n + 1, results.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => Math.max(n - 1, 0)); }
               else if (e.key === "Enter") { const c = results[i]; if (c) go(c); }
-              else if (e.key === "Escape") onClose();
             }}
           />
           <span className="kbd">esc</span>

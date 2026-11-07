@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Topbar } from "../components/Shell.tsx";
-import { Button, SeverityChip, StateBadge } from "../components/ui.tsx";
+import { Button, SeverityChip, StateBadge, EmptyState } from "../components/ui.tsx";
+import { CheckCheck } from "lucide-react";
 import { findings } from "../data/mock.ts";
 import { SEV_RANK } from "../lib/types.ts";
 
@@ -27,12 +28,17 @@ export function Findings() {
       <div className="content">
         <div className="seg" style={{ width: "fit-content" }}>
           {tabs.map(([key, label]) => (
-            <button key={key} className={filter === key ? "on" : ""} onClick={() => setFilter(key)}>
+            <button key={key} aria-pressed={filter === key} className={filter === key ? "on" : ""} onClick={() => setFilter(key)}>
               {label} ({counts[key]})
             </button>
           ))}
         </div>
         <section className="card">
+          {rows.length === 0 ? (
+            <EmptyState icon={<CheckCheck size={22} />} title="Aucun finding ici">
+              {filter === "fixed" ? "Rien n'a encore été marqué corrigé." : "Aucun finding dans ce filtre."}
+            </EmptyState>
+          ) : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
               <thead><tr><th>Sév.</th><th>Intitulé</th><th className="hide-sm">Emplacement</th><th className="hide-sm">Check</th><th>État</th><th className="hide-sm">Vu</th><th /></tr></thead>
@@ -51,6 +57,7 @@ export function Findings() {
               </tbody>
             </table>
           </div>
+          )}
         </section>
       </div>
     </>

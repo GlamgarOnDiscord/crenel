@@ -123,7 +123,7 @@ export function Bars({ proven, leads }: { proven: number[]; leads: number[] }) {
 export function ModelChip({ name }: { name: string }) {
   return (
     <span className="modelchip">
-      <svg className="glyph" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="var(--brand-ink)" strokeWidth="1.5" /><circle cx="8" cy="8" r="2" fill="var(--brand-ink)" /></svg>
+      <svg className="glyph" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="var(--brand-ink)" strokeWidth="1.5" /><circle cx="8" cy="8" r="2" fill="var(--brand-ink)" /></svg>
       {name}
     </span>
   );
