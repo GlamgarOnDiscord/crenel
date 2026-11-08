@@ -37,7 +37,7 @@ import { GOAL_LABEL, parseGoal, runGoal, type GoalCheck, type GoalSpec } from ".
 import { uidOf, type AuthzMatrix, type StateStore, type StoredFinding, type StoredTest } from "./state.js";
 import { z } from "zod";
 import { backendFor } from "../toolbox/backend.js";
-import { runTool, toolboxOptions, type ToolName } from "../toolbox/run.js";
+import { httpxTargets, runTool, toolboxOptions, type ToolName } from "../toolbox/run.js";
 
 export type Decision = "once" | "always" | "deny";
 export type Intent = "full" | "authz" | "secrets" | "tests" | "chat" | "goal" | "tools";
@@ -86,6 +86,7 @@ const LABEL: Record<string, string> = {
   "tools.trufflehog": "trufflehog sur le projet (conteneur sans réseau)",
   "tools.katana": "Découvrir les routes avec katana (conteneur, proxy à périmètre)",
   "tools.nuclei": "Modèles nuclei non intrusifs (conteneur, proxy à périmètre)",
+  "tools.httpx": "Inventaire des hôtes déclarés avec httpx (conteneur, proxy à périmètre)",
 };
 
 /** Pick an intent from the user's words. Deterministic: the model does not plan. */
@@ -260,7 +261,7 @@ export class AgentRun {
     if (intent === "secrets") return [...["scan.secrets", "scan.baas"].filter(has), "validate.claims"];
     if (intent === "tests") return this.deps.store.findings().items.length ? ["tests.generate"] : [...scan, ...tail];
     // The optional toolbox: in a full scan when options.toolbox.enabled, always on /tools.
-    const tools = ["tools.trufflehog", ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
+    const tools = ["tools.trufflehog", ...(httpxTargets(this.deps.config.scope.allowedHosts).length ? ["tools.httpx"] : []), ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
     if (intent === "tools") return [...tools, ...tail];
     const review = this.deps.llm && this.scope.stagingUrl && scan.includes("scan.web") ? ["review.bundle"] : [];
     return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...active, ...tail];
@@ -379,7 +380,7 @@ export class AgentRun {
     const where = wsl
       ? (name === "trufflehog" ? `WSL ${opts.wsl.distro}, utilisateur non root, proxy qui refuse tout` : `WSL ${opts.wsl.distro}, utilisateur non root, trafic dirigé vers le proxy à périmètre (non forcé)`)
       : (name === "trufflehog" ? "--network none, projet en lecture seule" : "réseau interne, sortie unique: proxy à périmètre");
-    const input = JSON.stringify({ outil: name, [wsl ? "wsl" : "conteneur"]: where, cible: name === "trufflehog" ? "projectDir" : this.scope.stagingUrl }, null, 2);
+    const input = JSON.stringify({ outil: name, [wsl ? "wsl" : "conteneur"]: where, cible: name === "trufflehog" ? "projectDir" : name === "httpx" ? httpxTargets(this.deps.config.scope.allowedHosts) : this.scope.stagingUrl }, null, 2);
     const backend = backendFor(opts);
     const st = await backend.status();
     const blocker = !st.ready ? st.reason : st.tools[name]?.ready ? null : st.tools[name]?.reason;
@@ -387,7 +388,10 @@ export class AgentRun {
       this.ui({ kind: "note", tone: "muted", text: `${tool}: boîte à outils désactivée (${blocker.replace(/^toolbox off: /, "")}). Le reste du scan continue.` });
       return { found: [], ran: false };
     }
-    if (name !== "trufflehog") {
+    if (name === "httpx") {
+      const reqs = httpxTargets(this.deps.config.scope.allowedHosts).flatMap((h) => [{ method: "GET", url: `https://${h}/` }, { method: "GET", url: `http://${h}/` }]);
+      if (!reqs.length || !(await this.gated(tool, reqs))) return { found: [], ran: false };
+    } else if (name !== "trufflehog") {
       const url = this.scope.stagingUrl;
       if (!url || !(await this.gated(tool, [{ method: "GET", url }]))) return { found: [], ran: false };
     }
@@ -418,7 +422,8 @@ export class AgentRun {
       ? [`${r.findings.length} piste(s), ${r.findings.filter((f) => f.state === "proven").length} prouvée(s) par un validateur Crenel`,
         r.network === "none" ? "aucun réseau (--network none)" : `${r.proxy?.requests ?? 0} requête(s) via le proxy, ${r.proxy?.refused ?? 0} refusée(s)${r.network === "wsl+proxy" ? " (WSL: proxy indiqué à l'outil, pas imposé)" : ""}`,
         ...(r.timedOut ? ["arrêté: délai dépassé"] : []),
-        ...r.suggestions.slice(0, 5).map((s) => `route à déclarer dans la matrice: ${s.path}`)]
+        ...r.suggestions.slice(0, 5).map((s) => `route à déclarer dans la matrice: ${s.path}`),
+        ...(r.hosts ?? []).slice(0, 8).map((h) => `${h.url} ${h.status}${h.server ? ` ${h.server}` : ""}${h.tech.length ? ` (${h.tech.slice(0, 4).join(", ")})` : ""}`)]
       : [`non lancé: ${r.reason}`];
     this.journal.append("toolbox", { tool: name, ran: r.ran, reason: r.reason, exit: r.exit, network: r.network, proxy: r.proxy, raw: r.raw ? { sha256: r.raw.sha256, bytes: r.raw.bytes } : undefined, suggestions: r.suggestions });
     this.uiUpdate(uid, { kind: "tool", tool, args: name, input, lines, findings: r.findings.slice(0, 8).map((f) => ({ sev: SEV[f.severity], text: f.title, state: webState(f.state), id: uidOf(f.id) })), dur: ms(Date.now() - t0) });

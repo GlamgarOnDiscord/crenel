@@ -4,7 +4,7 @@
 //   serve  local web console + JSON API (127.0.0.1, random token)
 //   list   show available checks
 //   init   write a starter config
-//   tools  optional toolbox (nuclei, katana, trufflehog) behind the scoped proxy: Docker, or WSL on Windows
+//   tools  optional toolbox (nuclei, katana, trufflehog, httpx) behind the scoped proxy: Docker, or WSL on Windows
 //
 // Kept dependency-free (no arg parser) so the tool stays small and auditable.
 
@@ -365,7 +365,7 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
-      "  crenel tools  status|build|selftest|nuclei|katana|trufflehog [--config path] [--json] [--audit log.jsonl]",
+      "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",
       "                 optional toolbox (Docker, or a WSL distro on Windows); network only via Crenel's scoped proxy",
       "  crenel tools  install --wsl [--yes]   apt-get install the allowlisted tools in the WSL distro (asks first)",
       "  crenel list                                show available checks",

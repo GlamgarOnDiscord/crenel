@@ -1,12 +1,15 @@
 # Toolbox: external tools behind Crenel's perimeter
 
-Crenel can run three open-source tools in a Docker container (default), or, on Windows, from a WSL distribution such as Kali Linux ([WSL backend](#wsl-backend-windows-opt-in), weaker confinement):
+Crenel can run four open-source tools in a Docker container (default), or, on Windows, from a WSL distribution such as Kali Linux ([WSL backend](#wsl-backend-windows-opt-in), weaker confinement):
 
 | Tool | Version | What it does here | Network |
 |---|---|---|---|
 | [nuclei](https://github.com/projectdiscovery/nuclei) | 3.11.1, templates 10.5.1 | non-intrusive http templates only (exposures, misconfigurations, technologies, panels) | through the proxy |
 | [katana](https://github.com/projectdiscovery/katana) | 1.8.0 | route discovery, depth 2, bounded duration, no form filling, no headless browser | through the proxy |
 | [trufflehog](https://github.com/trufflesecurity/trufflehog) | 3.99.8 | secrets in the project directory (filesystem mode) | none by default |
+| [httpx](https://github.com/projectdiscovery/httpx) | 1.12.0 | inventory of the **declared** hosts: which answer, on http and https, status, title, `Server`, technologies (local fingerprints) | through the proxy |
+
+Why httpx, and why not the others: Crenel's live checks look at `scope.stagingUrl`; httpx looks at every host in `scope.allowedHosts` (at most 50, plain names, no wildcards), so a forgotten declared host that still serves the app over plain HTTP, or announces `nginx/1.18.0`, shows up. It sends one GET per host and scheme, follows no redirect, and runs without its ASN/CDN lookups (third-party services), favicon hashing, screenshots or path probing. subfinder was left out: its sources are third-party APIs (crt.sh, search engines), which the proxy refuses by design, and Crenel's `subdomain-takeover` already reads DNS for the declared hosts. ffuf was left out: content discovery overlaps `exposed-files`, which already proves a served `.env`, `.git` or dump with a negative control, and a wordlist fuzzer is the kind of traffic the proxy cannot make read-only over HTTPS.
 
 No exploitation tool is shipped (no sqlmap, no brute forcer), and none can be added through the config.
 
@@ -23,7 +26,7 @@ Every request Crenel sends goes through `src/core/net.ts` (declared hosts, no pr
 - The tool container is attached only to a per-run `docker network create --internal` network: no default route, no NAT, and Docker does not forward its DNS queries outside (observed here: `SERVFAIL` for any external name).
 - The relay is on that internal network only. It runs `socat` with fixed arguments: TCP 3128 to the proxy's Unix socket, bind-mounted read-only. On Linux, no container of the run has a route out and the proxy listens on no TCP port.
 - The proxy asks for a per-run credential, passed to the container through its environment (not the docker argv).
-- Both containers: read-only root filesystem, `--cap-drop ALL`, `no-new-privileges`, user 65532, `--pids-limit`, memory and CPU caps, wall-clock timeout, `/tmp` as a small tmpfs. The project is mounted read-only at `/project`. The image entrypoint only runs `nuclei`, `katana`, `trufflehog` (and `socat` for the relay).
+- Both containers: read-only root filesystem, `--cap-drop ALL`, `no-new-privileges`, user 65532, `--pids-limit`, memory and CPU caps, wall-clock timeout, `/tmp` as a small tmpfs. The project is mounted read-only at `/project`. The image entrypoint only runs `nuclei`, `katana`, `trufflehog`, `httpx` (and `socat` for the relay).
 - trufflehog without verification runs with `--network none`: no proxy, no relay, nothing.
 
 ## What the proxy filters (`src/core/egress-proxy.ts`)
@@ -61,6 +64,8 @@ Every result is a lead (`unproven`). It becomes `proven` only when an existing d
 |---|---|---|
 | nuclei `http-missing-security-headers` (CSP, HSTS, XCTO, XFO, Referrer-Policy) | `header-reread` | the header is absent from a fresh GET of `stagingUrl` |
 | trufflehog secret in `file:line` | `deterministic-check-replay-on-file` (exposed-secrets) | exposed-secrets itself proves a secret at the same file and line |
+| httpx: a declared host other than the staging host answers 200 over `http://` | `plain-http-reread` | a fresh GET over `http://`, redirect not followed, answers 200 (the staging host is `transport`'s job) |
+| httpx: a `Server` header with a version | none | stays an info lead |
 | katana route with an id (`/api/invoices/inv_b_1`) | suggestion for `options.authz-matrix.resources` | once you declare it with B's ids, `authz-replay` proves the cross-tenant read |
 
 Anything else (a nuclei exposure template, a trufflehog detector Crenel has no pattern for) stays a lead, labelled as such.
@@ -74,10 +79,11 @@ crenel tools selftest                   # real escape test, see below
 crenel tools trufflehog --config crenel.config.yaml
 crenel tools katana     --config crenel.config.yaml
 crenel tools nuclei     --config crenel.config.yaml [--json] [--audit log.jsonl]
+crenel tools httpx      --config crenel.config.yaml
 crenel tools cleanup                    # remove containers/networks left by a crash
 ```
 
-nuclei and katana target `scope.stagingUrl`. In the console (or the API), `/tools` runs the three tools, and a full scan includes them when `options.toolbox.enabled` is true. In the agent loop they go through the gate like any network tool (`tools.nuclei` counts as active testing and needs `allowActiveTesting`). `GET /api/toolbox` returns the Docker status, the options and the last egress events.
+nuclei and katana target `scope.stagingUrl`. In the console (or the API), `/tools` runs the four tools (httpx when hosts are declared), and a full scan includes them when `options.toolbox.enabled` is true. In the agent loop they go through the gate like any network tool (`tools.nuclei` counts as active testing and needs `allowActiveTesting`). `GET /api/toolbox` returns the Docker status, the options and the last egress events.
 
 ```yaml
 options:
@@ -148,7 +154,7 @@ crenel tools nuclei --config crenel.config.yaml
 
 ### What is the same as Docker
 
-- The allowlist: only nuclei, katana and trufflehog, built by the same argv builders (`nucleiArgv`, `katanaArgv`, `trufflehogArgv`): same nuclei tags allowlist and denylist, `-ni`, `-duc`, bounded katana, trufflehog with `--no-verification`. The WSL runner refuses any other program, and runs each one with `wsl.exe -d <distro> --cd ~ --exec timeout ...` (an argv array: no Windows shell, no Linux shell).
+- The allowlist: only nuclei, katana, trufflehog and httpx (Kali's package and program are `httpx-toolkit`: plain `httpx` there is an unrelated Python client), built by the same argv builders (`nucleiArgv`, `katanaArgv`, `trufflehogArgv`, `httpxArgv`): same nuclei tags allowlist and denylist, `-ni`, `-duc`, bounded katana, trufflehog with `--no-verification`. The WSL runner refuses any other program, and runs each one with `wsl.exe -d <distro> --cd ~ --exec timeout ...` (an argv array: no Windows shell, no Linux shell).
 - nuclei loads only a filtered template set: `crenel tools install --wsl` downloads the same pinned `nuclei-templates` release as the Dockerfile (checked against the same sha256), runs the same `nuclei-filter.mjs` on it, then makes it root-owned and read-only. Crenel writes a marker with the filter's hash; nuclei is refused on WSL until the marker matches this Crenel's filter and pinned release. Template downloads are disabled in the tool's environment.
 - nuclei still needs `scope.allowActiveTesting: true`; katana and nuclei go through the gate exactly like the Docker tools (`tools.katana`, `tools.nuclei` ask in *ask* mode).
 - The scoped egress proxy (declared hosts only, private and metadata addresses refused, DNS pinned, read-only methods on plain HTTP, request budget, rate limit, journal), the outputs parsed as untrusted by the same adapters, the same validators to turn a lead into a proof.
@@ -169,7 +175,7 @@ What still holds: the proxy cannot be talked into anything outside the scope, ev
 
 ### Root, and passwords
 
-`wsl -d <distro> -u root` runs a command as root without a password. Crenel uses it **only** in `crenel tools install --wsl`, after printing every step and getting an explicit `yes` (or `--yes`): `apt-get update`, `apt-get install --no-install-recommends nuclei katana trufflehog curl ca-certificates`, removing the previous template set, then `chown`/`chmod` to make the new one root-owned and read-only. The download and unpacking of the templates run as the default user, and the filter runs from Crenel on the Windows side (through `\\wsl.localhost\<distro>\`).
+`wsl -d <distro> -u root` runs a command as root without a password. Crenel uses it **only** in `crenel tools install --wsl`, after printing every step and getting an explicit `yes` (or `--yes`): `apt-get update`, `apt-get install --no-install-recommends nuclei katana trufflehog httpx-toolkit curl ca-certificates`, removing the previous template set, then `chown`/`chmod` to make the new one root-owned and read-only. The download and unpacking of the templates run as the default user, and the filter runs from Crenel on the Windows side (through `\\wsl.localhost\<distro>\`).
 
 Crenel never asks for, stores or logs a password. The tools always run as the distro's default user; if that user is root (`id -u` is 0), the backend refuses to run anything: create a regular user and make it the default (`kali-linux config --default-user <name>`).
 
@@ -190,7 +196,7 @@ The WSL code is developed on Linux and tested in CI with a fake `wsl.exe` (`src/
 1. `wsl --install -d kali-linux`, open it once and create the default user (not root).
 2. In `crenel.config.yaml`: `options.toolbox.backend: wsl`, a `scope.stagingUrl` you own (for example `node examples/vulnerable-app/server.mjs` on Windows, with `allowPrivate: true` and `127.0.0.1` declared).
 3. `crenel tools status`: the distro, `uid` not 0, the networking mode and the proxy address.
-4. `crenel tools install --wsl`, read the steps, type `yes`. Then `crenel tools status` again: three tools present, templates filtered.
+4. `crenel tools install --wsl`, read the steps, type `yes`. Then `crenel tools status` again: four tools present, templates filtered.
 5. `crenel tools selftest`: `PASS` for the three proxy probes (403, 403, 200); the direct probes are informative.
 6. `crenel tools trufflehog`, `crenel tools katana`, then `crenel tools nuclei` with `allowActiveTesting: true`; check `.crenel/audit.jsonl` for the `egress` lines.
 

@@ -53,7 +53,7 @@ test("wsl status: UTF-16 distro list, default non-root user, tools found by whic
   assert.equal(st.tools.katana, null);
   assert.equal(st.templates.ready, false);
   assert.ok(calls.every((c) => !c.includes("-u")), "status never runs anything as root");
-  assert.deepEqual(calls[2]!.slice(-4), ["which", "nuclei", "katana", "trufflehog"]);
+  assert.deepEqual(calls[2]!.slice(-5), ["which", "nuclei", "katana", "trufflehog", "httpx-toolkit"], "Kali's httpx is httpx-toolkit (plain httpx is a Python client)");
 });
 
 test("wsl status: no WSL, a missing distro, and a root default user are each reported, never run", async () => {
@@ -88,10 +88,11 @@ test("wsl templates: only a set filtered by this filter version and the pinned r
 });
 
 test("wsl tool argv: default user (no -u), home directory, coreutils timeout, allowlisted programs only", () => {
+  assert.equal(wslToolArgv("kali-linux", 1000, ["httpx", "-u", "a.test"])[9], "httpx-toolkit");
   const a = wslToolArgv("kali-linux", 1_200_000, ["katana", "-u", "http://x/"]);
   assert.deepEqual(a.slice(0, 9), ["-d", "kali-linux", "--cd", "~", "--exec", "timeout", "-k", "10", "1200s"]);
   assert.ok(!a.includes("-u") || a.indexOf("-u") > a.indexOf("katana"), "never -u root for a tool");
-  for (const bad of [["sqlmap", "-u", "x"], ["sh", "-c", "curl x"], ["bash"], []]) assert.throws(() => wslToolArgv("kali-linux", 1000, bad), /allowlisted/);
+  for (const bad of [["sqlmap", "-u", "x"], ["sh", "-c", "curl x"], ["bash"], ["httpx-toolkit"], []]) assert.throws(() => wslToolArgv("kali-linux", 1000, bad), /allowlisted/);
   const env = toolEnv("http://crenel:t@127.0.0.1:1");
   assert.deepEqual(env.WSLENV!.split(":").sort(), Object.keys(env).filter((k) => k !== "WSLENV").sort(), "WSLENV carries exactly the proxy and template variables");
   assert.equal(env.NO_PROXY, "");
@@ -128,7 +129,7 @@ function fakeWsl(over: Record<string, unknown> = {}): Fake {
   const cfgPath = join(dir, "fake.json");
   writeFileSync(cfgPath, JSON.stringify({
     distros: ["Ubuntu", "kali-linux"], utf16: true, uid: 1000, user: "kali", home: "/home/kali", net: "mirrored",
-    kernel: "5.15.167.4-microsoft-standard-WSL2", tools: { nuclei: "/usr/bin/nuclei", katana: "/usr/bin/katana", trufflehog: "/usr/bin/trufflehog" },
+    kernel: "5.15.167.4-microsoft-standard-WSL2", tools: { nuclei: "/usr/bin/nuclei", katana: "/usr/bin/katana", trufflehog: "/usr/bin/trufflehog", "httpx-toolkit": "/usr/bin/httpx-toolkit" },
     root, log, ...over,
   }));
   const bin = join(dir, "wsl.exe");
@@ -170,7 +171,7 @@ test("e2e: crenel tools install --wsl asks first; 'no' runs nothing, 'yes' insta
     const io = { config, configPath: join(f.dir, "crenel.config.yaml"), json: false, wsl: true, out: () => {}, err: () => {}, hostPath: (_d: string, p: string) => join(f.root, p) };
     let text = "";
     assert.equal(await toolsCommand({ ...io, sub: "install", ask: async () => "no", out: (s) => { text += s; } }), 1);
-    assert.match(text, /as root .*apt-get install -y --no-install-recommends nuclei katana trufflehog/);
+    assert.match(text, /as root .*apt-get install -y --no-install-recommends nuclei katana trufflehog httpx-toolkit/);
     assert.match(text, /needs no password: Crenel never asks for one/);
     assert.ok(!f.calls().some((c) => c.user === "root"), "nothing ran as root after a 'no'");
 
@@ -298,4 +299,20 @@ test("options.toolbox: docker by default, wsl only when asked, distro validated"
   assert.equal(ToolboxOptions.parse({ backend: "wsl", wsl: { distro: "Ubuntu-24.04" } }).wsl.distro, "Ubuntu-24.04");
   assert.equal(ToolboxOptions.safeParse({ backend: "wsl", wsl: { distro: "kali; rm" } }).success, false);
   assert.equal(ToolboxOptions.safeParse({ backend: "podman" }).success, false);
+});
+
+test("e2e: httpx from WSL runs Kali's httpx-toolkit on the declared hosts, through the proxy", { skip: skipOnWindows }, async () => {
+  const f = fakeWsl();
+  try {
+    const events: { target: string; refused?: string }[] = [];
+    const config = ConfigSchema.parse({ project: "t", projectDir: f.dir, scope: { allowedHosts: ["127.0.0.1", "*.wild.test"], allowPrivate: true }, options: { toolbox: { backend: "wsl" } } });
+    const r = await runTool({ tool: "httpx", config, projectDir: f.dir, scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), checks: REGISTRY, onEvent: (e) => events.push(e) });
+    assert.equal(r.ran, true, r.reason);
+    const run = f.calls().find((c) => c.argv.includes("timeout") && c.argv.includes("httpx-toolkit"))!;
+    assert.ok(run, "the distro's program is httpx-toolkit");
+    assert.equal(run.argv[run.argv.indexOf("-u") + 1], "127.0.0.1", "only plain declared host names");
+    const call = f.calls().find((c) => c.tool === "httpx")!;
+    assert.equal(call.proxy, true);
+    assert.ok(events.some((e) => e.target === "http://127.0.0.1/"), "the request went through Crenel's proxy");
+  } finally { f.close(); }
 });

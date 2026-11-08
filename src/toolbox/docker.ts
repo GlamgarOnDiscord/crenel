@@ -50,6 +50,8 @@ export interface DockerStatus {
   version?: string;
   image: string;
   imagePresent: boolean;
+  /** Tools the image holds (its crenel.tools label). */
+  tools?: string[];
   /** Why the toolbox is off, in one sentence for a human. */
   reason?: string;
 }
@@ -61,9 +63,12 @@ export async function dockerStatus(image = TOOLBOX_IMAGE): Promise<DockerStatus>
     const missing = v.code === 127 || /ENOENT|not found/i.test(v.stderr);
     return { available: false, image, imagePresent: false, reason: missing ? "Docker is not installed (the toolbox is optional; every other Crenel check works without it)" : `Docker daemon unreachable: ${v.stderr.trim().split("\n")[0] ?? ""}` };
   }
-  const i = await docker(["image", "inspect", "--format", "{{.Id}}", image], { timeoutMs: 8000 });
+  const i = await docker(["image", "inspect", "--format", '{{index .Config.Labels "crenel.tools"}}', image], { timeoutMs: 8000 });
+  // Images built before the label existed hold the first three tools.
+  const label = i.stdout.trim();
+  const tools = i.code !== 0 ? [] : label && label !== "<no value>" ? label.split(",").map((t) => t.trim()).filter(Boolean) : ["nuclei", "katana", "trufflehog"];
   return {
-    available: true, version: v.stdout.trim(), image, imagePresent: i.code === 0,
+    available: true, version: v.stdout.trim(), image, imagePresent: i.code === 0, tools,
     ...(i.code === 0 ? {} : { reason: `image ${image} is not built yet: run \`crenel tools build\`` }),
   };
 }

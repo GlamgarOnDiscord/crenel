@@ -55,6 +55,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   "tools.trufflehog": { name: "tools.trufflehog", network: false, active: false, mutating: false },
   "tools.katana": { name: "tools.katana", network: true, active: false, mutating: false },
   "tools.nuclei": { name: "tools.nuclei", network: true, active: true, mutating: false },
+  "tools.httpx": { name: "tools.httpx", network: true, active: false, mutating: false },
 };
 
 export interface PlannedRequest {

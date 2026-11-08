@@ -64,7 +64,9 @@ export function dockerBackend(image: string): Backend {
     async status() {
       const st = await dockerStatus(image);
       const ready = st.available && st.imagePresent;
-      return { backend: "docker", ready, reason: st.reason, tools: allTools(ready, ready ? undefined : `toolbox off: ${st.reason}`), docker: { ...st, relay: relayMode() } };
+      const tools = allTools(ready, ready ? undefined : `toolbox off: ${st.reason}`);
+      if (ready) for (const t of TOOL_NAMES) if (!(st.tools ?? []).includes(t)) tools[t] = { ready: false, reason: `${t} is not in image ${image}: rebuild it with \`crenel tools build\`` };
+      return { backend: "docker", ready, reason: st.reason, tools, docker: { ...st, relay: relayMode() } };
     },
     async run(r) {
       const paths = { projectRoot: "/project", templatesDir: "/opt/nuclei-templates" };

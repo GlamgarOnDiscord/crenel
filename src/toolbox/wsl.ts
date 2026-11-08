@@ -47,9 +47,10 @@ export const DEFAULT_DISTRO = "kali-linux";
 export const DISTRO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The program each allowlisted tool is in the distro (Kali package names). */
-export const WSL_BINARIES: Record<ToolName, string> = { nuclei: "nuclei", katana: "katana", trufflehog: "trufflehog" };
+// httpx is "httpx-toolkit" in Kali: plain "httpx" there is the unrelated Python HTTP client.
+export const WSL_BINARIES: Record<ToolName, string> = { nuclei: "nuclei", katana: "katana", trufflehog: "trufflehog", httpx: "httpx-toolkit" };
 /** Packages `crenel tools install --wsl` asks apt for, and nothing else. */
-export const WSL_PACKAGES = ["nuclei", "katana", "trufflehog", "curl", "ca-certificates"];
+export const WSL_PACKAGES = ["nuclei", "katana", "trufflehog", "httpx-toolkit", "curl", "ca-certificates"];
 /** Filtered templates, relative to the default user's home. */
 export const TEMPLATES_REL = ".crenel/nuclei-templates";
 const MARKER = ".crenel-filtered";
@@ -215,7 +216,7 @@ export interface WslRunOptions {
   exec?: WslExec;
   /** null = the tool needs no network: the proxy it is given refuses (and journals) everything. */
   scope: Scope | null;
-  /** Receives the proxy URL as the tool sees it. argv[0] must be an allowlisted binary. */
+  /** Receives the proxy URL as the tool sees it. argv[0] must be an allowlisted tool name. */
   argvWithProxy: (proxyUrl: string) => string[];
   endpoint: { listen: string; dial: string };
   timeoutMs: number;
@@ -242,11 +243,12 @@ export function toolEnv(proxyUrl: string): Record<string, string> {
 }
 
 /** wsl.exe argv for one tool run: default user (no -u), home directory, coreutils timeout. */
+/** argv[0] is the toolbox tool name (as the argv builders write it); it becomes the distro's program name. */
 export function wslToolArgv(distro: string, timeoutMs: number, argv: string[]): string[] {
-  const allowed = new Set(Object.values(WSL_BINARIES));
-  if (!argv[0] || !allowed.has(argv[0])) throw new Error(`${argv[0] ?? "(empty)"} is not an allowlisted toolbox program`);
+  const bin = argv[0] && (TOOL_NAMES as readonly string[]).includes(argv[0]) ? WSL_BINARIES[argv[0] as ToolName] : undefined;
+  if (!bin) throw new Error(`${argv[0] ?? "(empty)"} is not an allowlisted toolbox program`);
   if (!DISTRO_RE.test(distro)) throw new Error(`invalid distro name ${JSON.stringify(distro)}`);
-  return ["-d", distro, "--cd", "~", "--exec", "timeout", "-k", "10", `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`, ...argv];
+  return ["-d", distro, "--cd", "~", "--exec", "timeout", "-k", "10", `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`, bin, ...argv.slice(1)];
 }
 
 /** Run one allowlisted tool in the distro, its traffic pointed at a scoped proxy started for the run. */

@@ -51,7 +51,7 @@ function ToolboxCard() {
     } finally { setBusy(false); }
   }
   return (
-    <Card title="Boîte à outils" meta="nuclei, katana, trufflehog">
+    <Card title="Boîte à outils" meta="nuclei, katana, trufflehog, httpx">
       <Row title={`Utiliser WSL (${distro}) au lieu de Docker`} desc={status}
         control={<Toggle on={wsl} onChange={(v) => { if (!busy) void toggle(v); }} label="Utiliser WSL au lieu de Docker" />} />
     </Card>

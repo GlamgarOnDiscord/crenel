@@ -4,7 +4,7 @@
 //   crenel tools build                  build the image from toolbox/ (Docker backend)
 //   crenel tools install --wsl [--yes]  apt-get install the allowlisted tools in the WSL distro (asks first)
 //   crenel tools selftest               escape test of the confinement (real containers, or the WSL distro)
-//   crenel tools nuclei|katana|trufflehog [--json]
+//   crenel tools nuclei|katana|trufflehog|httpx [--json]
 //
 // Every egress event of the proxy (sent or refused) is appended to the audit
 // JSONL (.crenel/audit.jsonl next to the config, or --audit <file>).
@@ -204,6 +204,10 @@ export async function toolsCommand(i: ToolsCliInput): Promise<number> {
   for (const f of r.findings) {
     i.out(`  [${f.state === "proven" ? "PROVEN" : "lead"}] ${f.severity.padEnd(8)} ${f.title}\n           ${f.location}\n`);
     if (f.state === "proven" && f.proof) i.out(`           proof: ${f.proof.method}: ${f.proof.replay}\n`);
+  }
+  if (r.tool === "httpx") {
+    i.out(`\n${(r.hosts ?? []).length} answer(s) from declared hosts:\n`);
+    for (const h of r.hosts ?? []) i.out(`  ${String(h.status).padEnd(4)} ${h.url.padEnd(40)} ${h.server ?? ""}${h.tech.length ? `  [${h.tech.join(", ")}]` : ""}${h.title ? `  "${h.title}"` : ""}\n`);
   }
   if (r.tool === "katana") {
     i.out(`\n${r.routes.length} route(s) discovered on declared hosts.\n`);

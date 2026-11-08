@@ -67,6 +67,16 @@ async function tool(args) {
     out(JSON.stringify({ request: { method: "GET", endpoint: page }, response: { status_code: s2 } }) + "\n");
     return 0;
   }
+  if (prog === "httpx-toolkit") {
+    const proxy = flag(rest, "-http-proxy");
+    for (const h of (flag(rest, "-u") ?? "").split(",").filter(Boolean)) {
+      const url = `http://${h}/`;
+      const status = await viaProxy(proxy, url);
+      log({ tool: "httpx", proxy: !!proxy, url, status });
+      if (status) out(JSON.stringify({ url: url.slice(0, -1), status_code: status, webserver: "nginx/1.18.0", tech: ["Nginx"] }) + "\n");
+    }
+    return 0;
+  }
   if (prog === "trufflehog") {
     const root = rest[1];
     // trufflehog needs no network: a stray request must hit the proxy that refuses everything.

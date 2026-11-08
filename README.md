@@ -13,7 +13,7 @@ proves each one with a replayable request, and turns it into a regression test.
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![Checks](https://img.shields.io/badge/checks-42-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-319%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Tests](https://img.shields.io/badge/tests-325%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -91,7 +91,7 @@ Uploads SARIF to GitHub code scanning. JUnit and JSON outputs too: [`docs/USAGE.
 
 Every request goes through a scoped client that refuses undeclared hosts, private addresses and unsafe methods, and re-checks each redirect. The [active mode](docs/CHECKS.md#active-mode) checks write, so they need `allowActiveTesting` and their own `enabled: true`, touch only declared staging objects with test accounts, and list every write and whether it was restored. Point Crenel only at systems you own or are authorised to test. It is a hardening tool, not an attack tool. [`SECURITY.md`](SECURITY.md)
 
-Optional toolbox: `crenel tools build` then `crenel tools nuclei|katana|trufflehog` runs those tools in a Docker container whose only network exit is a proxy applying the same perimeter (their results stay leads until a Crenel validator replays them). What it filters, and what it cannot filter over HTTPS: [`docs/TOOLBOX.md`](docs/TOOLBOX.md). On Windows without Docker, `options.toolbox.backend: wsl` runs the same allowlisted tools from a WSL distro (Kali by default; `crenel tools install --wsl` asks before installing them as root, the tools run as your normal user), with weaker confinement spelled out in the same doc.
+Optional toolbox: `crenel tools build` then `crenel tools nuclei|katana|trufflehog|httpx` runs those tools in a Docker container whose only network exit is a proxy applying the same perimeter (their results stay leads until a Crenel validator replays them). What it filters, and what it cannot filter over HTTPS: [`docs/TOOLBOX.md`](docs/TOOLBOX.md). On Windows without Docker, `options.toolbox.backend: wsl` runs the same allowlisted tools from a WSL distro (Kali by default; `crenel tools install --wsl` asks before installing them as root, the tools run as your normal user), with weaker confinement spelled out in the same doc.
 
 ## Measured, not claimed
 
