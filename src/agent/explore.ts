@@ -51,12 +51,19 @@ export const ExploreOptions = z.object({
   maxToolRuns: z.number().int().min(0).max(10).optional(),
   /** secret-in-response: one read-only call to the key's own provider (its host must be declared). */
   secretLiveness: z.boolean().default(false),
+  /** explore.ssrf: address the TARGET can reach back for the out-of-band callback (e.g. the host bridge IP for a container target). Default 127.0.0.1. */
+  ssrfCallbackHost: z.string().max(255).optional(),
+  /** explore.ssrf: a fixed callback port to advertise, so the model can compose structured SSRF (host/port/path split). Default: an ephemeral port (single-URL SSRF only). */
+  ssrfCallbackPort: z.number().int().min(1).max(65535).optional(),
+  /** explore.dom-xss: path to Playwright's entry (index.mjs) and to a chromium executable, to prove DOM XSS in a real browser. Optional; absent, DOM XSS stays a lead. */
+  domXssPlaywright: z.string().max(1024).optional(),
+  domXssBrowser: z.string().max(1024).optional(),
 }).strict();
 
 export interface ExploreBudget { maxCalls: number; maxRequests: number; maxTokens: number; maxMs: number; maxToolRuns: number }
 const DEFAULTS: Record<"assist" | "full", ExploreBudget> = {
   assist: { maxCalls: 6, maxRequests: 40, maxTokens: 120_000, maxMs: 5 * 60_000, maxToolRuns: 0 },
-  full: { maxCalls: 15, maxRequests: 150, maxTokens: 400_000, maxMs: 15 * 60_000, maxToolRuns: 2 },
+  full: { maxCalls: 24, maxRequests: 300, maxTokens: 600_000, maxMs: 25 * 60_000, maxToolRuns: 10 },
 };
 
 /** The run's exploration mode: the run's choice, else the config's, else assist with a model and off without. */
@@ -84,7 +91,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -258,6 +265,10 @@ export class Explorer {
   private prompt(turn: number): string {
     const cfg = this.d.config;
     const opts = (cfg.options["authz-matrix"] ?? {}) as AuthzOptions;
+    const exOpts = (cfg.options.explore ?? {}) as { ssrfCallbackHost?: string; ssrfCallbackPort?: number };
+    const ssrfCb = exOpts.ssrfCallbackHost && exOpts.ssrfCallbackPort
+      ? ` Un rappel hors-bande est prêt sur http://${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}/ : pour une SSRF structurée (host/port/path séparés), mets host=${exOpts.ssrfCallbackHost}, port=${exOpts.ssrfCallbackPort}, path=/__INJECT__ (le validateur place le nonce). Pour un seul paramètre URL, laisse le validateur composer l'URL.`
+      : "";
     const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(cfg.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(cfg.options, k)})` : ""}`);
     const b = this.d.budget;
     const tools = [
@@ -266,12 +277,20 @@ export class Explorer {
       `code.read {path, from?, to?}: lire un fichier du projet (300 lignes max), chemin relatif.`,
       `bundle.fetch {path?, grep?}: sans path, la liste des fichiers JS servis par le site et les routes qu'ils citent; avec path, le contenu (ou les lignes qui contiennent grep).`,
       ...(this.d.mode === "full" && b.maxToolRuns > 0 ? [`toolbox.run {tool: "katana"|"httpx"|"nuclei"|"trufflehog", args: [...]}: un outil de la boîte à outils avec tes arguments; le proxy, le débit et les fichiers sont imposés par Crenel (${b.maxToolRuns} lancement(s) max).`] : []),
-      `note.lead {title, reasoning, severity?, location?, requests?}: noter une hypothèse (elle reste une piste).`,
+      `note.lead {title, reasoning, severity?, location?, requests?}: noter une hypothèse (elle reste une piste). Préfère TOUJOURS claim.submit quand un validateur peut décider: dès qu'un paramètre/argument te semble injectable (SQL/XSS/template/commande) soumets une claim injection, et dès qu'un paramètre semble provoquer une requête côté serveur (URL, host, importFrom, webhook, fetch, avatar_url…) soumets une claim ssrf. note.lead seulement si aucun validateur ne s'applique.`,
       `claim.submit {class, title, severity, reasoning, detail}: soumettre une affirmation à un validateur déterministe qui la rejoue. Classes et detail:\n` +
         `   replay: {request:{method?,url,as?,headers?,body?}, expect:{status?, bodyIncludes:["texte précis présent dans la réponse"]}, control?:{as}, id?}. Prouvé seulement si la réponse contient ces textes, que les témoins (sans identifiants, ou en tant qu'un autre compte, et un objet inexistant) ne les contiennent pas, et que l'un d'eux est le marqueur d'un AUTRE compte que celui de la requête (sinon c'est un fait rejoué, gardé comme piste).\n` +
-        `   cross-actor: {url, attacker:"a"|"c"|"anon", owner?:"b", id?}. Prouvé si l'attaquant lit l'objet du propriétaire (même réponse ou marqueur), qu'un id inexistant ne répond pas pareil, et qu'un anonyme ne l'obtient pas.\n` +
+        `   cross-actor: {url, attacker:"a"|"c"|"anon", owner?:"b", id?}. Prouvé si l'attaquant lit l'objet du propriétaire (même réponse ou marqueur), qu'un id inexistant ne répond pas pareil, et qu'un anonyme ne l'obtient pas. Tente aussi attacker:"anon" sur tout endpoint d'objet authentifié: si l'anonyme obtient l'objet d'un compte avec son marqueur, c'est une fuite d'auth prouvée (le validateur escalade seul).\n` +
         `   secret: {request:{url,as?}}. Prouvé si la réponse contient une clé secrète de forme connue (pas une clé publique).\n` +
-        `   file-match: {file, text, line?}. Prouvé si le texte cité (12 caractères min.) est dans le fichier.`,
+        `   file-match: {file, text, line?}. Prouvé si le texte cité (12 caractères min.) est dans le fichier.\n` +
+        `   injection: {url, param, where?:"query"|"body", value?, method?, as?} pour un point REST, OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué), NoSQL (opérateurs $ne/$eq en query bracket ou body JSON: toujours-vrai répond comme la base, toujours-faux diverge). Un paramètre ignoré n'est jamais prouvé.`,
+        `   ssrf: {url, param (ou gql avec __INJECT__), where?, callbackHost?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée. callbackHost doit être joignable depuis la cible.${ssrfCb}`,
+        `   stored-xss: {storeUrl, storeParam (ou storeGql avec __INJECT__), storeWhere?, retrieveUrl, retrieveGql?}. Pour une XSS STOCKÉE: le validateur stocke un marqueur <svg> via la 1re requête puis vérifie qu'il est servi NON échappé par la 2e (retrieveUrl).`,
+        `   dom-xss: {url, param, where?}. Pour une XSS DOM (reflétée par le JS de la page, pas dans le HTML brut): le validateur charge l'URL dans un vrai navigateur et prouve si le script injecté s'exécute (alert avec nonce).`,
+        `   lfi: {url, param, where?}. Path traversal / LFI: le validateur fait lire un fichier système connu via ../ (plusieurs encodages) et prouve par le contenu du fichier (ex. root:x:0:0 de /etc/passwd).`,
+        `   jwt-none: {url, token, override?}. Donne un JWT valide; le validateur forge une version non signée (alg:none, claims modifiables via override) et prouve si le serveur l'accepte là où l'anonyme est refusé.`,
+        `   mass-assignment: {url, field, value, update?, readUrl?, method?, bodyType?, as?}. Un champ que le client ne devrait pas pouvoir fixer (role, isAdmin, credits, plan, verified…): le validateur lit l'objet de l'acteur, fait un update SANS le champ (contrôle: il ne doit pas bouger) puis AVEC field=value, et prouve si la relecture montre exactement value. Mutant, sur l'objet de l'acteur, donc mode actif requis.`,
+        `   cors: {url}. Mauvaise config CORS: le validateur envoie deux origines attaquantes distinctes et prouve si Access-Control-Allow-Origin les reflète toutes deux avec Allow-Credentials: true (lecture seule).`,
     ];
     const used = `Budget restant: ${b.maxCalls - turn + 1} tour(s) dont celui-ci, ${Math.max(0, b.maxRequests - this.requests)} requête(s), ~${Math.max(0, b.maxTokens - this.tokens)} jetons.`;
     const ctx = this.d.context?.length ? `\nCe que le plan fixe a déjà trouvé (inutile de le refaire):\n${fence(untrusted("plan", this.d.context.slice(0, 40).join("\n"), 4000))}` : "";
@@ -279,6 +298,7 @@ export class Explorer {
     return `${UNTRUSTED_PREAMBLE}\n` +
       `Tu explores, pour un outil défensif, une application que l'utilisateur possède et est autorisé à tester. Le plan fixe de Crenel ne couvre que des schémas connus; ton rôle est de trouver ce qu'il rate: une route de forme inhabituelle qui ne vérifie pas le propriétaire, un point de debug au nom inventé, un secret servi par une réponse. ` +
       `Rien de ce que tu dis n'est une preuve: seul un validateur qui rejoue la requête décide. Une affirmation non prouvée reste une piste.\n` +
+      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte), et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider.\n` +
       `Cible: ${cfg.scope.stagingUrl ?? "(pas de stagingUrl: projet seulement)"}. Hôtes déclarés: ${cfg.scope.allowedHosts.join(", ") || "aucun"}. ` +
       `Comptes de test: ${accounts.join(", ") || "aucun"}; "anon" = sans identifiants. Ressources déjà couvertes par la matrice: ${JSON.stringify((opts.resources ?? []).map((r) => r.path))}.\n` +
       `Demande de l'utilisateur: ${one(this.d.userPrompt, 400)}\n` +
@@ -558,7 +578,7 @@ export class Explorer {
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
-  const raw = cls === "cross-actor" ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors") ? d.url : cls === "jwt-none" ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
   return u ? [u] : null;
