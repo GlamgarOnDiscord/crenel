@@ -62,7 +62,7 @@ options:
 
 // Flags that never take a value, so they do not swallow the following token
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
-const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify"]);
+const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify", "exit-with-stdin"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
 const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report"]);
 
@@ -286,6 +286,13 @@ async function main(): Promise<number> {
       const bye = () => { void srv.close().then(ok); };
       process.once("SIGINT", bye);
       process.once("SIGTERM", bye);
+      // A parent app (the desktop window) keeps our stdin open: when it goes
+      // away, even killed, stdin closes and the server stops with it.
+      if (flags["exit-with-stdin"]) {
+        process.stdin.once("end", bye);
+        process.stdin.once("close", bye);
+        process.stdin.resume();
+      }
     });
     return 0;
   }
@@ -424,6 +431,7 @@ async function main(): Promise<number> {
       "                 [--audit log.jsonl] [--notify] [--verbose]",
       "                 --notify: send new proven findings to the configured Slack and webhooks",
       "  crenel serve  [--config path] [--port 4100] [--open] [--llm]      local web console and API",
+      "                 [--exit-with-stdin]: stop when stdin closes (used by the desktop app)",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",

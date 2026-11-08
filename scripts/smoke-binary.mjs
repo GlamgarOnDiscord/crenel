@@ -5,7 +5,8 @@
 //   2. `crenel scan` on a copy of examples/ proves the planted Stripe secret and
 //      the known-bad package (the latter needs the embedded src/data JSON);
 //   3. `crenel serve --port 0` answers on 127.0.0.1 (health, token-to-cookie
-//      exchange, the embedded console and one of its assets), then stops.
+//      exchange, the embedded console and one of its assets), then stops when
+//      its stdin closes (--exit-with-stdin, as under the desktop app).
 // Usage: node scripts/smoke-binary.mjs <path to executable>
 
 import { spawn, spawnSync } from "node:child_process";
@@ -40,7 +41,7 @@ try {
   step(`scan ok (${proven.size} proven findings)`);
 
   // 3. serve on a free port, read the printed link.
-  const srv = spawn(bin, ["serve", "--config", "crenel.config.yaml", "--port", "0"], { cwd: work, stdio: ["ignore", "pipe", "pipe"] });
+  const srv = spawn(bin, ["serve", "--config", "crenel.config.yaml", "--port", "0", "--exit-with-stdin"], { cwd: work, stdio: ["pipe", "pipe", "pipe"] });
   let out = "";
   let err = "";
   srv.stderr.on("data", (d) => { err += d; });
@@ -74,10 +75,13 @@ try {
     assert.equal(api.status, 200);
     step(`serve ok (${base}, console ${html.length} B, ${asset})`);
   } finally {
-    srv.kill();
-    await new Promise((ok) => (srv.exitCode !== null ? ok() : srv.once("exit", ok)));
+    // --exit-with-stdin: closing stdin (what the desktop app's exit does) stops it.
+    const exited = new Promise((ok) => (srv.exitCode !== null ? ok("already") : srv.once("exit", () => ok("stdin"))));
+    srv.stdin.end();
+    const how = await Promise.race([exited, new Promise((ok) => setTimeout(() => ok("timeout"), 15_000))]);
+    if (how === "timeout") { srv.kill(); throw new Error("serve did not stop when its stdin closed"); }
   }
-  step("serve stopped");
+  step("serve stopped when its stdin closed");
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
