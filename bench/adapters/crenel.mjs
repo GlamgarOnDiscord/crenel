@@ -30,7 +30,19 @@ export async function run({ projectDir, baseUrl, caseConfig, tmp }) {
   const start = out.stdout.indexOf("{");
   if (start < 0) throw new Error(`crenel produced no JSON (exit ${out.code}): ${out.stderr.slice(0, 400)}`);
   const result = JSON.parse(out.stdout.slice(start));
-  return { findings: result.findings ?? [], errors: result.errors ?? [] };
+  const findings = result.findings ?? [];
+  const errors = result.errors ?? [];
+  // A case with a recorded exploration (explore.script) also runs `crenel explore`
+  // on it, replaying the model's moves: the validators decide, as with a live model.
+  if (caseConfig.explore?.script) {
+    const script = join(tmp, "explore.script.json");
+    writeFileSync(script, JSON.stringify(caseConfig.explore.script));
+    const ex = await exec(process.execPath, ["--import", "tsx", join(REPO, "src/cli.ts"), "explore", "--config", cfgPath, "--json", "--llm-script", script, "--state", join(tmp, "state")], REPO);
+    const at = ex.stdout.indexOf("{");
+    if (at < 0) errors.push({ check: "explore", message: `no JSON (exit ${ex.code}): ${ex.stderr.slice(0, 300)}` });
+    else findings.push(...(JSON.parse(ex.stdout.slice(at)).findings ?? []));
+  }
+  return { findings, errors };
 }
 
 function exec(cmd, args, cwd) {

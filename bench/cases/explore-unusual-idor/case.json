@@ -1,0 +1,33 @@
+{
+  "title": "Free exploration: an RPC-shaped route with the id in the query string, never declared, leaks B's statement to A; a public catalog keyed by the same id and a custom-named debug endpoint are decoys",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "accounts": { "a": { "token": "tok-a", "marker": "acct_a_bench" }, "b": { "token": "tok-b", "marker": "acct_b_bench" } }
+    } },
+    "explore": {
+      "why": "A recorded exploration (the model's moves, replayed without a model): the bench measures that the harness turns them into a validator's proof and keeps the decoy claims unproven. The same target is also explored by a real model in the end-to-end check.",
+      "script": [
+        { "thought": "Read what the site serves, list B's statements, look at the debug endpoint.", "calls": [
+          { "tool": "bundle.fetch", "args": {} },
+          { "tool": "http.request", "args": { "url": "/rpc/billing.listStatements", "as": "b" } },
+          { "tool": "http.request", "args": { "url": "/__ops/build" } }
+        ] },
+        { "thought": "Try B's statement as A, and the plan route; submit the claims.", "calls": [
+          { "tool": "http.request", "args": { "url": "/rpc/billing.getStatement?statement=stm_b_19", "as": "a" } },
+          { "tool": "claim.submit", "args": { "class": "cross-actor", "title": "Account A reads account B's billing statement (getStatement, id in the query)", "severity": "critical", "reasoning": "The RPC route takes the statement id from the query string and answers any signed-in account.", "detail": { "url": "/rpc/billing.getStatement?statement=stm_b_19", "attacker": "a", "id": "stm_b_19" } } },
+          { "tool": "claim.submit", "args": { "class": "cross-actor", "title": "Account A reads B's plan through getPlan", "severity": "high", "reasoning": "Same id shape as getStatement.", "detail": { "url": "/rpc/billing.getPlan?statement=stm_b_19", "attacker": "a", "id": "stm_b_19" } } },
+          { "tool": "claim.submit", "args": { "class": "secret", "title": "Debug endpoint __ops/build serves a Stripe key", "severity": "critical", "reasoning": "A Stripe key is in the JSON.", "detail": { "request": { "url": "/__ops/build" } } } }
+        ], "done": true }
+      ]
+    }
+  },
+  "mustFind": [
+    { "id": "statement-idor", "check": "^explore$", "text": "stm_b_19", "state": "proven", "minSeverity": "high", "why": "A reads B's statement on a route no check knows (RPC shape, id in the query)." }
+  ],
+  "mustNotFlag": [
+    { "id": "plan-public", "check": "^explore$", "text": "getPlan", "forbid": "proven", "why": "The same answer for any id and anyone: public, not B's data." },
+    { "id": "ops-build-publishable", "check": "^explore$", "text": "__ops/build", "forbid": "proven", "why": "A publishable key is public by design; no secret in the response." },
+    { "id": "no-check-sees-it", "check": "^(?!explore$)", "text": "stm_b_19", "forbid": "any", "why": "Sanity: no fixed check reaches this route; only exploration does." }
+  ]
+}

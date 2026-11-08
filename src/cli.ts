@@ -4,6 +4,7 @@
 //   serve  local web console + JSON API (127.0.0.1, random token)
 //   list   show available checks
 //   init   write a starter config
+//   explore free exploration by a model (claude -p), every claim replayed by a validator
 //   tools  optional toolbox (nuclei, katana, trufflehog, httpx) behind the scoped proxy: Docker, or WSL on Windows
 //
 // Kept dependency-free (no arg parser) so the tool stays small and auditable.
@@ -64,7 +65,7 @@ options:
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
 const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify", "exit-with-stdin"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
-const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report"]);
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report", "mode", "max-calls", "llm-script", "state"]);
 
 function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
@@ -356,6 +357,66 @@ async function main(): Promise<number> {
     });
   }
 
+  if (cmd === "explore") {
+    // Free exploration alone: the model picks its requests and reads within the
+    // declared perimeter; only the generic validators decide what is proven.
+    // The CLI cannot ask, so it runs like `scan`: perimeter and budgets enforced,
+    // every request in the audit of the state directory.
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try { config = loadConfig(configPath); } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const mode = typeof flags.mode === "string" ? flags.mode : config.explore ?? "assist";
+    if (mode !== "assist" && mode !== "full") {
+      process.stderr.write(`--mode must be assist or full (got ${mode}).\n`);
+      return 2;
+    }
+    if (typeof flags["max-calls"] === "string") {
+      const n = Number(flags["max-calls"]);
+      if (!Number.isInteger(n) || n < 1) { process.stderr.write("--max-calls expects a positive integer\n"); return 2; }
+      config = { ...config, options: { ...config.options, explore: { ...((config.options.explore ?? {}) as object), maxCalls: n } } };
+    }
+    const { readFileSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { scriptedLlm } = await import("./agent/llm.js");
+    let llm;
+    if (typeof flags["llm-script"] === "string") {
+      // A recorded exploration (bench, tests): replayed answers, no model spent.
+      const script = JSON.parse(readFileSync(flags["llm-script"], "utf8")) as unknown[];
+      llm = scriptedLlm(script.map((x) => (typeof x === "string" ? x : JSON.stringify(x))), `scripted (${script.length} turn(s))`);
+    } else {
+      const model = typeof flags.model === "string" ? flags.model : "sonnet";
+      llm = claudeCli(model);
+      if (!llm || !(await detectClaude())) {
+        process.stderr.write(`explore needs a model: the claude CLI (model ${model}), or --llm-script for a recorded run.\n`);
+        return 2;
+      }
+    }
+    const { AgentRun } = await import("./agent/run.js");
+    const { StateStore } = await import("./agent/state.js");
+    const stateDir = typeof flags.state === "string" ? resolve(flags.state) : mkdtempSync(join(tmpdir(), "crenel-explore-"));
+    const store = new StateStore(stateDir);
+    const agent = new AgentRun({ config, configPath, store, grants: new Set(), llm }, { prompt: "/explore", mode: "bypass", explore: mode });
+    const stop = () => agent.stop("stopped by the user (signal)");
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    if (!flags.json) process.stderr.write(`Exploring (${mode}, ${llm.label}); journal: ${store.runPath(agent.id)}\n`);
+    await agent.start();
+    const findings = store.findings().items.filter((f) => f.run === agent.id && f.check === "explore");
+    const end = agent.journal.since(0).find((e) => e.type === "explore.end")?.data as Record<string, unknown> | undefined;
+    if (flags.json) {
+      process.stdout.write(JSON.stringify({ findings, explore: end ?? null, status: agent.status, journal: store.runPath(agent.id) }, null, 2) + "\n");
+    } else {
+      for (const f of findings) process.stdout.write(`${f.state === "proven" ? "PROVEN" : "lead  "} ${f.severity.padEnd(8)} ${f.title}\n         ${f.location}\n         ${f.state === "proven" ? f.proof?.method ?? "" : f.verdict ?? ""}\n`);
+      process.stdout.write(`\n${findings.filter((f) => f.state === "proven").length} proven, ${findings.filter((f) => f.state !== "proven").length} lead(s); ${String(end?.calls ?? 0)} model call(s), ${String(end?.requests ?? 0)} request(s)${end?.stopped ? `, stopped: ${String(end.stopped)}` : ""}.\n`);
+      process.stdout.write("Only a validator's replay makes a finding proven; everything else stays a lead.\n");
+    }
+    return agent.status === "error" ? 1 : 0;
+  }
+
   if (cmd === "triage") {
     // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
     const configPath = (flags.config as string) ?? defaultConfigPath();
@@ -431,6 +492,9 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
+      "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--max-calls N] [--json] [--state dir]",
+      "                 free exploration by the model (claude -p); claims proven only by a validator's replay",
+      "                 [--llm-script turns.json]: replay a recorded exploration, no model spent",
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",
       "                 optional toolbox (Docker, or a WSL distro on Windows); network only via Crenel's scoped proxy",
       "  crenel tools  install --wsl [--yes]   apt-get install the allowlisted tools in the WSL distro (asks first)",
