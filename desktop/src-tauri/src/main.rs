@@ -14,7 +14,8 @@
 // Security model (docs/DESKTOP.md): the web page never gets the shell. The only
 // IPC is three app commands, answered only for the app's own start page; the
 // console (a 127.0.0.1 page) has no capability, and navigation is limited to
-// the start page and the engine's own origin.
+// the start page and the engine's own origin; links to anything else open in
+// the system browser.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -25,6 +26,7 @@ use std::time::Duration;
 
 use tauri::async_runtime::Receiver;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, State, Url, Webview, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -61,6 +63,49 @@ fn is_local(url: &Url) -> bool {
 fn is_engine(url: &Url, port: &Mutex<Option<u16>>) -> bool {
     let current = *port.lock().unwrap();
     url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && current.is_some() && url.port() == current
+}
+
+/// A link that leaves the app (the project site, GitHub, docs): open it in the
+/// system browser, never in this window. Only web and mail links, never a file.
+fn open_external(url: &Url) {
+    let local = matches!(url.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]"));
+    if matches!(url.scheme(), "https" | "http" | "mailto") && !local {
+        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+    }
+}
+
+/// Whether the config already names something to test (a stagingUrl or an
+/// allowedHosts entry). A plain line scan is enough for this hint: the engine
+/// validates the real config.
+fn has_target(config: &str) -> bool {
+    let mut in_hosts = false;
+    for raw in config.lines() {
+        let line = raw.split('#').next().unwrap_or("");
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(v) = t.strip_prefix("stagingUrl:") {
+            if !v.trim().is_empty() {
+                return true;
+            }
+        }
+        if let Some(v) = t.strip_prefix("allowedHosts:") {
+            let v = v.trim();
+            if v.starts_with('[') && v.trim_matches(|c| c == '[' || c == ']' || c == ' ').len() > 0 {
+                return true;
+            }
+            in_hosts = true;
+            continue;
+        }
+        if in_hosts {
+            if t.starts_with("- ") && t.len() > 2 {
+                return true;
+            }
+            in_hosts = false;
+        }
+    }
+    false
 }
 
 fn ensure_local(webview: &Webview) -> Result<(), String> {
@@ -149,7 +194,8 @@ async fn open_project(app: AppHandle, webview: Webview, engine: State<'_, Engine
         return Err(format!("{} is not a folder", dir.display()));
     }
     let shell = app.shell();
-    if !dir.join(CONFIG_NAME).is_file() {
+    let created = !dir.join(CONFIG_NAME).is_file();
+    if created {
         if !create {
             return Err("no-config".into());
         }
@@ -209,9 +255,12 @@ async fn open_project(app: AppHandle, webview: Webview, engine: State<'_, Engine
             }
         }
     });
-    // Open the console itself (/app), not the landing page at /.
+    // Open the console itself, not the landing page: the console uses hash
+    // routes, and the fragment survives the engine's token-to-cookie redirect.
+    // A project with nothing to test yet starts on the onboarding.
+    let configured = !created && std::fs::read_to_string(dir.join(CONFIG_NAME)).map(|t| has_target(&t)).unwrap_or(false);
     let mut console = link;
-    console.set_path("/app");
+    console.set_fragment(Some(if configured { "/app/overview" } else { "/app/onboarding" }));
     Ok(console.to_string())
 }
 
@@ -219,6 +268,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Engine::default())
         .invoke_handler(tauri::generate_handler![pick_project, initial_project, open_project])
         .setup(|app| {
@@ -227,7 +277,17 @@ fn main() {
                 .title("Crenel")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(880.0, 560.0)
-                .on_navigation(move |url| is_local(url) || is_engine(url, &port))
+                .on_navigation(move |url| {
+                    let ok = is_local(url) || is_engine(url, &port);
+                    if !ok {
+                        open_external(url);
+                    }
+                    ok
+                })
+                .on_new_window(|url, _features| {
+                    open_external(&url);
+                    NewWindowResponse::Deny
+                })
                 .build()?;
             *app.state::<Engine>().home.lock().unwrap() = win.url().ok();
 

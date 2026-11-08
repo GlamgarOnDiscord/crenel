@@ -20,7 +20,7 @@ Bundles: Windows NSIS installer (per-user, no admin) and MSI; macOS `.dmg` for A
 
 1. The start page (`desktop/ui`, plain HTML/JS, no framework) asks Rust to open a folder picker (`pick_project`, the dialog plugin called from Rust).
 2. `open_project(dir)`: if `dir/crenel.config.yaml` is missing, the page offers to create the starter config (`crenel init`: read-only checks, no host tested until declared). Then Rust spawns `crenel serve` in that folder with `--port 0`: the OS picks a free port at bind time, so there is no window between "find a free port" and "listen on it". Rust reads the link the engine prints when it listens (that is the readiness signal, 45 s timeout, stderr shown on failure) and returns it.
-3. The page navigates to the link. The console swaps the token for its cookie exactly as in a browser.
+3. The page navigates to the link, with the console's hash route: `#/app/overview`, or `#/app/onboarding` when the config names nothing to test yet (no `stagingUrl`, no `allowedHosts` entry) or was just created. The console swaps the token for its cookie exactly as in a browser; the redirect keeps the fragment, so the window lands on the console, not on the landing page.
 4. File > Open project (Ctrl/Cmd+O) stops the engine and returns to the start page. If the engine stops on its own, the window comes back to the start page with its exit code and last stderr lines.
 5. When the app exits, Rust kills the engine. If the app itself is killed, the engine's stdin (a pipe held by the app) closes and `--exit-with-stdin` makes it stop: no orphan server keeps the port and the token.
 
@@ -28,10 +28,10 @@ Bundles: Windows NSIS installer (per-user, no admin) and MSI; macOS `.dmg` for A
 
 ## Security model
 
-- **The web never gets the shell.** The sidecar is spawned from Rust with fixed arguments. No capability grants `shell:*`, `fs:*`, `http:*` or `dialog:*` to any page; the shell and dialog plugins are only used from Rust.
+- **The web never gets the shell.** The sidecar is spawned from Rust with fixed arguments. No capability grants `shell:*`, `fs:*`, `http:*`, `dialog:*` or `opener:*` to any page; the shell, dialog and opener plugins are only used from Rust.
 - **One local capability.** `capabilities/default.json` applies to the window's local pages only and grants `core:app:allow-version`. The console is on `http://127.0.0.1:<port>`, a remote origin for Tauri, and no capability lists a remote URL, so it has no IPC at all.
 - **App commands check their caller.** `pick_project`, `open_project` and `initial_project` refuse to answer unless the calling webview is on the app's own start page (`tauri://localhost` or `http://tauri.localhost` on Windows).
-- **Navigation is pinned.** `on_navigation` allows only the start page and `http://127.0.0.1:<current engine port>`. A link to any other site does nothing in the window.
+- **Navigation is pinned.** `on_navigation` allows only the start page and `http://127.0.0.1:<current engine port>`. A link to any other site (the project site, GitHub, docs), or a page asking for a new window, is opened in the system browser by the opener plugin, called from Rust for `https`, `http` and `mailto` links only (never a file or another scheme), and the window stays where it is.
 - **CSP.** The start page: `default-src 'self'; script-src 'self'` and no inline script or style; `connect-src` only Tauri's IPC. The console keeps the CSP `crenel serve` sends.
 - **The engine is unchanged.** Same 127.0.0.1 binding, random token, Host check against DNS rebinding, Origin check on writes, as documented for `crenel serve`. The token only travels on the sidecar's stdout pipe and in the first URL.
 - **No updater.** The auto-updater is off (see below), so the app never downloads code.
