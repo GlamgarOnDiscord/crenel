@@ -26,6 +26,7 @@ import { toJunit } from "./report/junit.js";
 import { SEVERITIES } from "./report/render.js";
 import type { Severity } from "./core/types.js";
 import { spawn } from "node:child_process";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 // Default config file. `crenel.config.yaml`, falling back to the pre-rename
 // `bastion.config.yaml` when only that one exists, so older setups keep working.
@@ -102,6 +103,18 @@ async function runGuarded(config: Parameters<typeof run>[0], configPath: string,
   }
 }
 
+// Locations become repository-relative (the cwd, as in a GitHub checkout);
+// rules get the registry's titles. See src/report/sarif.ts.
+function sarifOptions(config: { projectDir: string }, configPath: string) {
+  const configDir = dirname(resolve(configPath));
+  return {
+    repoRoot: process.cwd(),
+    projectDir: isAbsolute(config.projectDir) ? config.projectDir : resolve(configDir, config.projectDir),
+    configPath: resolve(configPath),
+    titles: Object.fromEntries(REGISTRY.map((c) => [c.name, c.title])),
+  };
+}
+
 async function main(): Promise<number> {
   const { _, flags, warnings } = parseFlags(process.argv.slice(2));
   for (const w of warnings) process.stderr.write(`Attention: ${w}\n`);
@@ -153,7 +166,7 @@ async function main(): Promise<number> {
       writeFileSync(flags.out, renderJson(result));
     }
     if (flags.sarif && typeof flags.sarif === "string") {
-      writeFileSync(flags.sarif, toSarif(result));
+      writeFileSync(flags.sarif, toSarif(result, sarifOptions(config, configPath)));
     }
     if (flags.junit && typeof flags.junit === "string") {
       writeFileSync(flags.junit, toJunit(result));
