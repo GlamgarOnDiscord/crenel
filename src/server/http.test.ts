@@ -106,6 +106,13 @@ test("the API is locked: token, Host header, JSON writes, same-origin writes", a
     assert.match(set, /HttpOnly/);
     assert.match(set, /SameSite=Strict/);
     assert.equal((await fetch(c.srv.url + "/api/state", { headers: { cookie: set.split(";")[0]! } })).status, 200);
+    // It comes back to the page it was opened on, never to another site.
+    assert.equal(link.headers.get("location"), "/");
+    const deep = await fetch(c.srv.url + "/app/overview?token=test-token", { redirect: "manual" });
+    assert.equal(deep.headers.get("location"), "/app/overview");
+    const other = await fetch(c.srv.url + "//evil.example/x?token=test-token", { redirect: "manual" });
+    assert.equal(other.status, 302);
+    assert.match(other.headers.get("location") ?? "", /^\/(?![/\\])/);
   } finally { await teardown(c); }
 });
 

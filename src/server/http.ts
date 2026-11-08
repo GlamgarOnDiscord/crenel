@@ -535,7 +535,10 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       // Opening the printed link: trade the token in the URL for a cookie, then drop it from the URL.
       if (req.method === "GET" && url.searchParams.has("token") && !url.pathname.startsWith("/api/")) {
         if (!safeEqual(url.searchParams.get("token") ?? "", token)) return send(res, 401, "bad token");
-        res.writeHead(302, { location: "/", "set-cookie": `crenel_token=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store" });
+        // Back to the same page without the token (the desktop app opens /app/...);
+        // never a "//host" or backslash path, which a browser would read as another site.
+        const back = /^\/(?![/\\])[^\\]*$/.test(url.pathname) ? url.pathname : "/";
+        res.writeHead(302, { location: back, "set-cookie": `crenel_token=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store" });
         return res.end();
       }
       if (url.pathname.startsWith("/api/")) {
