@@ -46,6 +46,32 @@ export const PROVIDERS: { id: CustomProvider; label: string; logo: Provider; pre
 ] as const;
 
 export const providerOf = (id: CustomProvider) => PROVIDERS.find((p) => p.id === id)!;
+
+// Ready-made connectors. Most are OpenAI-compatible endpoints (the engine spec is
+// the same `openai:<model>`, only the base URL and the key's env-var name differ),
+// so no backend change is needed to add one. `apiKeyEnv` is a conventional env-var
+// NAME, never a key; `local: true` means no key. Pick one to pre-fill the card.
+export interface Connector { id: string; label: string; logo: Provider; provider: CustomProvider; baseUrl?: string; apiKeyEnv?: string; local?: boolean; hint?: string }
+export const CONNECTORS: Connector[] = [
+  { id: "openai", label: "OpenAI", logo: "openai", provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY" },
+  { id: "anthropic", label: "Anthropic", logo: "claude", provider: "anthropic-api", baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY" },
+  { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY" },
+  { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY" },
+  { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY" },
+  { id: "mistral", label: "Mistral", logo: "mistral", provider: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", apiKeyEnv: "MISTRAL_API_KEY" },
+  { id: "gemini", label: "Gemini", logo: "gemini", provider: "openai-compatible", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnv: "GEMINI_API_KEY" },
+  { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY" },
+  { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY" },
+  { id: "fireworks", label: "Fireworks", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY" },
+  { id: "perplexity", label: "Perplexity", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY" },
+  { id: "ollama", label: "Ollama", logo: "custom", provider: "ollama", baseUrl: "http://127.0.0.1:11434", local: true, hint: "local" },
+  { id: "lmstudio", label: "LM Studio", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:1234/v1", local: true, hint: "local" },
+  { id: "vllm", label: "vLLM / llama.cpp", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:8000/v1", local: true, hint: "local" },
+  { id: "custom", label: "Autre (OpenAI-compatible)", logo: "custom", provider: "openai-compatible" },
+];
+export const connectorOf = (id: string) => CONNECTORS.find((c) => c.id === id);
+/** A fresh draft pre-filled from a connector preset (provider, base URL, key env). */
+export const connectorToDraft = (c: Connector, name = ""): ModelDraft => ({ provider: c.provider, name, baseUrl: c.baseUrl ?? "", apiKeyEnv: c.apiKeyEnv ?? "", temperature: "" });
 /** The engine spec for a custom model: "openai:<name>", "ollama:<name>", "anthropic-api:<name>". */
 export const customSpec = (m: CustomModel) => `${providerOf(m.provider).prefix}:${m.name}`;
 

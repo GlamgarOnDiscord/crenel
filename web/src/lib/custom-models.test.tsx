@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   activeModelView, customSpec, draftToModel, emptyDraft, modelSend, parseCustomModels, validateDraft,
+  CONNECTORS, connectorOf, connectorToDraft,
   type CustomModel, type ModelDraft,
 } from "./workspace.tsx";
 
@@ -63,4 +64,18 @@ test("parseCustomModels: round-trips valid data, drops garbage, never throws", (
   assert.deepEqual(parseCustomModels("not json"), []);
   assert.deepEqual(parseCustomModels(JSON.stringify({ not: "an array" })), []);
   assert.deepEqual(parseCustomModels(JSON.stringify([{ id: "x", provider: "bogus", name: "m" }])), [], "an unknown provider is filtered out");
+});
+
+test("connectors: presets prefill a valid draft and map to the right engine spec", () => {
+  assert.ok(CONNECTORS.length >= 12, "a rich set of connectors is offered");
+  const groq = connectorOf("groq")!;
+  const d = connectorToDraft(groq, "llama-3.1-70b");
+  assert.equal(d.provider, "openai-compatible");
+  assert.equal(d.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(d.apiKeyEnv, "GROQ_API_KEY");
+  assert.deepEqual(validateDraft(d), {}, "a preset-filled draft is valid");
+  assert.equal(customSpec(draftToModel(d)), "openai:llama-3.1-70b");
+  // local presets carry no key and are flagged
+  assert.equal(connectorOf("ollama")!.local, true);
+  assert.equal(connectorToDraft(connectorOf("lmstudio")!).apiKeyEnv, "");
 });

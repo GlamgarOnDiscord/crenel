@@ -822,14 +822,16 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .msel-add .msel-n { color: var(--fg-muted); }
 
 /* Config card for a custom model. Compact, same tokens as the rest of the pop. */
-.cmf { display: grid; gap: 10px; padding: 10px; max-height: min(70vh, 460px); overflow-y: auto; }
+.cmf { display: grid; gap: 10px; padding: 12px; width: 344px; max-width: calc(100vw - 32px); max-height: min(74vh, 520px); overflow-y: auto; }
 .cmf-head { display: flex; align-items: center; gap: 8px; }
 .cmf-title { font-size: 13.5px; font-weight: 600; color: var(--fg); }
 .cmf-spec { margin-left: auto; font-size: 11.5px; color: var(--fg-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-provs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.cmf-prov { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px; border: 0; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 11px; font-weight: 500; cursor: pointer; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
-.cmf-prov:hover { background: var(--hover); }
-.cmf-prov.on { color: var(--fg); background: var(--active); box-shadow: inset 0 0 0 1.5px var(--brand-line); }
+.cmf-conns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.cmf-conn { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
+.cmf-conn:hover { background: var(--hover); }
+.cmf-conn.on { color: var(--fg); background: var(--active); box-shadow: inset 0 0 0 1.5px var(--brand-line); }
+.cmf-conn-l { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-tag { font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-faint); background: var(--well); border-radius: 5px; padding: 1px 5px; }
 .cmf-field { display: grid; gap: 4px; }
 .cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
 .cmf-opt { font-size: 10.5px; font-weight: 400; color: var(--fg-ghost); }

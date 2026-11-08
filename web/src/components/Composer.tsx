@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { EXPLORES, GOALS, MODELS, MODES, PROVIDERS, activeModelView, customSpec, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
+import { CONNECTORS, EXPLORES, GOALS, MODELS, MODES, activeModelView, connectorToDraft, customSpec, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -50,24 +50,27 @@ function ExploreMenu({ placement }: { placement: "up" | "down" }) {
    Soft validation; nothing here is a secret. */
 function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; onSave: (d: ModelDraft) => void; onCancel: () => void }) {
   const [draft, setDraft] = useState<ModelDraft>(() => initial ?? emptyDraft());
+  const [sel, setSel] = useState<string>("custom");
   const [touched, setTouched] = useState(false);
   const errors = validateDraft(draft);
   const prov = providerOf(draft.provider);
   const set = (patch: Partial<ModelDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const pick = (c: (typeof CONNECTORS)[number]) => { setSel(c.id); setDraft((d) => connectorToDraft(c, d.name)); };
   const submit = () => { setTouched(true); if (Object.keys(errors).length === 0) onSave(draft); };
   const spec = draft.name.trim() ? `${prov.prefix}:${draft.name.trim()}` : `${prov.prefix}:…`;
   return (
     <div className="cmf" role="group" aria-label="Configurer un modèle custom">
       <div className="cmf-head">
         <button type="button" className="tbtn icon" aria-label="Retour à la liste" onClick={onCancel}><ArrowLeft size={15} /></button>
-        <span className="cmf-title">Modèle custom</span>
+        <span className="cmf-title">Connecteur custom</span>
         <span className="cmf-spec mono" title="Spécification envoyée au moteur">{spec}</span>
       </div>
-      <div className="cmf-provs" role="radiogroup" aria-label="Fournisseur">
-        {PROVIDERS.map((p) => (
-          <button key={p.id} type="button" role="radio" aria-checked={p.id === draft.provider}
-            className={cn("cmf-prov", p.id === draft.provider && "on")} onClick={() => set({ provider: p.id })}>
-            <ModelLogo provider={p.logo} size={14} /><span>{p.label}</span>
+      <div className="cmf-conns" role="radiogroup" aria-label="Connecteur">
+        {CONNECTORS.map((c) => (
+          <button key={c.id} type="button" role="radio" aria-checked={c.id === sel}
+            className={cn("cmf-conn", c.id === sel && "on")} onClick={() => pick(c)} title={c.baseUrl ?? "à configurer"}>
+            <ModelLogo provider={c.logo} size={15} /><span className="cmf-conn-l">{c.label}</span>
+            {c.hint && <span className="cmf-tag">{c.hint}</span>}
           </button>
         ))}
       </div>
