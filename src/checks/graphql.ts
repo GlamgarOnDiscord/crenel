@@ -54,6 +54,14 @@ async function suggestionsAt(url: string, ctx: CheckContext): Promise<Finding | 
 // read, so this needs active mode; only probed on a path that speaks GraphQL.
 async function batchingAt(url: string, ctx: CheckContext): Promise<Finding | null> {
   if (!ctx.scope.allowActiveTesting) return null;
+  // Confirm the path actually speaks GraphQL first, so a REST endpoint that happens
+  // to echo a JSON array for an array body is never mistaken for query batching.
+  try {
+    const probe = await safeFetch(url, ctx.scope, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ query: "{ __typename }" }) });
+    const b = probe.body.toLowerCase();
+    const isGql = (() => { try { const j = JSON.parse(probe.body) as Record<string, unknown>; return ("data" in j && j.data !== null && typeof j.data === "object") || Array.isArray((j as { errors?: unknown }).errors); } catch { return false; } })();
+    if (!isGql || !(b.includes("__typename") || b.includes('"data"') || b.includes('"errors"'))) return null;
+  } catch { return null; }
   const n = 5;
   let res;
   try { res = await safeFetch(url, ctx.scope, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(Array.from({ length: n }, () => ({ query: "{ __typename }" }))) }); }
