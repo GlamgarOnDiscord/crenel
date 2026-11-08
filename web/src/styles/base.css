@@ -726,23 +726,18 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .egauge.eg-muted .eg-dot { fill: var(--fg-muted); }
 
 .msel { z-index: 70; width: 340px; max-width: calc(100vw - 24px); background: var(--panel-raised); border-radius: 16px; box-shadow: var(--shadow-pop); padding: 6px; outline: none; }
-.effort { padding: 10px 10px 12px; display: grid; gap: 10px; }
-.effort-hd { display: flex; align-items: center; gap: 8px; }
-.effort-l { font-size: 13px; font-weight: 500; color: var(--fg); }
-.effort-v { font-size: 13px; color: var(--brand-ink); font-weight: 500; }
-.effort-track { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 12px; background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
-.effort-opt { position: relative; display: grid; justify-items: center; gap: 5px; padding: 8px 4px 7px; border: 0; background: transparent; border-radius: 9px; color: var(--fg-faint); font-size: 12px; font-weight: 500; transition: color .15s var(--ease); }
-.effort-opt:hover { color: var(--fg-muted); }
-.effort-opt.on { color: var(--fg); }
-.effort-opt:focus-visible { border-radius: 9px; box-shadow: 0 0 0 2px var(--brand-ring); }
-.effort-thumb { position: absolute; inset: 0; border-radius: 9px; background: var(--active); box-shadow: inset 0 0 0 1px var(--line-strong), var(--btn-sheen); }
-.effort-name, .effort-pips { position: relative; z-index: 1; }
-.effort-pips { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
-.effort-pips i { width: 3px; border-radius: 1.5px; background: var(--line-strong); transition: background .2s var(--ease); }
-.effort-pips i:nth-child(1) { height: 4px; } .effort-pips i:nth-child(2) { height: 6px; } .effort-pips i:nth-child(3) { height: 8px; } .effort-pips i:nth-child(4) { height: 10px; }
-.effort-opt.on .effort-pips i.f { background: var(--brand); }
-.effort-opt:not(.on) .effort-pips i.f { background: var(--fg-ghost); }
-.effort-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg-ghost); padding: 0 4px; }
+.effort { padding: 10px 10px 12px; display: grid; gap: 8px; }
+.effort-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-faint); padding: 0 2px; }
+/* Pill slider: --f is the selected stop (0..1), --p a dot's stop. Stops sit
+   on the inner run of the track, inset by --pad so the thumb never clips. */
+.eslider { --pad: 9px; --h: 18px; position: relative; height: var(--h); border-radius: 999px; background: var(--well); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: pointer; touch-action: none; outline: none; }
+.eslider:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--brand-ring); }
+.eslider-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--pad) * 2 + var(--f) * (100% - var(--pad) * 2)); border-radius: inherit; background: var(--brand); transition: width .32s var(--ease); }
+.eslider-dot { position: absolute; top: 50%; left: calc(var(--pad) + var(--p) * (100% - var(--pad) * 2)); width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--fg-ghost); transition: background .2s var(--ease); }
+.eslider-dot.in { background: rgba(10, 11, 13, .45); }
+.eslider-thumb { position: absolute; top: 2px; bottom: 2px; left: calc(var(--pad) + var(--f) * (100% - var(--pad) * 2)); width: 14px; margin-left: -7px; border-radius: 6px; background: #FBFBFC; box-shadow: 0 0 0 1px rgba(10, 11, 13, .18), 0 1px 3px rgba(0, 0, 0, .35); transition: left .32s var(--ease), transform .15s var(--ease); }
+.eslider:active .eslider-thumb { transform: scaleX(1.15); }
+@media (prefers-reduced-motion: reduce) { .eslider-fill, .eslider-thumb, .eslider-dot { transition: none; } }
 
 .msel-cmd { display: grid; border-top: 1px solid var(--line-strong); padding-top: 6px; }
 .msel-search { display: flex; align-items: center; gap: 8px; padding: 6px 10px 8px; }

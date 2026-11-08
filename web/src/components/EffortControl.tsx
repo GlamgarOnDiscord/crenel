@@ -1,12 +1,10 @@
-// Effort control for the composer: a gauge glyph and a four-stop segmented
-// track (radiogroup) whose thumb glides on a motion spring (Arc UI motion
-// tokens), with "Plus rapide" / "Plus fin" captions as in the Codex composer.
-import { motion, useReducedMotion } from "motion/react";
-import { useId, useRef } from "react";
+// Effort control for the composer, recreated from the Codex model menu:
+// "Plus rapide" / "Plus fin" captions over a pill slider whose brand fill
+// runs up to a light thumb, with a dot on each of the four stops. It is a
+// single role="slider": arrows, Home/End and pointer drag all snap to a stop.
+import { useRef, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
 import { cn } from "../lib/utils";
 import { EFFORTS, type EffortId } from "../lib/workspace";
-import { motionTokens } from "./arc/lib/motion-tokens";
-import { TextMorph } from "./kit/text-morph";
 
 // Half-ring gauge: a track arc and an amber arc that grows with the level.
 export function EffortGauge({ level, size = 16, tone = "brand" }: { level: number; size?: number; tone?: "brand" | "muted" }) {
@@ -25,44 +23,42 @@ export function EffortGauge({ level, size = 16, tone = "brand" }: { level: numbe
 }
 
 export function EffortControl({ value, onChange }: { value: EffortId; onChange: (v: EffortId) => void }) {
-  const id = useId();
-  const reduced = useReducedMotion();
-  const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const idx = EFFORTS.findIndex((e) => e.id === value);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(false);
+  const last = EFFORTS.length - 1;
+  const idx = Math.max(0, EFFORTS.findIndex((e) => e.id === value));
   const current = EFFORTS[idx]!;
-  function move(to: number) {
-    const n = Math.max(0, Math.min(EFFORTS.length - 1, to));
-    onChange(EFFORTS[n]!.id);
-    refs.current[n]?.focus();
+  function set(n: number) {
+    const i = Math.max(0, Math.min(last, n));
+    if (i !== idx) onChange(EFFORTS[i]!.id);
+  }
+  function fromPointer(e: RPointerEvent<HTMLDivElement>) {
+    const r = trackRef.current?.getBoundingClientRect();
+    if (!r || r.width === 0) return;
+    set(Math.round(((e.clientX - r.left) / r.width) * last));
   }
   return (
     <div className="effort">
-      <div className="effort-hd">
-        <EffortGauge level={current.level} size={20} />
-        <span className="effort-l" id={`${id}-l`}>Effort</span>
-        <span className="sp" />
-        <TextMorph className="effort-v">{current.label}</TextMorph>
-      </div>
-      <div className="effort-track" role="radiogroup" aria-labelledby={`${id}-l`}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); move(idx + 1); }
-          else if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); move(idx - 1); }
-          else if (e.key === "Home") { e.preventDefault(); move(0); }
-          else if (e.key === "End") { e.preventDefault(); move(EFFORTS.length - 1); }
-        }}>
-        {EFFORTS.map((e, i) => {
-          const on = e.id === value;
-          return (
-            <button key={e.id} ref={(el) => { refs.current[i] = el; }} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1}
-              className={cn("effort-opt", on && "on", i < idx && "past")} onClick={() => onChange(e.id)}>
-              {on && <motion.span layoutId={`${id}-thumb`} className="effort-thumb" transition={reduced ? { duration: 0 } : motionTokens.spring.snappy} />}
-              <span className="effort-pips" aria-hidden="true">{[1, 2, 3, 4].map((p) => <i key={p} className={p <= e.level ? "f" : ""} />)}</span>
-              <span className="effort-name">{e.label}</span>
-            </button>
-          );
-        })}
-      </div>
       <div className="effort-ends" aria-hidden="true"><span>Plus rapide</span><span>Plus fin</span></div>
+      <div ref={trackRef} className="eslider" role="slider" tabIndex={0}
+        aria-label="Effort" aria-valuemin={1} aria-valuemax={EFFORTS.length} aria-valuenow={current.level} aria-valuetext={current.label}
+        style={{ "--f": idx / last } as CSSProperties}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); set(idx + 1); }
+          else if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); set(idx - 1); }
+          else if (e.key === "Home") { e.preventDefault(); set(0); }
+          else if (e.key === "End") { e.preventDefault(); set(last); }
+        }}
+        onPointerDown={(e) => { dragging.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); fromPointer(e); }}
+        onPointerMove={(e) => { if (dragging.current) fromPointer(e); }}
+        onPointerUp={() => { dragging.current = false; }}
+        onPointerCancel={() => { dragging.current = false; }}>
+        <span className="eslider-fill" aria-hidden="true" />
+        {EFFORTS.map((e, i) => (
+          <span key={e.id} aria-hidden="true" className={cn("eslider-dot", i <= idx && "in")} style={{ "--p": i / last } as CSSProperties} />
+        ))}
+        <span className="eslider-thumb" aria-hidden="true" />
+      </div>
     </div>
   );
 }
