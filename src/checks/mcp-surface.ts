@@ -40,6 +40,10 @@ const KNOWN_CONFIGS = [
   ".windsurf/mcp_config.json",
 ];
 
+// Settings keys that execute a command or carry values (Claude Code settings: hooks,
+// apiKeyHelper, statusLine, the AWS and OTel helpers, env).
+const EXEC_KEYS = ["hooks", "apiKeyHelper", "statusLine", "awsAuthRefresh", "awsCredentialExport", "otelHeadersHelper", "env"];
+
 // Pull the server map out of the various shapes these files use.
 function serversOf(data: unknown): Record<string, unknown> {
   if (!data || typeof data !== "object") return {};
@@ -83,6 +87,12 @@ export const mcpSurface: Check = {
 
       const servers = serversOf(data);
       const serverNames = Object.keys(servers);
+      // Keys of an agent settings file that run a command or carry values: hooks,
+      // credential helpers, a status line command, an env block.
+      const active = data && typeof data === "object" ? EXEC_KEYS.filter((k) => k in (data as Record<string, unknown>)) : [];
+      // No server and nothing that runs or holds a value (a settings file that
+      // only sets attribution or a schema): no surface to review.
+      if (!serverNames.length && !active.length) continue;
       const runsBinary: string[] = [];
       const hasEnv: string[] = [];
       for (const [sname, sval] of Object.entries(servers)) {
@@ -97,13 +107,14 @@ export const mcpSurface: Check = {
         id: `mcp-surface:config:${name}`,
         check: "mcp-surface",
         title: `Agent/MCP config committed: ${name} (${serverNames.length} server${serverNames.length === 1 ? "" : "s"})`,
-        severity: runsBinary.length > 0 ? "medium" : "low",
+        severity: runsBinary.length > 0 || active.some((k) => k !== "env") ? "medium" : "low",
         state: "unproven",
         location: rel(full),
         description:
           `${name} declares ${serverNames.length} MCP server(s)${serverNames.length ? `: ${serverNames.join(", ")}` : ""}. ` +
           (runsBinary.length ? `${runsBinary.join(", ")} run a local command (arbitrary execution if the config is tampered with). ` : "") +
           (hasEnv.length ? `${hasEnv.join(", ")} carry an env block that may hold secrets. ` : "") +
+          (active.length ? `It also sets ${active.join(", ")} (commands the agent runs, or values it sends). ` : "") +
           `Review that every server is trusted and that no secret is committed here.`,
         remediation:
           "Pin and review each MCP server, keep secrets out of the committed file (use env/secret store), and treat any untrusted server as code execution.",

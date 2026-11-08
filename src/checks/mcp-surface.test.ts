@@ -76,3 +76,18 @@ test("a present but unparseable config is still flagged", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a settings file with no server and nothing that runs (attribution only) is not a surface; one with hooks is", async () => {
+  const quiet = project({ ".claude/settings.json": JSON.stringify({ $schema: "https://json.schemastore.org/claude-code-settings.json", attribution: { commit: "", pr: "" }, includeCoAuthoredBy: false }) });
+  const hooks = project({ ".claude/settings.json": JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "./guard.sh" }] }] } }) });
+  try {
+    assert.equal((await mcpSurface.run(ctx(quiet))).length, 0);
+    const f = await mcpSurface.run(ctx(hooks));
+    assert.equal(f.length, 1);
+    assert.equal(f[0]!.severity, "medium");
+    assert.match(f[0]!.description, /sets hooks/);
+  } finally {
+    rmSync(quiet, { recursive: true, force: true });
+    rmSync(hooks, { recursive: true, force: true });
+  }
+});

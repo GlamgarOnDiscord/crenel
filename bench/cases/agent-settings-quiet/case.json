@@ -1,0 +1,10 @@
+{
+  "title": "A committed agent settings file that only sets commit attribution",
+  "type": "static",
+  "config": { "projectDir": "project" },
+  "mustFind": [],
+  "mustNotFlag": [
+    { "id": "attribution-only-settings", "check": "mcp-surface", "where": "settings\\.json", "forbid": "any",
+      "why": "No MCP server, no hook, no helper command, no env: the file sets how commits are attributed, nothing runs and nothing secret is held." }
+  ]
+}
