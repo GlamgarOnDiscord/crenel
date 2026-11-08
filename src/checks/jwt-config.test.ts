@@ -34,3 +34,18 @@ test("a proper JWT config is not flagged", async () => {
   try { assert.equal((await jwtConfig.run(ctx(dir))).length, 0); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("an unsigned token built in test code is not a JWT config (seen on a real monorepo's 2FA test)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-jwt-"));
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(join(dir, "apps/api/test"), { recursive: true });
+  mkdirSync(join(dir, "src"), { recursive: true });
+  const fake = "const part = (v) => Buffer.from(JSON.stringify(v)).toString('base64url');\nexport const t = `${part({ alg: 'none' })}.${part({ sub: 'u' })}.signature`;\n";
+  writeFileSync(join(dir, "apps/api/test/google-2fa-reauth.test.ts"), fake);
+  writeFileSync(join(dir, "src/auth.spec.ts"), fake);
+  writeFileSync(join(dir, "src/jwt.ts"), 'jwt.sign(payload, key, { algorithm: "none" });\n');
+  try {
+    const found = await jwtConfig.run(ctx(dir));
+    assert.deepEqual(found.map((f) => f.location), ["src/jwt.ts:1"], "production code is still flagged, test code is not");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -17,6 +17,11 @@ const NONE_IN_LIST = /\balgorithms\s*:\s*\[[^\]]*['"]none['"]/i;
 // verify(token, ...) with a null/empty secret is also a bypass shape.
 const EMPTY_SECRET_VERIFY = /\.verify\s*\(\s*[^,]+,\s*(?:null|undefined|['"]['"])/;
 
+// Test code builds unsigned tokens on purpose (to check they are refused, or to
+// stub a provider's id_token): an alg "none" there configures nothing.
+export const isTestPath = (rel: string) =>
+  /(^|[\\/])(test|tests|__tests__|__mocks__|e2e|fixtures?)[\\/]/i.test(rel) || /\.(test|spec)\.[cm]?[jt]sx?$/i.test(rel);
+
 const lineOf = (t: string, i: number) => t.slice(0, i).split("\n").length;
 
 export const jwtConfig: Check = {
@@ -33,6 +38,7 @@ export const jwtConfig: Check = {
         text = readFileSync(file, "utf8");
       } catch { continue; }
       const rel = relative(ctx.projectDir, file) || file;
+      if (isTestPath(rel)) continue;
       const check = (re: RegExp, id: string, what: string) => {
         const g = new RegExp(re, "gi");
         let m: RegExpExecArray | null;

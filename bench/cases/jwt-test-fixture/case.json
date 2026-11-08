@@ -1,0 +1,13 @@
+{
+  "title": "alg none: in the verifier (a bypass) and in a test that stubs a provider's id_token (not config)",
+  "type": "static",
+  "config": { "projectDir": "project" },
+  "mustFind": [
+    { "id": "verify-accepts-none", "check": "jwt-config", "where": "src/session\\.ts", "minSeverity": "high",
+      "why": "The verifier accepts unsigned tokens: anyone can forge a session." }
+  ],
+  "mustNotFlag": [
+    { "id": "test-stub-token", "check": "jwt-config", "where": "test/", "forbid": "any",
+      "why": "A test that builds an unsigned token on purpose (a stubbed Google id_token, or a token the app must refuse) configures nothing." }
+  ]
+}
