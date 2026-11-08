@@ -1,0 +1,19 @@
+name: action app-comment test
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./
+        with:
+          config: examples/crenel.config.yaml
+          upload-sarif: "false"
+          pr-comment: "true"
+          locale: fr
+          app-client-id: ${{ vars.CRENEL_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.CRENEL_APP_PRIVATE_KEY }}
