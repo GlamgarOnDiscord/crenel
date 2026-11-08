@@ -126,7 +126,8 @@ runs:
       run: node "$GITHUB_ACTION_PATH/dist/cli.js" github-check --report "$CRENEL_REPORT" --config "$CRENEL_CONFIG" --fail-on "$CRENEL_FAIL_ON"
     - if: ${{ always() && inputs.check-run == 'true' && inputs.app-private-key != '' && steps.check-token.outputs.token == '' }}
       shell: bash
-      run: echo "::warning::Crenel check run skipped: the GitHub App has no Checks permission yet (Repository permissions, Checks, Read and write, then accept it on the installation)"
+      run: |
+        echo "::warning::Crenel check run skipped: the GitHub App has no Checks permission yet (Repository permissions, Checks, Read and write, then accept it on the installation)"
     - shell: bash
       env:
         CRENEL_EXIT: ${{ steps.scan.outputs.exit }}
