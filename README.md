@@ -22,6 +22,12 @@ Free · local · no account · no LLM required
 
 </div>
 
+> [!NOTE]
+> **Early days.** Crenel is at the very beginning: it works and is tested, but the
+> checks, the exploration validators and the docs are still growing, APIs may
+> change, and some capabilities depend on optional tooling. Expect rough edges,
+> and please file issues — feedback now shapes where it goes.
+
 ## Why
 
 Apps shipped fast, often with AI, keep making the same mistakes: a server key in the client bundle, a Supabase table without RLS, one account able to read another's data. Scanners report hundreds of maybes. Crenel reports what it can **prove**.
