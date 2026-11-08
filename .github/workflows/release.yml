@@ -1,0 +1,213 @@
+# Release: the standalone `crenel` executable and the desktop app (Tauri v2)
+# for Windows x64, Linux x64/arm64 and macOS x64/arm64. See docs/RELEASE.md
+# and docs/DESKTOP.md.
+#
+# - push of a tag v*: build, smoke test, SHA256SUMS, provenance attestations
+#   (public repository only), then a DRAFT GitHub Release the owner publishes.
+# - workflow_dispatch: the same builds and tests as a dry run. Artifacts are
+#   uploaded to the run; nothing is published, no tag, no release.
+#
+# Nothing is code signed (it costs money): see "Unsigned binaries" in
+# docs/RELEASE.md. Actions are pinned by commit SHA; no install scripts run.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 26.13.0 # LTS; `node --build-sea` needs >= 25.5
+  TAURI_CLI_VERSION: 2.12.4
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-24.04, triple: x86_64-unknown-linux-gnu, bundles: "appimage,deb", exe: "" }
+          - { target: linux-arm64, os: ubuntu-24.04-arm, triple: aarch64-unknown-linux-gnu, bundles: "appimage,deb", exe: "" }
+          - { target: windows-x64, os: windows-2025, triple: x86_64-pc-windows-msvc, bundles: "nsis,msi", exe: ".exe" }
+          - { target: macos-arm64, os: macos-15, triple: aarch64-apple-darwin, bundles: "dmg", exe: "" }
+          - { target: macos-x64, os: macos-15-intel, triple: x86_64-apple-darwin, bundles: "dmg", exe: "" }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Versions agree with the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          node -e '
+            const fs = require("fs"); const want = process.argv[1];
+            const got = {
+              "package.json": JSON.parse(fs.readFileSync("package.json")).version,
+              "desktop/src-tauri/tauri.conf.json": JSON.parse(fs.readFileSync("desktop/src-tauri/tauri.conf.json")).version,
+              "src/version.ts": /VERSION = "([^"]+)"/.exec(fs.readFileSync("src/version.ts", "utf8"))[1],
+            };
+            for (const [f, v] of Object.entries(got)) if (v !== want) { console.error(`${f} is ${v}, tag is ${want}`); process.exit(1); }
+          ' "$tag"
+
+      # 1. The standalone engine (Node.js single executable application).
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
+      - name: Build the standalone executable
+        run: node scripts/build-sea.mjs --out "out/crenel-${{ matrix.target }}${{ matrix.exe }}"
+      - name: Smoke test (version, scan, serve)
+        run: node scripts/smoke-binary.mjs "out/crenel-${{ matrix.target }}${{ matrix.exe }}"
+      - name: Size
+        run: ls -l out/
+
+      # 2. The desktop app, with the engine as its sidecar.
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
+      - name: Engine as the Tauri sidecar
+        run: |
+          mkdir -p desktop/src-tauri/binaries
+          cp "out/crenel-${{ matrix.target }}${{ matrix.exe }}" "desktop/src-tauri/binaries/crenel-${{ matrix.triple }}${{ matrix.exe }}"
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: desktop
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            desktop/src-tauri/target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+      - name: Build the desktop app
+        working-directory: desktop
+        env:
+          # AppImage tooling runs without FUSE on the runners.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
+        run: pnpm tauri build --ci --bundles "${{ matrix.bundles }}" -- --locked
+      - name: Collect the bundles
+        run: |
+          b=desktop/src-tauri/target/release/bundle
+          find "$b" -maxdepth 2 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \) -exec cp {} out/ \;
+          ls -l out/
+
+      # 3. Linux x64: open the AppImage under Xvfb on the example project,
+      # take a screenshot and a short recording of the window (proof it runs).
+      - name: Screenshot and recording of the app (Xvfb)
+        if: matrix.target == 'linux-x64'
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb ffmpeg dbus-x11
+          proj="$RUNNER_TEMP/demo"; mkdir -p "$proj"
+          cp examples/crenel.config.yaml "$proj/"; cp -r examples/vulnerable-app "$proj/"
+          app=$(ls out/*.AppImage | head -1); chmod +x "$app"
+          mkdir -p proof
+          Xvfb :99 -screen 0 1440x900x24 >/dev/null 2>&1 &
+          export DISPLAY=:99 CRENEL_PROJECT="$proj" APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 LIBGL_ALWAYS_SOFTWARE=1
+          sleep 2
+          dbus-launch --exit-with-session "$app" > proof/app.log 2>&1 &
+          ffmpeg -loglevel error -y -f x11grab -video_size 1440x900 -framerate 10 -i :99 -t 20 -c:v libx264 -preset veryfast -crf 30 -pix_fmt yuv420p proof/crenel-desktop-linux.mp4
+          ffmpeg -loglevel error -y -f x11grab -video_size 1440x900 -i :99 -frames:v 1 proof/crenel-desktop-linux.png
+          pgrep -fa crenel || true
+          pkill -f 'crenel' || true
+          ls -l proof/
+          cat proof/app.log | tail -40
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.target == 'linux-x64'
+        with:
+          name: proof-desktop-linux
+          path: proof/
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: crenel-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+          compression-level: 0 # executables and installers are already compressed or incompressible enough
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # artifact attestations (Sigstore)
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: crenel-*
+          path: release
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: release
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+      # Attestations are free on public repositories (private ones need GitHub
+      # Enterprise Cloud): skipped while this repository is private.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: release/*
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHA256SUMS
+          path: release/SHA256SUMS
+
+  publish:
+    # Only for a pushed tag, and only as a draft: the owner reviews and publishes.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: checksums
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the draft release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: crenel-*
+          path: release
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: SHA256SUMS
+          path: release
+      - name: Checksums still match
+        working-directory: release
+        run: sha256sum -c SHA256SUMS
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --draft --verify-tag --title "Crenel $TAG" --generate-notes release/*
