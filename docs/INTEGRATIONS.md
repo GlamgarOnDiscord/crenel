@@ -57,6 +57,27 @@ The Action runs `crenel scan --sarif` and uploads with `github/codeql-action/upl
 - the documented limits are enforced: at most 25,000 results and 25,000 rules per run, 20 tags per rule, and 10 MB gzipped for the file (over it, leads are dropped first, then the lowest severities, and the run says so in `toolExecutionNotifications`);
 - `executionSuccessful` is false when a check failed, so a partial run is not read as a clean one.
 
+### Checked before upload
+
+`src/report/sarif-validate.ts` checks a SARIF file against the official [OASIS SARIF 2.1.0 JSON schema](https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json) (vendored in `src/report/schemas/`) and against every requirement and limit of GitHub's page listed above (required rule fields, one location with a repository-relative uri and a start line, a single uri scheme, `primaryLocationLineHash`, counts, 10 MB gzipped). The test suite runs it on a real scan of the bundled example, and the `security` workflow runs it on the file it is about to upload:
+
+```bash
+npx tsx scripts/validate-sarif.ts crenel.sarif
+```
+
+### Where code scanning is available
+
+Code scanning accepts uploads on public repositories, and on private ones only with GitHub Code Security. Crenel's own repository is private without it, so its `security` workflow validates the SARIF, keeps it as the `crenel-sarif` workflow artifact, and lets the upload step fail (`continue-on-error`) instead of the job. The job also grants `actions: read`, which `upload-sarif` needs on a private repository to read its workflow run. **The real upload to code scanning is therefore verified only once the repository is public or has Code Security.** To check it then, after a `security` run:
+
+```bash
+gh api repos/GlamgarOnDiscord/crenel/code-scanning/analyses --jq '.[] | select(.tool.name == "Crenel") | {created_at, category, results_count, rules_count, warning}'
+gh api 'repos/GlamgarOnDiscord/crenel/code-scanning/alerts?tool_name=Crenel&per_page=5' --jq '.[] | {rule: .rule.id, severity: .rule.security_severity_level, path: .most_recent_instance.location.path}'
+```
+
+Until then the same API answers `403 Code scanning is not enabled for this repository`.
+
+`upload-sarif` also recomputes `primaryLocationLineHash` from the file contents and warns ("found existing inconsistent fingerprint value") where it differs from Crenel's id-based value; it keeps Crenel's value, which is the point: findings anchored to the same config line keep separate identities.
+
 ## GitHub pull request comment
 
 References: [REST issue comments](https://docs.github.com/en/rest/issues/comments) (a pull request is an issue for comments), [permissions for these endpoints](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens), [`permissions` in workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), [GITHUB_TOKEN least privilege](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication).

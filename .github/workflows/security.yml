@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   security-events: write # required to upload SARIF
+  actions: read # upload-sarif reads the workflow run (required on private repositories)
 
 jobs:
   crenel:
@@ -31,7 +32,22 @@ jobs:
       # Scan and emit SARIF. Does not fail the job here; gate on a baseline in
       # a real project with: node dist/cli.js scan --baseline crenel-baseline.json
       - run: node dist/cli.js scan --config examples/crenel.config.yaml --sarif crenel.sarif || true
+      # Check the file before GitHub sees it: OASIS SARIF 2.1.0 schema and
+      # GitHub's documented code scanning requirements (docs/INTEGRATIONS.md).
+      - run: npx tsx scripts/validate-sarif.ts crenel.sarif
+      # Always inspectable, even where code scanning is not available.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: crenel-sarif
+          path: crenel.sarif
+          if-no-files-found: error
+          retention-days: 14
+      # Code scanning exists on public repositories, and on private ones only
+      # with GitHub Code Security. This repository is private without it, so
+      # the upload is allowed to fail here; drop continue-on-error in yours.
       - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        continue-on-error: true
         with:
           sarif_file: crenel.sarif
           category: crenel
