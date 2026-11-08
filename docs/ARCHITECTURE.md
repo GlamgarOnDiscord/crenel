@@ -44,6 +44,51 @@ LLM triage (`agent/triage.ts`) can advise on a lead but can never set `proven`.
 This is the core rule behind every design choice: the tool is trustworthy
 because its verdicts do not come from a model.
 
+## Free exploration
+
+Beyond the deterministic checks, `crenel explore` (or an agent run with `explore:
+assist|full` in the config) lets a model choose its own requests and reads inside
+the declared perimeter. The model only **claims**: it submits a `claim.submit` with
+a class and a `detail`, and a validator in `agent/validators.ts` replays it. Any
+`state` or `proven` the model writes is ignored; at most 12 claims per exploration.
+Budgets (`maxCalls`, `maxRequests`, `maxTokens`, `maxMs`, `maxToolRuns`) live in
+`options.explore`.
+
+Every finding is proven by a **generic oracle**, never a target-specific
+signature: a differential, a reflection, a computation, an out-of-band callback,
+real execution or a file signature. Each oracle also has guards against false
+positives: a parameter the server ignores gives no differential, no reflection and
+no callback, so it is never proven (at best a lead, which never gates CI).
+
+| Claim class | What it proves | Oracle |
+|---|---|---|
+| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection in one parameter. REST query or form body, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
+| `explore.ssrf` | The server fetches a URL taken from a parameter (REST or GraphQL) | out-of-band: Crenel starts a listener and injects a callback URL with a nonce; a hit proves it |
+| `explore.stored-xss` | Markup sent through a store request is served unescaped by another request | reflection, on the retrieve response |
+| `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
+| `explore.lfi` | Path traversal reading a system file | file signature (`/etc/passwd` or `win.ini` content) over several traversal encodings |
+| `explore.jwt-none` | A forged unsigned `alg:none` token is accepted | differential: accepted where the anonymous request is denied |
+
+The older classes (`explore.replay`, `explore.cross-actor`, `explore.secret`,
+`explore.file-match`) replay a request, compare two actors, check a secret in a
+response and match a line in a file.
+
+Options for the classes above, under `options.explore`:
+
+- `ssrfCallbackHost`: an address the **target** can reach back (default
+  `127.0.0.1`, which only works when the target runs on the same host).
+  `ssrfCallbackPort` fixes the callback port (default: an ephemeral one, which
+  fits single-URL SSRF only).
+- `domXssPlaywright` and `domXssBrowser`: path to Playwright's entry and to a
+  Chromium executable. The environment variables `CRENEL_PLAYWRIGHT` and
+  `CRENEL_BROWSER` work too.
+
+**The browser is an optional dependency.** Playwright is imported dynamically.
+Without it, `explore.dom-xss` stays a lead ("no browser") and everything else
+works. A DOM-XSS claim takes `{url, param}` (payload in the query, or in the
+fragment of an SPA hash route) or a `url` containing `__INJECT__`, for sinks in a
+hash or path (e.g. `http://app/#/search?q=__INJECT__`).
+
 ## From finding to "stays fixed"
 
 `generate/tests.ts` turns each finding into a regression test. Once that test is
