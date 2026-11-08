@@ -26,6 +26,7 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
+import { massAssignOracle, buildBody } from "./massassign.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -933,7 +934,53 @@ const exploreJwtNoneValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator];
+/* ---------------- explore.mass-assignment ---------------- */
+// OWASP API6. The model names an update endpoint, a field the client should not
+// control (role, isAdmin, credits, plan, verified…) and a value. This validator
+// proves the mechanism with a differential and a control, never a field-name
+// signature: read the actor's own object (baseline), update WITHOUT the field
+// (control: it must stay the same), update WITH field=value (the re-read must
+// show exactly that value). Whether the field is privileged is the model's
+// reading; what is proven is that the API accepted and persisted a body field.
+// Mutating, on the actor's own object, so it needs active mode. See massassign.test.ts.
+const exploreMassAssignValidator: Validator = {
+  class: "explore.mass-assignment",
+  name: "mass-assignment (body field accepted and persisted)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (!env.scope.allowActiveTesting) return no("mass-assignment mutates the object: needs allowActiveTesting");
+    if (typeof d.url !== "string") return no("need detail.url (the update endpoint)");
+    if (typeof d.field !== "string" || !d.field) return no("need detail.field (the field the client should not control)");
+    if (d.value === undefined) return no("need detail.value (the value to inject)");
+    const upUrl = resolveExploreUrl(d.url, env.stagingUrl);
+    const readUrl = resolveExploreUrl(typeof d.readUrl === "string" ? d.readUrl : d.url, env.stagingUrl);
+    if (!upUrl || !readUrl) return no("not http(s) URLs");
+    if (!env.scope.isHostAllowed(upUrl) || !env.scope.isHostAllowed(readUrl)) return no("off-scope host");
+    const actor = parseActor(d.as);
+    const method = typeof d.method === "string" ? d.method : "PUT";
+    const bodyType: "json" | "form" = d.bodyType === "form" ? "form" : "json";
+    const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
+    const readBack = async () => { const r = await sendAs({ url: d.url as string, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
+    const writeThen = async (extra: Record<string, unknown> | null) => {
+      const { body, contentType } = buildBody(base, extra, bodyType);
+      await sendAs({ url: d.url as string, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
+    };
+    let baseline, control, injectedRead;
+    try {
+      baseline = await readBack();
+      await writeThen(null);
+      control = await readBack();
+      await writeThen({ [d.field]: d.value });
+      injectedRead = await readBack();
+    } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = massAssignOracle({ field: d.field, injected: d.value, baseline, control, injectedRead });
+    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor ? actor.toUpperCase() : "anon"}`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason);
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

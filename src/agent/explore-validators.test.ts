@@ -342,3 +342,52 @@ test("explore.jwt-none proves broken JWT verification, denies a server that reje
     } finally { srv.close(); rmSync(dir,{recursive:true,force:true}); }
   }
 });
+
+test("mass-assignment: a vulnerable update binds the privileged field (proven), a safe one stays a lead", async () => {
+  for (const vulnerable of [true, false]) {
+    // Per-actor state; GET reads it, PUT binds body fields (all when vulnerable, only `name` when safe).
+    const state: Record<string, unknown> = { name: "a", role: "user" };
+    const srv = createServer((req, res) => {
+      const who = req.headers.authorization === "Bearer tok-a" ? "a" : null;
+      const u = new URL(req.url!, "http://x");
+      const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+      if (!who) return json(401, {});
+      if (u.pathname !== "/profile") return json(404, {});
+      if (req.method === "GET") return json(200, state);
+      let chunks = ""; req.on("data", (c) => (chunks += c)); req.on("end", () => {
+        let body: Record<string, unknown> = {}; try { body = JSON.parse(chunks || "{}"); } catch { /* ignore */ }
+        if (vulnerable) Object.assign(state, body);
+        else if (typeof body.name === "string") state.name = body.name; // whitelist: role is never bound
+        json(200, state);
+      });
+      return undefined;
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-ma-"));
+    try {
+      const env: ValidatorEnv = {
+        scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
+        projectDir: dir, stagingUrl: base, checks: [],
+        options: { "authz-matrix": { accounts: { a: { token: "tok-a" } } } },
+      };
+      const v = await validateClaim(claim("explore.mass-assignment", { url: "/profile", field: "role", value: "admin", update: { name: "a2" }, as: "a" }), env);
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.equal(v.ceiling, "medium"); assert.equal(state.role, "admin"); }
+      else { assert.equal(v.state, "unproven", v.reason); assert.equal(state.role, "user"); }
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test("mass-assignment: without active mode it refuses", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-ma2-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: "http://127.0.0.1:1" }),
+      projectDir: dir, stagingUrl: "http://127.0.0.1:1", checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a" } } } },
+    };
+    const v = await validateClaim(claim("explore.mass-assignment", { url: "/profile", field: "role", value: "admin", as: "a" }), env);
+    assert.equal(v.state, "unproven");
+    assert.match(v.reason, /active/i);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -68,6 +68,7 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 | `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
 | `explore.lfi` | Path traversal reading a system file | file signature (`/etc/passwd` or `win.ini` content) over several traversal encodings |
 | `explore.jwt-none` | A forged unsigned `alg:none` token is accepted | differential: accepted where the anonymous request is denied |
+| `explore.mass-assignment` | A body field the client should not set is accepted and persisted | differential: the actor's own re-read shows the injected value; a control update without the field leaves it unchanged (active mode) |
 
 The older classes (`explore.replay`, `explore.cross-actor`, `explore.secret`,
 `explore.file-match`) replay a request, compare two actors, check a secret in a
