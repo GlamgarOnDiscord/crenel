@@ -32,7 +32,12 @@ export class SecretStore {
   }
 
   private write(data: Record<string, string>): void {
-    mkdirSync(join(this.path, ".."), { recursive: true });
+    const dir = join(this.path, "..");
+    mkdirSync(dir, { recursive: true });
+    // .crenel/ may sit inside a repository: keep the secrets out of git even
+    // when the project's own .gitignore does not list .crenel/.
+    const ignore = join(dir, ".gitignore");
+    if (!existsSync(ignore)) writeFileSync(ignore, "# written by Crenel: never commit integration secrets\nsecrets.json\nsecrets.json.tmp\n");
     const tmp = this.path + ".tmp";
     writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
     chmodSync(tmp, 0o600); // the umask cannot widen it

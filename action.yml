@@ -1,15 +1,21 @@
 # Crenel as a GitHub Action: scan, upload SARIF to code scanning, and fail the
 # job only on a PROVEN finding at or above `fail-on`. Leads never fail a build.
 #
-#   permissions: { contents: read, security-events: write }
+#   permissions:
+#     contents: read
+#     security-events: write   # upload-sarif (code scanning)
+#     pull-requests: write     # only with pr-comment: "true"
 #   steps:
 #     - uses: actions/checkout@<sha>
 #     - uses: <owner>/crenel@<sha>
 #       with:
 #         config: crenel.config.yaml
+#         pr-comment: "true"
 #
 # Offline and read-only unless your config turns on active testing for hosts
-# you declared. No account, no model, no token sent anywhere.
+# you declared. No account, no model. The only token used is the workflow's
+# GITHUB_TOKEN, by GitHub's own upload-sarif action and, when pr-comment is on,
+# for one comment on the pull request (docs/INTEGRATIONS.md).
 name: Crenel scan
 description: Defensive security harness for SaaS. Proven findings only, with a replayable proof each.
 branding:
@@ -28,6 +34,12 @@ inputs:
   upload-sarif:
     description: Upload the SARIF to GitHub code scanning (needs security-events write)
     default: "true"
+  report:
+    description: Where to write the JSON report (read by the PR comment)
+    default: crenel.json
+  pr-comment:
+    description: On pull_request events, keep one comment summarising the proven findings (needs pull-requests write; skipped on forks, whose token is read-only)
+    default: "false"
 runs:
   using: composite
   steps:
@@ -47,15 +59,24 @@ runs:
         CRENEL_CONFIG: ${{ inputs.config }}
         CRENEL_SARIF: ${{ inputs.sarif }}
         CRENEL_FAIL_ON: ${{ inputs.fail-on }}
+        CRENEL_REPORT: ${{ inputs.report }}
       run: |
         set +e
-        node "$GITHUB_ACTION_PATH/dist/cli.js" scan --config "$CRENEL_CONFIG" --sarif "$CRENEL_SARIF" --fail-on "$CRENEL_FAIL_ON"
+        node "$GITHUB_ACTION_PATH/dist/cli.js" scan --config "$CRENEL_CONFIG" --sarif "$CRENEL_SARIF" --out "$CRENEL_REPORT" --fail-on "$CRENEL_FAIL_ON"
         echo "exit=$?" >> "$GITHUB_OUTPUT"
     - if: ${{ inputs.upload-sarif == 'true' && always() }}
       uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
       with:
         sarif_file: ${{ inputs.sarif }}
         category: crenel
+    # Never fails the job: a read-only token or an API error is a warning.
+    - if: ${{ always() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        CRENEL_CONFIG: ${{ inputs.config }}
+        CRENEL_REPORT: ${{ inputs.report }}
+      run: node "$GITHUB_ACTION_PATH/dist/cli.js" github-comment --report "$CRENEL_REPORT" --config "$CRENEL_CONFIG"
     - shell: bash
       env:
         CRENEL_EXIT: ${{ steps.scan.outputs.exit }}

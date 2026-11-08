@@ -45,6 +45,7 @@ test("secrets: written 0600, env var wins, a group-readable file is refused", { 
   const s = new SecretStore(dir, {});
   s.set("slack.webhookUrl", SLACK_URL);
   assert.equal(statSync(s.path).mode & 0o777, 0o600);
+  assert.match(readFileSync(join(dir, ".gitignore"), "utf8"), /^secrets\.json$/m);
   assert.deepEqual(s.get("slack.webhookUrl", "CRENEL_SLACK_WEBHOOK_URL"), { value: SLACK_URL, source: "file" });
   const withEnv = new SecretStore(dir, { CRENEL_SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/A/B/C" });
   assert.equal(withEnv.get("slack.webhookUrl", "CRENEL_SLACK_WEBHOOK_URL").source, "env");
