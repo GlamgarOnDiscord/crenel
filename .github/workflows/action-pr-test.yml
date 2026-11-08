@@ -1,0 +1,20 @@
+# Throwaway: exercises action.yml (pr-comment, locale fr, GITHUB_TOKEN fallback). Not merged.
+name: action pr-comment test
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  crenel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./
+        continue-on-error: true
+        with:
+          config: examples/crenel.config.yaml
+          upload-sarif: "false"
+          pr-comment: "true"
+          locale: fr
+      - run: cat examples/.crenel/audit.jsonl
