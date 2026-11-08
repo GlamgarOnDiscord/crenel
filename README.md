@@ -13,7 +13,7 @@ proves each one with a replayable request, and turns it into a regression test.
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![Checks](https://img.shields.io/badge/checks-42-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-354%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Tests](https://img.shields.io/badge/tests-368%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -30,6 +30,32 @@ Apps shipped fast, often with AI, keep making the same mistakes: a server key in
 - **Authorization done right.** Two test accounts, a declarative matrix, and a response-body oracle with a negative control. A `200` alone is never a leak.
 - **Fixed stays fixed.** Every proven flaw becomes a test in your CI.
 - **Scope in code, not in a prompt.** Crenel only reaches hosts you declare. Active probes are opt-in. Writes (active mode) go only to staging objects you declare, and each one is restored or reported.
+
+## Install
+
+Every release on [GitHub Releases](https://github.com/GlamgarOnDiscord/crenel/releases) carries a single-file `crenel` executable (no Node.js needed; the console is inside it) and a desktop app:
+
+| Platform | Command-line executable | Desktop app |
+|---|---|---|
+| Linux x64 | `crenel-linux-x64` | `Crenel_<version>_amd64.AppImage`, `.deb` |
+| Linux arm64 | `crenel-linux-arm64` | `Crenel_<version>_aarch64.AppImage`, `_arm64.deb` |
+| Windows x64 | `crenel-windows-x64.exe` | `Crenel_<version>_x64-setup.exe`, `_x64_en-US.msi` |
+| macOS Apple silicon | `crenel-macos-arm64` | `Crenel_<version>_aarch64.dmg` |
+| macOS Intel | `crenel-macos-x64` | `Crenel_<version>_x64.dmg` |
+
+Download links follow `https://github.com/GlamgarOnDiscord/crenel/releases/download/<tag>/<file>`. Check the file against the release's `SHA256SUMS` before running it:
+
+```bash
+TAG=v0.1.0; F=crenel-linux-x64
+curl -fLO "https://github.com/GlamgarOnDiscord/crenel/releases/download/$TAG/$F"
+curl -fLO "https://github.com/GlamgarOnDiscord/crenel/releases/download/$TAG/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+chmod +x "$F" && ./"$F" --version
+```
+
+On Windows (PowerShell): `(Get-FileHash .\crenel-windows-x64.exe -Algorithm SHA256).Hash` and compare with its line in `SHA256SUMS`. Once the repository is public, `gh attestation verify <file> -R GlamgarOnDiscord/crenel` also checks the build provenance.
+
+**The binaries are not code signed** (signing costs money). Windows SmartScreen shows "Windows protected your PC": *More info* then *Run anyway*. macOS Gatekeeper refuses an app downloaded from the internet: right-click the app, *Open*, then *Open* again (or System Settings > Privacy & Security > *Open Anyway*); for the command-line file, `xattr -d com.apple.quarantine ./crenel-macos-arm64`; for the app, `xattr -cr /Applications/Crenel.app`. Only do this for a file whose checksum matched. Details in [docs/RELEASE.md](docs/RELEASE.md) and [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Quick start
 
