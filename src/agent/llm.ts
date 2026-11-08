@@ -63,3 +63,23 @@ export async function detectClaude(): Promise<boolean> {
 
 /** Rough token estimate for budgets (4 characters per token). */
 export const estimateTokens = (s: string) => Math.ceil(s.length / 4);
+
+/**
+ * A recorded model: answers with `responses` in order, then `{"calls":[],"done":true}`.
+ * For tests and the bench (a scripted exploration replayed deterministically, so
+ * the harness's tools and validators are measured without spending a model).
+ * Every prompt it received is kept in `prompts`.
+ */
+export function scriptedLlm(responses: string[], label = "scripted"): Llm & { prompts: string[] } {
+  const prompts: string[] = [];
+  let i = 0;
+  return {
+    label,
+    prompts,
+    async ask(prompt, call) {
+      call?.signal?.throwIfAborted();
+      prompts.push(prompt);
+      return responses[i++] ?? '{"calls":[],"done":true}';
+    },
+  };
+}

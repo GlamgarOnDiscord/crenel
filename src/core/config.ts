@@ -44,6 +44,13 @@ export const ConfigSchema = z.object({
       if (!hosts.has(h.toLowerCase().trim())) ctx.addIssue({ code: "custom", path: ["access", h], message: `${h} n'est pas dans allowedHosts` });
     }
   }),
+  /**
+   * Free exploration on top of the fixed plan, when a model is enabled: off,
+   * assist (read tools, small budget) or full (adds the toolbox with free
+   * arguments and writes under the gate). Unset: assist with a model, off
+   * without. Budgets in options.explore. See src/agent/explore.ts.
+   */
+  explore: z.enum(["off", "assist", "full"]).optional(),
   /** Which checks to run. Empty means "all read-only checks". */
   checks: z.array(z.string()).default([]),
   /** Per-check options, keyed by check name. */

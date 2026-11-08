@@ -51,6 +51,10 @@ export const TOOLS: Record<string, ToolSpec> = {
   "active.writes": { name: "active.writes", network: true, active: true, mutating: false, writes: true },
   "tests.generate": { name: "tests.generate", network: false, active: false, mutating: false },
   "llm.advise": { name: "llm.advise", network: false, active: false, mutating: false },
+  // Free exploration (a model picks the requests; the perimeter is the same).
+  "explore.http": { name: "explore.http", network: true, active: false, mutating: false },
+  "explore.write": { name: "explore.write", network: true, active: true, mutating: false, writes: true },
+  "explore.toolbox": { name: "explore.toolbox", network: true, active: false, mutating: false },
   // Optional toolbox (containers whose only exit is the scoped egress proxy).
   "tools.trufflehog": { name: "tools.trufflehog", network: false, active: false, mutating: false },
   "tools.katana": { name: "tools.katana", network: true, active: false, mutating: false },

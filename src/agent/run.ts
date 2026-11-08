@@ -39,9 +39,10 @@ import { uidOf, type AuthzMatrix, type StateStore, type StoredFinding, type Stor
 import { z } from "zod";
 import { backendFor } from "../toolbox/backend.js";
 import { httpxTargets, runTool, toolboxOptions, type ToolName } from "../toolbox/run.js";
+import { Explorer, exploreBudget, resolveExploreMode, type ExploreMode } from "./explore.js";
 
 export type Decision = "once" | "always" | "deny";
-export type Intent = "full" | "authz" | "secrets" | "tests" | "chat" | "goal" | "tools";
+export type Intent = "full" | "authz" | "secrets" | "tests" | "chat" | "goal" | "tools" | "explore";
 
 // Web-facing event shapes (mirror web/src/lib/types.ts AgentEvent).
 type Sev = "crit" | "high" | "med" | "low" | "info";
@@ -84,6 +85,7 @@ const LABEL: Record<string, string> = {
   "authz.matrix": "Prouver l'isolation entre comptes",
   "validate.claims": "Rejouer chaque preuve (validateurs)",
   "tests.generate": "Générer les tests de régression",
+  explore: "Explorer librement avec le modèle (outils génériques, chaque affirmation rejouée par un validateur)",
   "tools.trufflehog": "trufflehog sur le projet (conteneur sans réseau)",
   "tools.katana": "Découvrir les routes avec katana (conteneur, proxy à périmètre)",
   "tools.nuclei": "Modèles nuclei non intrusifs (conteneur, proxy à périmètre)",
@@ -99,6 +101,7 @@ export function intentOf(prompt: string): Intent {
   if (s.startsWith("/secrets")) return "secrets";
   if (s.startsWith("/test")) return "tests";
   if (s.startsWith("/tools")) return "tools";
+  if (s.startsWith("/explore")) return "explore";
   if (s.startsWith("/")) return "chat";
   if (/\bscan|analyse|audit|premier scan/.test(s)) return "full";
   if (/compte a|compte b|entre comptes|isolation|autorisation|authz|tenant/.test(s)) return "authz";
@@ -123,6 +126,8 @@ export interface RunDeps {
    * calls go to declared destinations, never to scan targets.
    */
   notify?: (findings: StoredFinding[], run: string, counts: { proven: number; leads: number; fixed: number }) => Promise<{ records: Record<string, unknown>[]; skipped: string[] }>;
+  /** Toolbox backend for exploration's toolbox.run (tests). Defaults to options.toolbox's. */
+  toolboxBackend?: import("../toolbox/backend.js").Backend;
   /** Run-level budget. */
   maxProbes?: number;
   maxMs?: number;
@@ -134,6 +139,8 @@ export interface RunOptions {
   model?: string;
   goal?: GoalSpec;
   id?: string;
+  /** Free exploration for this run (off | assist | full); the config's choice when omitted. */
+  explore?: ExploreMode;
 }
 
 const ms = (t: number) => (t < 1000 ? `${t} ms` : `${(t / 1000).toFixed(1).replace(".", ",")} s`);
@@ -161,6 +168,8 @@ export class AgentRun {
   private stopReason = "";
   private readonly started = Date.now();
   private readonly accessReported = new Set<string>();
+  /** Free exploration mode of this run (off without a model). */
+  readonly explore: ExploreMode;
 
   constructor(private readonly deps: RunDeps, private readonly opts: RunOptions) {
     this.id = opts.id ?? `r-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomBytes(4).toString("hex")}`;
@@ -168,6 +177,7 @@ export class AgentRun {
     this.goal = opts.goal ?? (this.intent === "goal" ? parseGoal(opts.prompt.replace(/^\/goal\s*/i, "")) : undefined);
     this.title = opts.prompt.length > 120 ? opts.prompt.slice(0, 118) + "…" : opts.prompt;
     this.journal = new Journal(deps.store.runPath(this.id), this.id);
+    this.explore = resolveExploreMode(deps.config, !!deps.llm, opts.explore);
     const cfg = deps.config;
     const configDir = dirname(resolve(deps.configPath));
     this.projectDir = isAbsolute(cfg.projectDir) ? cfg.projectDir : resolve(configDir, cfg.projectDir);
@@ -235,7 +245,7 @@ export class AgentRun {
   /* ---------- the run ---------- */
 
   async start(): Promise<void> {
-    this.journal.append("run.start", { prompt: this.opts.prompt, title: this.title, mode: this.opts.mode, intent: this.intent, model: this.opts.model ?? null, llm: this.deps.llm?.label ?? null });
+    this.journal.append("run.start", { prompt: this.opts.prompt, title: this.title, mode: this.opts.mode, intent: this.intent, model: this.opts.model ?? null, llm: this.deps.llm?.label ?? null, explore: this.explore });
     this.ui({ kind: "user", text: this.opts.prompt });
     this.phase("running");
     let outcome = "done";
@@ -268,15 +278,17 @@ export class AgentRun {
     // The optional toolbox: in a full scan when options.toolbox.enabled, always on /tools.
     const tools = ["tools.trufflehog", ...(httpxTargets(this.deps.config.scope.allowedHosts).length ? ["tools.httpx"] : []), ...(this.scope.stagingUrl ? ["tools.katana", "tools.nuclei"] : [])];
     if (intent === "tools") return [...tools, ...tail];
+    const explore = this.explore !== "off" ? ["explore"] : [];
+    if (intent === "explore") return explore.length ? ["explore", "validate.claims"] : [];
     const review = this.deps.llm && this.scope.stagingUrl && scan.includes("scan.web") ? ["review.bundle"] : [];
-    return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...active, ...tail];
+    return [...scan, ...review, ...(this.toolboxEnabled() ? tools : []), ...(authzOn ? ["authz.matrix"] : []), ...active, ...explore, ...tail];
   }
 
   /** One pass of the plan. Returns the findings it produced, validated. */
   private async plan(intent: Intent, iteration = 0): Promise<StoredFinding[]> {
     const steps = this.steps(intent);
     if (steps.length === 0) {
-      this.ui({ kind: "say", text: "Rien à rejouer: aucune ressource n'est déclarée dans options.authz-matrix de la config." });
+      this.ui({ kind: "say", text: intent === "explore" ? "Exploration coupée: elle demande un modèle (claude -p) et explore différent de off (config ou console)." : "Rien à rejouer: aucune ressource n'est déclarée dans options.authz-matrix de la config." });
       return [];
     }
     if (iteration <= 1) {
@@ -299,6 +311,7 @@ export class AgentRun {
       if (tool === "authz.matrix") { claims.push(...(await this.authzTool(found, ran))); continue; }
       if (tool === "active.writes") { toolFound.push(...(await this.activeTool(ran))); continue; }
       if (tool === "review.bundle") { toolFound.push(...(await this.reviewTool())); ran.add("bundle-review"); continue; }
+      if (tool === "explore") { toolFound.push(...(await this.exploreTool(outputs))); ran.add("explore"); continue; }
       if (tool.startsWith("tools.")) {
         const out = await this.toolboxTool(tool.slice(6) as ToolName);
         toolFound.push(...out.found);
@@ -441,6 +454,7 @@ export class AgentRun {
     const mode = this.opts.mode === "readonly" ? "Mode lecture seule: aucune requête ne sortira." : this.opts.mode === "bypass" ? "Mode bypass: je n'interromps pas pour demander, le périmètre reste appliqué et chaque sonde est inscrite à l'audit." : "Je demanderai votre accord avant toute requête vers un hôte.";
     return `Plan déterministe pour « ${intent} ». D'abord ce qui se lit sans réseau (bundle, dépôt, lockfile). ` +
       (net ? `Ensuite les vérifications réseau, seulement vers ${cfg.allowedHosts.join(", ") || "(aucun hôte déclaré)"}; ${cfg.allowActiveTesting ? "les sondes actives sont permises par la config" : "les sondes actives sont coupées dans la config (allowActiveTesting: false)"}. ` : "") +
+      (steps.includes("explore") ? `Puis une exploration libre (${this.explore}): le modèle choisit ses requêtes et ses lectures, dans le même périmètre et sous budget. ` : "") +
       `${mode} Rien n'est marqué prouvé sans qu'un validateur ait rejoué la preuve lui-même.`;
   }
 
@@ -491,6 +505,36 @@ export class AgentRun {
   private inline(fs: Finding[], claimed = true): InlineFinding[] {
     // Before validation, nothing is shown as proven: a check's output is a claim.
     return fs.slice(0, 8).map((f) => ({ sev: SEV[f.severity], text: f.title, state: claimed ? "lead" : webState(f.state), id: uidOf(f.id) }));
+  }
+
+  /**
+   * Free exploration: the model picks its own requests, searches and reads,
+   * through the same gate, scoped client, journal and kill switch, within the
+   * budgets of options.explore. Its claims are decided by the generic
+   * validators; what they cannot prove is kept as a lead.
+   */
+  private async exploreTool(outputs: string[]): Promise<{ f: Finding; v?: ClaimVerdict }[]> {
+    const llm = this.deps.llm;
+    const mode = this.explore;
+    if (!llm || mode === "off") return [];
+    const t0 = Date.now();
+    let budget;
+    try { budget = exploreBudget(this.deps.config, mode); } catch (err) {
+      this.ui({ kind: "note", tone: "warn", text: `explore: ${(err as Error).message}` });
+      return [];
+    }
+    const input = JSON.stringify({ mode, budget }, null, 2);
+    const uid = this.ui({ kind: "tool", tool: "explore", args: `${mode} · ${llm.label}`, input, lines: ["…"], dur: "" });
+    const explorer = new Explorer({
+      llm, mode, config: this.deps.config, projectDir: this.projectDir, budget, signal: this.ac.signal, checks: this.checks,
+      gate: (tool, reqs) => this.gated(tool, reqs), onNet: (e) => this.onNet(e), emit: (type, data) => this.journal.append(type, data),
+      userPrompt: this.opts.prompt, context: outputs, backend: this.deps.toolboxBackend,
+    });
+    const r = await explorer.run();
+    this.tokens += r.tokens;
+    this.unattended = false;
+    this.uiUpdate(uid, { kind: "tool", tool: "explore", args: `${mode} · ${llm.label}`, input, lines: r.lines, findings: r.found.slice(0, 8).map(({ f }) => ({ sev: SEV[f.severity], text: f.title, state: webState(f.state), id: uidOf(f.id) })), dur: ms(Date.now() - t0) });
+    return r.found;
   }
 
   /** The model reads every chunk the site serves; what it says stays a lead. */
@@ -757,7 +801,8 @@ export class AgentRun {
   /** Persist, generate tests, summarise. */
   private async finish(validated: StoredFinding[], ran: Set<string>, genTests: boolean): Promise<StoredFinding[]> {
     const store = this.deps.store;
-    const merged = validated.length || ran.size ? store.mergeFindings(this.id, validated.map((f) => redactDeep(f)), [...ran]) : store.findings().items;
+    // Exploration is not a check: a finding it does not find again is not "fixed", it was just not looked for.
+    const merged = validated.length || ran.size ? store.mergeFindings(this.id, validated.map((f) => redactDeep(f)), [...ran].filter((c) => c !== "explore")) : store.findings().items;
     if (ran.size) {
       store.appendAudit({
         at: new Date(this.started).toISOString(), kind: "scan", run: this.id, project: this.deps.config.project,
@@ -772,7 +817,7 @@ export class AgentRun {
     const fixed = merged.filter((f) => f.state === "fixed").length;
     this.journal.append("results", { proven, leads, fixed, ran: [...ran] });
     if (this.deps.notify && !this.aborted && ran.size) await this.integrations(merged, { proven, leads, fixed });
-    if (!this.aborted && this.intent !== "goal") await this.summary(merged);
+    if (!this.aborted && this.intent !== "goal") await this.summary(merged, this.intent !== "explore");
     return merged;
   }
 
@@ -817,13 +862,13 @@ export class AgentRun {
     });
   }
 
-  private async summary(findings: StoredFinding[]): Promise<void> {
+  private async summary(findings: StoredFinding[], useModel = true): Promise<void> {
     const proven = findings.filter((f) => f.state === "proven");
     const leads = findings.filter((f) => f.state === "unproven");
     const crit = proven.filter((f) => f.severity === "critical").length;
     let text = `${proven.length} faille(s) prouvée(s)${crit ? `, dont ${crit} critique(s)` : ""}, ${leads.length} piste(s) non prouvée(s) (pas de preuve, pas de rapport: elles restent des pistes). ` +
       (proven.length ? `À traiter d'abord: ${proven.slice(0, 3).map((f) => f.title).join(" · ")}.` : "Rien de prouvé sur ce périmètre.");
-    if (this.deps.llm && proven.length + leads.length > 0) {
+    if (useModel && this.deps.llm && proven.length + leads.length > 0) {
       const data = findings.slice(0, 30).map((f) => `${f.state} | ${f.severity} | ${f.title} | ${f.location}`).join("\n");
       const prompt = `${UNTRUSTED_PREAMBLE}\nRésume pour un fondateur, en français, en 3 phrases maximum, quoi corriger d'abord. Les états (proven/unproven) sont décidés par des validateurs, ne les change pas.\n${fence(untrusted("findings", data))}`;
       try {
@@ -861,7 +906,7 @@ export class AgentRun {
       const f = store.find((x) => s.includes(x.uid)) ?? store.find((x) => words.some((w) => x.title.toLowerCase().includes(w)));
       text = f
         ? `${f.title} (${f.state === "proven" ? "prouvé" : f.state === "fixed" ? "corrigé" : "piste"}). ${f.description} ${f.proof ? `Preuve: ${f.proof.replay}.` : ""} À faire: ${f.remediation}`
-        : "Aucun modèle n'est branché (claude -p introuvable ou coupé), je ne réponds qu'aux commandes: /scan, /authz, /secrets, /test, /goal, /cible, /explain <finding>.";
+        : "Aucun modèle n'est branché (claude -p introuvable ou coupé), je ne réponds qu'aux commandes: /scan, /authz, /secrets, /test, /goal, /cible, /explain <finding> (/explore demande un modèle).";
     }
     this.ui({ kind: "say", text });
   }
