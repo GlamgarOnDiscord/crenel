@@ -16,7 +16,8 @@
 
 import { randomBytes } from "node:crypto";
 import { dirname, isAbsolute, resolve } from "node:path";
-import type { Config } from "../core/config.js";
+import { scopeSettings, type Config } from "../core/config.js";
+import { accessFindings, redactDeep } from "../core/access.js";
 import { Scope, type NetEvent } from "../core/scope.js";
 import { safeFetch } from "../core/net.js";
 import { REGISTRY, resolveChecks } from "../core/registry.js";
@@ -159,6 +160,7 @@ export class AgentRun {
   private readonly goal?: GoalSpec;
   private stopReason = "";
   private readonly started = Date.now();
+  private readonly accessReported = new Set<string>();
 
   constructor(private readonly deps: RunDeps, private readonly opts: RunOptions) {
     this.id = opts.id ?? `r-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomBytes(4).toString("hex")}`;
@@ -171,10 +173,7 @@ export class AgentRun {
     this.projectDir = isAbsolute(cfg.projectDir) ? cfg.projectDir : resolve(configDir, cfg.projectDir);
     this.checks = deps.checks ?? (cfg.checks.length ? resolveChecks(cfg.checks) : REGISTRY);
     this.scope = new Scope({
-      allowedHosts: cfg.scope.allowedHosts,
-      allowActiveTesting: cfg.scope.allowActiveTesting,
-      allowPrivate: cfg.scope.allowPrivate,
-      stagingUrl: cfg.scope.stagingUrl,
+      ...scopeSettings(cfg.scope),
       signal: this.ac.signal,
       onRequest: (e) => this.onNet(e),
     });
@@ -403,9 +402,9 @@ export class AgentRun {
     }
     let toolRefusals = 0;
     const maxProbes = (this.deps.maxProbes ?? 1000) + opts.maxRequests;
+    // The toolbox scope paces and caps like the run's, but carries no access token: tools go through the egress proxy, which cannot add headers to TLS.
     const scope = new Scope({
-      allowedHosts: this.deps.config.scope.allowedHosts, allowActiveTesting: this.deps.config.scope.allowActiveTesting,
-      allowPrivate: this.deps.config.scope.allowPrivate, stagingUrl: this.deps.config.scope.stagingUrl, signal: this.ac.signal,
+      ...scopeSettings(this.deps.config.scope), access: undefined, signal: this.ac.signal,
       onRequest: (e) => {
         this.journal.append("net", { ...e, tool: name });
         if (e.refused) {
@@ -568,6 +567,11 @@ export class AgentRun {
         } catch (err) {
           lines.push(`${c.name}: échec (${(err as Error).message})`);
         }
+      }
+      // A host behind Cloudflare Access was not reached: one info lead per host, once per run.
+      for (const f of accessFindings(scope, this.accessReported)) {
+        findings.push(f);
+        lines.push(`${f.location}: Cloudflare Access, non atteint`);
       }
     }
     this.unattended = false;
@@ -753,7 +757,7 @@ export class AgentRun {
   /** Persist, generate tests, summarise. */
   private async finish(validated: StoredFinding[], ran: Set<string>, genTests: boolean): Promise<StoredFinding[]> {
     const store = this.deps.store;
-    const merged = validated.length || ran.size ? store.mergeFindings(this.id, validated, [...ran]) : store.findings().items;
+    const merged = validated.length || ran.size ? store.mergeFindings(this.id, validated.map((f) => redactDeep(f)), [...ran]) : store.findings().items;
     if (ran.size) {
       store.appendAudit({
         at: new Date(this.started).toISOString(), kind: "scan", run: this.id, project: this.deps.config.project,

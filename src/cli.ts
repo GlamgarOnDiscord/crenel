@@ -9,7 +9,7 @@
 // Kept dependency-free (no arg parser) so the tool stays small and auditable.
 
 import { writeFileSync, existsSync } from "node:fs";
-import { loadConfig } from "./core/config.js";
+import { loadConfig, scopeSettings } from "./core/config.js";
 import { run } from "./core/runner.js";
 import { REGISTRY } from "./core/registry.js";
 import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
@@ -401,12 +401,7 @@ async function main(): Promise<number> {
       process.stderr.write(`review-bundle needs the claude CLI (model ${model}).\n`);
       return 2;
     }
-    const scope = new Scope({
-      allowedHosts: config.scope.allowedHosts,
-      allowActiveTesting: config.scope.allowActiveTesting,
-      allowPrivate: config.scope.allowPrivate,
-      stagingUrl: config.scope.stagingUrl,
-    });
+    const scope = new Scope(scopeSettings(config.scope));
     const log = (m: string) => process.stderr.write(`${m}\n`);
     const { files, bytes } = await crawlLiveBundle({ scope, log }, config.scope.stagingUrl);
     process.stdout.write(`Fetched ${files.length} file(s), ${Math.round(bytes / 1024)} KB, from ${config.scope.stagingUrl}. Reviewing with ${llm.label}...\n\n`);

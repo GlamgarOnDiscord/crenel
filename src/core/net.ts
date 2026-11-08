@@ -12,12 +12,18 @@
 //   5. every request has a timeout and obeys the scope's kill switch, and the
 //      scope's observer sees each request sent or refused (journal, budgets);
 //   6. only GET and HEAD go out by default. A POST passes when its body is
-//      provably a read (readOnlyPost); anything else needs allowActiveTesting.
+//      provably a read (readOnlyPost); anything else needs allowActiveTesting;
+//   7. a response that is Cloudflare Access's login gate, not the app, throws
+//      AccessGateError (the host was not reached) and is recorded on the scope;
+//      a declared Access service token is added for its exact host, https only,
+//      on each hop that targets it and on no other;
+//   8. the scope's request budget and pacing (maxRequests, ratePerSec).
 //
 // It is deliberately small and dependency-free.
 
 import { lookup } from "node:dns/promises";
-import { Scope, ScopeError } from "./scope.js";
+import { AccessGateError, Scope, ScopeError } from "./scope.js";
+import { detectAccessGate } from "./access.js";
 
 const MAX_REDIRECTS = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -148,8 +154,17 @@ export async function safeFetch(
     try {
       scope.signal?.throwIfAborted();
       scope.assertUrlAllowed(current);
+      // A host whose root is behind Access (the whole hostname is the Access
+      // application) answers every path with the same login page: nothing more is
+      // sent to it. A gate seen only on a sub-path (a path-scoped application)
+      // leaves the rest of the host reachable.
+      const known = scope.accessGates.get(new URL(current).hostname.toLowerCase());
+      if (known && new URL(known.url).pathname === "/") throw new AccessGateError(known);
       await assertResolvesPublic(new URL(current).hostname, scope.allowPrivate);
+      await scope.pace();
     } catch (err) {
+      // Not a refusal of the scope: the host is known to be gated and nothing was sent.
+      if (err instanceof AccessGateError) throw err;
       scope.onRequest?.({ method, url: current, refused: (err as Error).message });
       throw err;
     }
@@ -157,14 +172,26 @@ export async function safeFetch(
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const signal = scope.signal ? AbortSignal.any([scope.signal, timeout]) : timeout;
     let res: Response;
+    // Service-token headers are recomputed for every hop: only this hop's exact host, only https.
+    const access = scope.headersFor(current);
+    const tokenSent = Object.keys(access).length > 0;
+    const headers = tokenSent ? { ...init.headers, ...access } : init.headers;
     try {
       // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
-      res = await fetch(current, { method, headers: init.headers, body: init.body, redirect: "manual", signal });
+      res = await fetch(current, { method, headers, body: init.body, redirect: "manual", signal });
     } catch (err) {
       scope.onRequest?.({ method, url: current, error: (err as Error).message });
       throw err;
     }
     scope.onRequest?.({ method, url: current, status: res.status });
+
+    // Cloudflare Access answered instead of the app (status/headers first; a
+    // 401/403 body is read below). Never a pass or a fail on the app.
+    const gateNow = detectAccessGate(res.status, res.headers, current);
+    if (gateNow) {
+      await res.body?.cancel().catch(() => {});
+      throw gated(scope, current, res.status, gateNow, tokenSent);
+    }
 
     // followRedirects: false returns the 3xx itself, so a check can read where it points without going there.
     if (res.status >= 300 && res.status < 400 && res.headers.get("location") && init.followRedirects !== false) {
@@ -194,7 +221,17 @@ export async function safeFetch(
       }
     }
     const body = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+    if (res.status === 401 || res.status === 403) {
+      const gateBody = detectAccessGate(res.status, res.headers, current, body);
+      if (gateBody) throw gated(scope, current, res.status, gateBody, tokenSent);
+    }
     return { status: res.status, url: current, headers: res.headers, body, truncated };
   }
   throw new ScopeError(`Refused: too many redirects from ${url}`);
+}
+
+function gated(scope: Scope, url: string, status: number, reason: string, tokenSent: boolean): AccessGateError {
+  const gate = { host: new URL(url).hostname.toLowerCase(), url, status, reason, tokenSent };
+  scope.noteAccessGate(gate);
+  return new AccessGateError(gate);
 }

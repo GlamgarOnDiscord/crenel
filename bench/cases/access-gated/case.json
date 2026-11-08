@@ -1,0 +1,39 @@
+{
+  "title": "Staging behind Cloudflare Access, no service token: the login redirect is not the app",
+  "type": "live",
+  "config": {},
+  "mustFind": [
+    {
+      "id": "access-not-reached",
+      "check": "cloudflare-access",
+      "text": "protected by Cloudflare Access",
+      "minSeverity": "info",
+      "why": "The tool must say it could not reach the app. Silence on a gated host reads as a clean bill of health while nothing was tested (the old behaviour: every live check quietly stopped at the redirect)."
+    }
+  ],
+  "mustNotFlag": [
+    {
+      "id": "headers-of-access-page",
+      "check": "headers",
+      "forbid": "proven",
+      "why": "The missing CSP, HSTS and frame headers are those of Cloudflare's 302, not of the app behind it."
+    },
+    {
+      "id": "cookie-of-access-page",
+      "text": "CF_AppSession|set-cookie|samesite",
+      "forbid": "proven",
+      "why": "CF_AppSession is Cloudflare's own login cookie, not a session cookie of the app."
+    },
+    {
+      "id": "redirect-to-access",
+      "check": "open-redirect|transport|next-middleware",
+      "forbid": "proven",
+      "why": "A 302 to the team's cloudflareaccess.com login is Access itself, not an open redirect."
+    },
+    {
+      "id": "any-proven-on-gate",
+      "forbid": "proven",
+      "why": "Nothing on a host Crenel could not reach is proven: the gate is reported as one info lead, never as a pass or a fail of the app."
+    }
+  ]
+}

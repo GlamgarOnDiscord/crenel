@@ -3,7 +3,8 @@
 // sink the whole run), and returns everything for the reporter.
 
 import { isAbsolute, resolve, dirname } from "node:path";
-import type { Config } from "./config.js";
+import { scopeSettings, type Config } from "./config.js";
+import { accessFindings, redactFindings } from "./access.js";
 import { Scope } from "./scope.js";
 import { resolveChecks } from "./registry.js";
 import type { Check, CheckContext, Finding } from "./types.js";
@@ -34,12 +35,7 @@ export async function run(
     ? config.projectDir
     : resolve(configDir, config.projectDir);
 
-  const scope = new Scope({
-    allowedHosts: config.scope.allowedHosts,
-    allowActiveTesting: config.scope.allowActiveTesting,
-    allowPrivate: config.scope.allowPrivate,
-    stagingUrl: config.scope.stagingUrl,
-  });
+  const scope = new Scope(scopeSettings(config.scope));
 
   const checks = checksOverride ?? resolveChecks(config.checks, config.options);
   const log = (msg: string) => {
@@ -70,11 +66,13 @@ export async function run(
       errors.push({ check: check.name, message: (err as Error).message });
     }
   }
+  // One info lead per host that answered with Cloudflare Access instead of the app.
+  findings.push(...accessFindings(scope));
 
   return {
     project: config.project,
     startedAt: new Date(started).toISOString(),
-    findings,
+    findings: redactFindings(findings),
     errors,
     checksRun,
     durationMs: Date.now() - started,

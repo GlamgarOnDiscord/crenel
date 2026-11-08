@@ -11,6 +11,7 @@
 import { appendFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash } from "node:crypto";
+import { redactDeep } from "../core/access.js";
 
 export const JOURNAL_VERSION = 1;
 
@@ -49,7 +50,9 @@ export class Journal {
     }
   }
 
-  append<T>(type: string, data: T): JournalEntry<T> {
+  append<T>(type: string, raw: T): JournalEntry<T> {
+    // A registered secret (an Access service token echoed by a body) never reaches the journal.
+    const data = redactDeep(raw);
     const body = { v: JOURNAL_VERSION, seq: this.seq + 1, ts: new Date().toISOString(), run: this.run, type, data };
     const entry: JournalEntry<T> = { ...body, prev: this.last, hash: hashOf(this.last, body) };
     appendFileSync(this.path, JSON.stringify(entry) + "\n");

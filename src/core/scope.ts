@@ -27,6 +27,17 @@ export interface ScopeConfig {
   signal?: AbortSignal;
   /** Observer called for every request the scoped client sends or refuses (journal, audit, budgets). */
   onRequest?: (e: NetEvent) => void;
+  /**
+   * Cloudflare Access service tokens, per exact host: the names of the two
+   * environment variables holding the Client ID and Secret (never the values).
+   */
+  access?: Record<string, AccessTokenRef>;
+  /** Environment the access variables are read from (tests). Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Pace every request sent under this scope to at most this many per second. */
+  ratePerSec?: number;
+  /** Refuse any request past this many in the life of the scope (a run's budget). */
+  maxRequests?: number;
 }
 
 /** One request seen by the scoped client: sent (with a status or an error) or refused. */
@@ -39,10 +50,20 @@ export interface NetEvent {
   refused?: string;
 }
 
+import { resolveAccess, type AccessGate, type AccessTokenRef } from "./access.js";
+
 export class ScopeError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ScopeError";
+  }
+}
+
+/** Thrown by safeFetch when the response is Cloudflare Access, not the app: the host was not reached. */
+export class AccessGateError extends ScopeError {
+  constructor(readonly gate: AccessGate) {
+    super(`Not reached: ${gate.host} is behind Cloudflare Access (${gate.reason}); the response is its login page, not the app`);
+    this.name = "AccessGateError";
   }
 }
 
@@ -53,6 +74,16 @@ export class Scope {
   readonly stagingUrl?: string;
   readonly signal?: AbortSignal;
   readonly onRequest?: (e: NetEvent) => void;
+  readonly ratePerSec?: number;
+  readonly maxRequests?: number;
+  /** Requests reserved so far (budget and pacing). */
+  private sent = 0;
+  private nextAt = 0;
+  private readonly hostHeaders: Record<string, Record<string, string>> = {};
+  /** Hosts whose access token could not be loaded, with the reason. */
+  readonly accessMissing: Record<string, string> = {};
+  /** Hosts seen behind Cloudflare Access during this scope's life (first sighting kept). */
+  readonly accessGates = new Map<string, AccessGate>();
 
   /** The declared hosts, for checks that look at each of them (DNS, takeover). */
   get allowedHosts(): string[] { return [...this.allowed]; }
@@ -63,6 +94,16 @@ export class Scope {
     this.allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase().trim()));
     this.allowActiveTesting = config.allowActiveTesting ?? false;
     this.allowPrivate = config.allowPrivate ?? false;
+    if (config.ratePerSec !== undefined && config.ratePerSec > 0) this.ratePerSec = config.ratePerSec;
+    if (config.maxRequests !== undefined && config.maxRequests > 0) this.maxRequests = config.maxRequests;
+    if (config.access && Object.keys(config.access).length) {
+      for (const h of Object.keys(config.access)) {
+        if (!this.allowed.has(h.toLowerCase().trim())) throw new ScopeError(`Refused: scope.access names ${h}, which is not in allowedHosts`);
+      }
+      const r = resolveAccess(config.access, config.env ?? process.env);
+      Object.assign(this.hostHeaders, r.headers);
+      Object.assign(this.accessMissing, r.missing);
+    }
     if (config.stagingUrl) {
       // Validate the staging URL against the allowlist at construction time, so a
       // misconfigured run fails before any check gets to make a request.
@@ -102,6 +143,47 @@ export class Scope {
     }
   }
 
+  /**
+   * Extra headers for a request to exactly this URL: the service token of its
+   * host, over https only. A redirect to another host, or a plain http:// URL,
+   * gets nothing.
+   */
+  headersFor(url: string): Record<string, string> {
+    let u: URL;
+    try { u = new URL(url); } catch { return {}; }
+    if (u.protocol !== "https:") return {};
+    return this.hostHeaders[u.hostname.toLowerCase()] ?? {};
+  }
+
+  /** Record that a host answered with Cloudflare Access (first sighting kept, a root sighting preferred). */
+  noteAccessGate(gate: AccessGate): void {
+    const prev = this.accessGates.get(gate.host);
+    // A sighting on the root wins: it means the whole host is the Access application.
+    if (!prev || (new URL(prev.url).pathname !== "/" && new URL(gate.url).pathname === "/")) this.accessGates.set(gate.host, gate);
+  }
+
+  /**
+   * Reserve one request: refuse past maxRequests, wait for the next slot under
+   * ratePerSec. The slot is reserved synchronously, so concurrent callers queue.
+   */
+  async pace(): Promise<void> {
+    if (this.maxRequests !== undefined && this.sent >= this.maxRequests) {
+      throw new ScopeError(`Refused: request budget exhausted (scope.maxRequests ${this.maxRequests})`);
+    }
+    this.sent++;
+    if (!this.ratePerSec) return;
+    const now = Date.now();
+    const at = Math.max(now, this.nextAt);
+    this.nextAt = at + 1000 / this.ratePerSec;
+    if (at > now) await new Promise<void>((res, rej) => {
+      const t = setTimeout(res, at - now);
+      this.signal?.addEventListener("abort", () => { clearTimeout(t); rej(this.signal!.reason); }, { once: true });
+    });
+  }
+
+  /** Requests sent (or reserved) under this scope. */
+  get requestsSent(): number { return this.sent; }
+
   get hosts(): string[] {
     return [...this.allowed];
   }
@@ -114,3 +196,4 @@ function safeHost(url: string): string {
     return "(invalid url)";
   }
 }
+
