@@ -5,6 +5,7 @@
 // contents. Deterministic and offline. A lead: the fix is to gitignore it and
 // rotate anything it held.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
@@ -36,13 +37,65 @@ function assignedVars(text: string): number {
   return n;
 }
 
+/**
+ * In a git work tree, which of `files` git tracks and which it ignores. Null
+ * when projectDir is not a work tree or git is unavailable: then every env file
+ * found counts, as before (a deploy folder, an unpacked archive). Read-only:
+ * ls-files and check-ignore, no lock taken.
+ */
+export function gitStatusOf(dir: string, files: string[]): { tracked: Set<string>; ignored: Set<string> } | null {
+  if (!files.length) return null;
+  const git = (args: string[], input?: string) => execFileSync("git", ["-C", dir, ...args], {
+    encoding: "utf8", input, timeout: 15_000, maxBuffer: 16 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"],
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+  });
+  try {
+    if (git(["rev-parse", "--is-inside-work-tree"]).trim() !== "true") return null;
+  } catch { return null; }
+  const rels = files.map((f) => relative(dir, f) || f);
+  const tracked = new Set<string>();
+  const ignored = new Set<string>();
+  try {
+    for (const r of git(["ls-files", "-z", "--", ...rels]).split("\0")) if (r) tracked.add(r);
+  } catch { return null; }
+  try {
+    // check-ignore exits 1 when nothing is ignored: that is not an error here.
+    for (const r of git(["check-ignore", "--no-index", "-z", "--stdin"], rels.join("\0") + "\0").split("\0")) if (r) ignored.add(r);
+  } catch (err) {
+    const out = (err as { stdout?: string }).stdout ?? "";
+    for (const r of out.split("\0")) if (r) ignored.add(r);
+  }
+  return { tracked, ignored };
+}
+
 export const committedEnv: Check = {
   name: "committed-env",
   title: "Committed .env files (conventionally secret-bearing)",
   readOnly: true,
   async run(ctx: CheckContext): Promise<Finding[]> {
     const findings: Finding[] = [];
-    for (const file of walk(ctx.projectDir)) {
+    const files = [...walk(ctx.projectDir)];
+    // In a git repository only a TRACKED .env is committed. An ignored one is the
+    // recommended setup (a local file next to .env.example); an untracked one that
+    // nothing ignores is one `git add .` away, so it stays a low lead.
+    const git = gitStatusOf(ctx.projectDir, files);
+    for (const file of files) {
+      const relPath = relative(ctx.projectDir, file) || file;
+      if (git && !git.tracked.has(relPath)) {
+        if (git.ignored.has(relPath)) continue;
+        findings.push({
+          id: `committed-env:${relPath}`,
+          check: "committed-env",
+          title: `Env file not ignored by git: ${relPath}`,
+          severity: "low",
+          state: "unproven",
+          location: relPath,
+          description: `${relPath} is not committed, but no .gitignore rule covers it: the next \`git add .\` commits it.`,
+          remediation: "Add .env* (keeping !.env.example) to .gitignore.",
+          proof: { method: "git check-ignore finds no rule for the file", replay: `git check-ignore -v '${relPath}' || echo 'not ignored'` },
+        });
+        continue;
+      }
       let vars = 0;
       try {
         if (statSync(file).size < 256 * 1024) vars = assignedVars(readFileSync(file, "utf8"));
@@ -61,7 +114,9 @@ export const committedEnv: Check = {
           `itself is the risk.`,
         remediation:
           "Add it to .gitignore, remove it from the repo (and from git history), rotate anything it held, and commit only a .env.example with empty values.",
-        proof: { method: "committed env file detected by name", replay: `git ls-files | grep -nE '(^|/)\\.env(\\.|$)'` },
+        proof: git
+          ? { method: "env file tracked by git", replay: `git ls-files --error-unmatch '${rel}'` }
+          : { method: "committed env file detected by name", replay: `git ls-files | grep -nE '(^|/)\\.env(\\.|$)'` },
         regressionHint: "CI: fail if a tracked file matches .env (excluding .env.example).",
       });
     }

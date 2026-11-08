@@ -56,3 +56,24 @@ test("node_modules is skipped", async () => {
     assert.equal((await committedEnv.run(ctx(dir))).length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("in a git repository only a tracked .env is committed; an ignored one is the right setup", async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const dir = project({
+    ".gitignore": ".env\n",
+    "apps/api/.env": "DATABASE_URL=postgres://u:p@h/db\n",
+    "apps/web/.env": "VITE_API_URL=http://localhost:3000\n",
+    "apps/worker/.env.local": "TOKEN=x\n",
+    "apps/legacy/.env.production": "SECRET=y\n",
+  });
+  const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  try {
+    try { git("init", "-q"); } catch { return t.skip("git not available"); }
+    git("add", "-f", ".gitignore", "apps/legacy/.env.production");
+    git("commit", "-q", "-m", "init");
+    const found = await committedEnv.run(ctx(dir));
+    const by = Object.fromEntries(found.map((f) => [f.location.replace(/\\/g, "/"), f.severity]));
+    assert.deepEqual(by, { "apps/legacy/.env.production": "medium", "apps/worker/.env.local": "low" });
+    assert.match(found.find((f) => f.location.includes("worker"))!.title, /not ignored by git/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
