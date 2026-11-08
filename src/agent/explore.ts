@@ -63,7 +63,7 @@ export const ExploreOptions = z.object({
 export interface ExploreBudget { maxCalls: number; maxRequests: number; maxTokens: number; maxMs: number; maxToolRuns: number }
 const DEFAULTS: Record<"assist" | "full", ExploreBudget> = {
   assist: { maxCalls: 6, maxRequests: 40, maxTokens: 120_000, maxMs: 5 * 60_000, maxToolRuns: 0 },
-  full: { maxCalls: 15, maxRequests: 150, maxTokens: 400_000, maxMs: 15 * 60_000, maxToolRuns: 2 },
+  full: { maxCalls: 24, maxRequests: 300, maxTokens: 600_000, maxMs: 25 * 60_000, maxToolRuns: 10 },
 };
 
 /** The run's exploration mode: the run's choice, else the config's, else assist with a model and off without. */
@@ -283,7 +283,7 @@ export class Explorer {
         `   cross-actor: {url, attacker:"a"|"c"|"anon", owner?:"b", id?}. Prouvé si l'attaquant lit l'objet du propriétaire (même réponse ou marqueur), qu'un id inexistant ne répond pas pareil, et qu'un anonyme ne l'obtient pas. Tente aussi attacker:"anon" sur tout endpoint d'objet authentifié: si l'anonyme obtient l'objet d'un compte avec son marqueur, c'est une fuite d'auth prouvée (le validateur escalade seul).\n` +
         `   secret: {request:{url,as?}}. Prouvé si la réponse contient une clé secrète de forme connue (pas une clé publique).\n` +
         `   file-match: {file, text, line?}. Prouvé si le texte cité (12 caractères min.) est dans le fichier.\n` +
-        `   injection: {url, param, where?:"query"|"body", value?, method?, as?} pour un point REST, OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué). Un paramètre ignoré n'est jamais prouvé.`,
+        `   injection: {url, param, where?:"query"|"body", value?, method?, as?} pour un point REST, OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué), NoSQL (opérateurs $ne/$eq en query bracket ou body JSON: toujours-vrai répond comme la base, toujours-faux diverge). Un paramètre ignoré n'est jamais prouvé.`,
         `   ssrf: {url, param (ou gql avec __INJECT__), where?, callbackHost?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée. callbackHost doit être joignable depuis la cible.${ssrfCb}`,
         `   stored-xss: {storeUrl, storeParam (ou storeGql avec __INJECT__), storeWhere?, retrieveUrl, retrieveGql?}. Pour une XSS STOCKÉE: le validateur stocke un marqueur <svg> via la 1re requête puis vérifie qu'il est servi NON échappé par la 2e (retrieveUrl).`,
         `   dom-xss: {url, param, where?}. Pour une XSS DOM (reflétée par le JS de la page, pas dans le HTML brut): le validateur charge l'URL dans un vrai navigateur et prouve si le script injecté s'exécute (alert avec nonce).`,
@@ -298,6 +298,7 @@ export class Explorer {
     return `${UNTRUSTED_PREAMBLE}\n` +
       `Tu explores, pour un outil défensif, une application que l'utilisateur possède et est autorisé à tester. Le plan fixe de Crenel ne couvre que des schémas connus; ton rôle est de trouver ce qu'il rate: une route de forme inhabituelle qui ne vérifie pas le propriétaire, un point de debug au nom inventé, un secret servi par une réponse. ` +
       `Rien de ce que tu dis n'est une preuve: seul un validateur qui rejoue la requête décide. Une affirmation non prouvée reste une piste.\n` +
+      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte), et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider.\n` +
       `Cible: ${cfg.scope.stagingUrl ?? "(pas de stagingUrl: projet seulement)"}. Hôtes déclarés: ${cfg.scope.allowedHosts.join(", ") || "aucun"}. ` +
       `Comptes de test: ${accounts.join(", ") || "aucun"}; "anon" = sans identifiants. Ressources déjà couvertes par la matrice: ${JSON.stringify((opts.resources ?? []).map((r) => r.path))}.\n` +
       `Demande de l'utilisateur: ${one(this.d.userPrompt, 400)}\n` +

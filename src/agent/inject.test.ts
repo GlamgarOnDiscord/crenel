@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { xssOracle, sqliOracle, templateOracle, nonce } from "./inject.js";
+import { xssOracle, sqliOracle, templateOracle, nosqlOracle, nonce } from "./inject.js";
 
 test("nonce is unique and url-safe", () => {
   const a = nonce("x"), b = nonce("x");
@@ -75,5 +75,18 @@ test("template: nonce reflected without evaluation is a lead", () => {
 
 test("template: nothing reflected is denied", () => {
   const r = templateOracle({ token: "crT9", product: "49", body: "error" });
+  assert.equal(r.verdict, "denied");
+});
+
+test("nosql: always-true operator matches baseline, always-false diverges -> proven", () => {
+  const r = nosqlOracle({ baseline: { status: 200, body: '{"ok":1}' }, truthy: { status: 200, body: '{"ok":1}' }, falsy: { status: 401, body: "denied" } });
+  assert.equal(r.verdict, "proven");
+});
+test("nosql: parse error surfaces -> proven", () => {
+  const r = nosqlOracle({ baseline: { status: 200, body: "ok" }, truthy: { status: 500, body: "MongoError: unknown operator" }, falsy: { status: 200, body: "ok" } });
+  assert.equal(r.verdict, "proven");
+});
+test("nosql: no differential -> denied", () => {
+  const r = nosqlOracle({ baseline: { status: 200, body: "x" }, truthy: { status: 200, body: "same" }, falsy: { status: 200, body: "same" } });
   assert.equal(r.verdict, "denied");
 });

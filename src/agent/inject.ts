@@ -74,6 +74,37 @@ export function sqliOracle(input: {
   return { verdict: "denied", kind: "sqli", reason: "no differential between TRUE and FALSE injections" };
 }
 
+/* ---------------- NoSQL injection ---------------- */
+// Mongo/document stores: operator injection ($ne, $gt, $in) through bracket query
+// keys or a JSON body turns a filter into always-true / always-false. The proof is
+// the same boolean differential as SQLi (an always-true operator behaves like the
+// baseline while an always-false one diverges), or a document-store parse error.
+// Generic operator technique, no target signature.
+const NOSQL_ERRORS = [
+  "mongoerror", "bson", "unknown operator", "$where", "casterror",
+  "failed to parse", "e11000", "unterminated object", "unexpected token in json",
+];
+export function nosqlOracle(input: {
+  baseline: { status: number; body: string };
+  truthy: { status: number; body: string };
+  falsy: { status: number; body: string };
+}): InjVerdict {
+  const { baseline, truthy, falsy } = input;
+  const errored = [truthy, falsy].find((r) => NOSQL_ERRORS.some((e) => r.body.toLowerCase().includes(e)));
+  if (errored) return { verdict: "proven", kind: "nosqli-error", reason: "a document-store parse error surfaced when an operator was injected" };
+  const same = (a: { status: number; body: string }, b: { status: number; body: string }) =>
+    a.status === b.status && (a.body === b.body || sha(a.body) === sha(b.body));
+  const truthyLikeBase = same(truthy, baseline);
+  const falsyDiffers = !same(falsy, baseline) && !same(falsy, truthy);
+  if (truthyLikeBase && falsyDiffers) {
+    return { verdict: "proven", kind: "nosqli-boolean", reason: "an always-true operator ($ne) matches the baseline while an always-false one ($in:[]) diverges (boolean-based)" };
+  }
+  if (!same(truthy, falsy)) {
+    return { verdict: "lead", kind: "nosqli", reason: "operator-injected responses differ but not cleanly against the baseline: review by hand" };
+  }
+  return { verdict: "denied", kind: "nosqli", reason: "no differential between always-true and always-false operators" };
+}
+
 /* ---------------- template / command injection ---------------- */
 // payload: `${token}` wraps a computation, e.g. send `A${token}B` where the raw
 // marker is `<nonce>` and the computed marker is `<nonce>` with 7*7 replaced by 49.

@@ -443,3 +443,36 @@ test("cross-actor: an endpoint public to anon that carries the owner's marker es
     assert.match(v.reason, /no token at all/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("injection: NoSQL operator injection on a single-param endpoint is proven via the boolean differential", async () => {
+  // POST /coupon {code}: a valid literal and an always-true operator ($ne) both validate;
+  // an always-false operator ($eq impossible) does not. GET probes (sqli/xss) stay neutral.
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (u.pathname !== "/coupon") return json(404, {});
+    if (req.method === "GET") return json(200, { hint: "post a code" });
+    let chunks = ""; req.on("data", (c) => (chunks += c)); req.on("end", () => {
+      let body: any = {}; try { body = JSON.parse(chunks || "{}"); } catch { return json(400, { error: "unexpected token in json" }); }
+      const code = body.code;
+      if (code && typeof code === "object") {
+        if ("$eq" in code) return json(404, { valid: false });      // always-false
+        return json(200, { valid: true, discount: 10 });            // $ne / any operator -> always-true
+      }
+      return code === "SAVE10" ? json(200, { valid: true, discount: 10 }) : json(404, { valid: false });
+    });
+    return undefined;
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-nosql-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
+      projectDir: dir, stagingUrl: base, checks: [], options: {},
+    };
+    const v = await validateClaim(claim("explore.injection", { url: "/coupon", param: "code", where: "body", method: "POST", value: "SAVE10" }), env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.match(v.reason, /NoSQL/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

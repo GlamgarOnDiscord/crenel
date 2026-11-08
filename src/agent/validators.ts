@@ -21,7 +21,7 @@ import { scanBaas, readOneRow, type SupabasePair } from "../checks/baas-exposure
 import { sameIdentity } from "../checks/authz-matrix.js";
 import { isPlaceholder, PATTERNS } from "../checks/exposed-secrets.js";
 import { checkLiveness, verifierHost } from "../checks/key-liveness.js";
-import { xssOracle, sqliOracle, templateOracle, nonce } from "./inject.js";
+import { xssOracle, sqliOracle, templateOracle, nosqlOracle, nonce } from "./inject.js";
 import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
@@ -752,6 +752,26 @@ const exploreInjectionValidator: Validator = {
         if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `OS command injection in ${pname} at ${pathOnly(url0)} (${form.trim()}): the shell evaluated the expression`, evidence: ev(r.reason), ceiling: "critical" };
         if (r.verdict === "lead") leads.push(`cmd ${form.trim()}: ${r.reason}`);
       } catch (e) { leads.push(`command probe failed: ${(e as Error).message}`); }
+    }
+
+    // 5. NoSQL injection — operator injection ($ne always-true vs $eq always-false),
+    // through bracket query keys (param[$ne]=…) and through a JSON body. Generic
+    // document-store technique; the boolean differential or a parse error decides.
+    if (gql === null) {
+      const imp = `crenel-${nonce(pname)}`;
+      const qOp = async (op: string) => { const req = injectParam(base, `${d.param as string}[${op}]`, imp, "query"); const res = await sendAs({ ...req, as: actor }, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0); return { status: res.status, body: res.body }; };
+      try {
+        const r = nosqlOracle({ baseline: await fetchWith(baseVal), truthy: await qOp("$ne"), falsy: await qOp("$eq") });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (query operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`nosql query: ${r.reason}`);
+      } catch (e) { leads.push(`nosql query probe failed: ${(e as Error).message}`); }
+      try {
+        const jbody = (v: unknown) => JSON.stringify({ [d.param as string]: v });
+        const jSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: jbody(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+        const r = nosqlOracle({ baseline: await jSend(baseVal), truthy: await jSend({ $ne: imp }), falsy: await jSend({ $eq: imp }) });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`nosql body: ${r.reason}`);
+      } catch (e) { leads.push(`nosql body probe failed: ${(e as Error).message}`); }
     }
 
     return no(leads.length ? `not proven; leads: ${leads.slice(0, 3).join("; ")}` : "no injection proven (no differential, reflection or computation)", ev(leads.slice(0, 2).join(" | ")));

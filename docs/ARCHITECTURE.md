@@ -62,7 +62,7 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 
 | Claim class | What it proves | Oracle |
 |---|---|---|
-| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection in one parameter. REST query or form body, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
+| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection, NoSQL operator injection ($ne/$eq) in one parameter. REST query or form body, JSON-body operators, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database/parse error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
 | `explore.ssrf` | The server fetches a URL taken from a parameter (REST or GraphQL) | out-of-band: Crenel starts a listener and injects a callback URL with a nonce; a hit proves it |
 | `explore.stored-xss` | Markup sent through a store request is served unescaped by another request | reflection, on the retrieve response |
 | `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
