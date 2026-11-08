@@ -3,6 +3,7 @@
 | Fichier | Usage |
 | --- | --- |
 | `icon.svg` | Icône maître (vectorielle, Arrow/QuiverAI), source de toutes les déclinaisons. |
+| `pp.png` | Photo de profil (avatar) 1024×1024, à partir de `icon.svg`. |
 | `favicon.svg`, `favicon-16/32/48.png` | Favicon recadré sur la tête et la clé, lisible à 16 px. |
 | `logo-horizontal-dark.png`, `logo-horizontal-light.png` | Logo complet : icône + logotype Mona Sans Wide 900 + carré ambre. |
 | `logo-stacked-dark.png` | Logo empilé (icône au-dessus). |
