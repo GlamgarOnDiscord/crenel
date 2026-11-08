@@ -579,3 +579,42 @@ test("graphql: query batching with no rate limit is proven", async () => {
     assert.match(v.reason, /batching/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("jwt-forge: RS256->HS256 algorithm confusion is proven end to end", async () => {
+  const { generateKeyPairSync, createSign, createHmac, createPublicKey } = await import("node:crypto");
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: "jwk" });
+  const pubPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  // A genuine RS256 token for account A.
+  const si = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({ sub: "a@x", role: "user" })}`;
+  const rs = `${si}.${createSign("RSA-SHA256").update(si).sign(privateKey, "base64url")}`;
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (u.pathname === "/.well-known/jwks.json") return json(200, { keys: [jwk] });
+    if (u.pathname !== "/me") return json(404, {});
+    const tok = (req.headers.authorization || "").replace(/^Bearer /, "");
+    const [h, p, s] = tok.split(".");
+    if (!h || !p || s === undefined) return json(401, {});
+    let alg = ""; try { alg = JSON.parse(Buffer.from(h, "base64url").toString()).alg; } catch { return json(401, {}); }
+    let valid = false;
+    try {
+      if (alg === "HS256") valid = s === createHmac("sha256", pubPem).update(`${h}.${p}`).digest("base64url"); // the confusion bug
+      else if (alg === "RS256") { const { createVerify } = require("node:crypto"); valid = createVerify("RSA-SHA256").update(`${h}.${p}`).verify(createPublicKey({ key: jwk, format: "jwk" }), s, "base64url"); }
+    } catch { valid = false; }
+    return valid ? json(200, { me: JSON.parse(Buffer.from(p, "base64url").toString()) }) : json(401, {});
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-jwtf-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+      projectDir: dir, stagingUrl: base, checks: [], options: {},
+    };
+    const v = await validateClaim(claim("explore.jwt-forge", { url: "/me", token: rs, override: { role: "admin" } }), env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.match(v.reason, /confusion/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

