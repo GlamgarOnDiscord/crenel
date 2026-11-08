@@ -1,14 +1,22 @@
-// Effort control for the composer, after the Codex model menu and taken
-// further: "Plus rapide" / "Plus fin" captions frame the name of the current
-// level (morphing on change), and a pill slider whose brand fill deepens as
-// effort rises runs up to a light thumb, with a dot on each of the four stops.
-// Hovering previews a stop (ghost thumb, its name in the caption) before the
-// click commits it. A single role="slider": arrows, PageUp/PageDown, Home/End
-// and pointer drag all snap to a stop.
-import { useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
+// Effort control for the composer. Started from the Codex model menu and
+// pushed further: instead of a plain track, a ramp of thin bars (short on the
+// "Plus rapide" side, tall on the "Plus fin" side) lights up to a glowing
+// cursor. One spring-driven value (--x, 0..1) feeds every bar through CSS, so
+// the fill flows continuously: the cursor follows the pointer while dragging,
+// then snaps to the nearest of the four stops with a slight overshoot. A
+// light wave runs through the lit bars, faster as effort rises; each change
+// sends a ripple from the cursor. Hovering previews a stop (its name in the
+// caption, its tick lit) before a click commits it. A single role="slider":
+// arrows, PageUp/PageDown, Home/End and pointer drag. Reduced motion: no
+// spring, no wave, no ripple.
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring } from "motion/react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
 import { cn } from "../lib/utils";
 import { EFFORTS, type EffortId } from "../lib/workspace";
 import { TextMorph } from "./kit/text-morph";
+
+const BARS = 32;
+const BAR_T = Array.from({ length: BARS }, (_, i) => i / (BARS - 1));
 
 // Half-ring gauge: a track arc and an amber arc that grows with the level.
 export function EffortGauge({ level, size = 16, tone = "brand" }: { level: number; size?: number; tone?: "brand" | "muted" }) {
@@ -27,34 +35,44 @@ export function EffortGauge({ level, size = 16, tone = "brand" }: { level: numbe
 }
 
 export function EffortControl({ value, onChange }: { value: EffortId; onChange: (v: EffortId) => void }) {
-  const trackRef = useRef<HTMLDivElement | null>(null);
+  const areaRef = useRef<HTMLDivElement | null>(null);
+  const reduced = useReducedMotion();
   const [dragging, setDragging] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const last = EFFORTS.length - 1;
   const idx = Math.max(0, EFFORTS.findIndex((e) => e.id === value));
   const current = EFFORTS[idx]!;
-  // A hovered stop other than the current one is a preview, not a choice.
   const preview = hover !== null && hover !== idx && !dragging ? hover : null;
   const shown = EFFORTS[preview ?? idx]!;
+
+  // Raw target (stop, or pointer while dragging) and its spring-smoothed twin.
+  const target = useMotionValue(idx / last);
+  const x = useSpring(target, reduced ? { duration: 0 } : { stiffness: 420, damping: 30, mass: 0.7 });
+  useEffect(() => { if (!dragging) target.set(idx / last); }, [idx, last, dragging, target]);
+
+  // Ripple key: bumps on every committed change (not on first paint).
+  const [pulse, setPulse] = useState(0);
+  const prev = useRef(idx);
+  useEffect(() => { if (prev.current !== idx) { prev.current = idx; setPulse((p) => p + 1); } }, [idx]);
+
   function set(n: number) {
     const i = Math.max(0, Math.min(last, n));
     if (i !== idx) onChange(EFFORTS[i]!.id);
   }
-  function stopAt(e: RPointerEvent<HTMLDivElement>) {
-    const r = trackRef.current?.getBoundingClientRect();
+  function frac(e: RPointerEvent<HTMLDivElement>) {
+    const r = areaRef.current?.getBoundingClientRect();
     if (!r || r.width === 0) return null;
-    return Math.max(0, Math.min(last, Math.round(((e.clientX - r.left) / r.width) * last)));
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   }
   return (
-    <div className="effort">
+    <div className={cn("effort", dragging && "drag")} style={{ "--lv": current.level } as CSSProperties}>
       <div className="effort-ends">
         <span aria-hidden="true">Plus rapide</span>
         <TextMorph className={cn("effort-now", preview !== null && "preview")}>{shown.label}</TextMorph>
         <span aria-hidden="true">Plus fin</span>
       </div>
-      <div ref={trackRef} className={cn("eslider", dragging && "drag")} role="slider" tabIndex={0}
+      <div className="eq" role="slider" tabIndex={0}
         aria-label="Effort" aria-valuemin={1} aria-valuemax={EFFORTS.length} aria-valuenow={current.level} aria-valuetext={current.label}
-        style={{ "--f": idx / last, "--g": (preview ?? idx) / last, "--lv": current.level } as CSSProperties}
         onKeyDown={(e) => {
           const k = e.key;
           if (k === "ArrowRight" || k === "ArrowUp" || k === "PageUp") { e.preventDefault(); set(idx + 1); }
@@ -62,17 +80,40 @@ export function EffortControl({ value, onChange }: { value: EffortId; onChange: 
           else if (k === "Home") { e.preventDefault(); set(0); }
           else if (k === "End") { e.preventDefault(); set(last); }
         }}
-        onPointerDown={(e) => { setDragging(true); e.currentTarget.setPointerCapture?.(e.pointerId); const i = stopAt(e); if (i !== null) set(i); }}
-        onPointerMove={(e) => { const i = stopAt(e); if (dragging) { if (i !== null) set(i); } else setHover(i); }}
+        onPointerDown={(e) => {
+          const f = frac(e); if (f === null) return;
+          setDragging(true); e.currentTarget.setPointerCapture?.(e.pointerId);
+          target.set(f); set(Math.round(f * last));
+        }}
+        onPointerMove={(e) => {
+          const f = frac(e); if (f === null) return;
+          if (dragging) { target.set(f); set(Math.round(f * last)); } else setHover(Math.round(f * last));
+        }}
         onPointerUp={() => setDragging(false)}
         onPointerCancel={() => setDragging(false)}
         onPointerLeave={() => setHover(null)}>
-        <span className="eslider-fill" aria-hidden="true" />
-        {EFFORTS.map((e, i) => (
-          <span key={e.id} aria-hidden="true" className={cn("eslider-dot", i <= idx && "in", i === preview && "aim")} style={{ "--p": i / last } as CSSProperties} />
-        ))}
-        <span className={cn("eslider-ghost", preview !== null && "on")} aria-hidden="true" />
-        <span className="eslider-thumb" aria-hidden="true" />
+        <motion.div ref={areaRef} className="eq-area" style={{ "--x": x } as unknown as CSSProperties}>
+          <div className="eq-bars" aria-hidden="true">
+            {BAR_T.map((t, i) => (
+              <span key={i} className="eq-bar" style={{ "--t": t, "--i": i } as CSSProperties}><i /></span>
+            ))}
+          </div>
+          <span className="eq-cursor" aria-hidden="true" />
+          <AnimatePresence>
+            {pulse > 0 && !reduced && (
+              <motion.span key={pulse} className="eq-ripple" aria-hidden="true" style={{ left: `${(idx / last) * 100}%` }}
+                initial={{ scale: 0.3, opacity: 0.7 }} animate={{ scale: 3.2, opacity: 0 }} exit={{ opacity: 0 }}
+                transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1] }} />
+            )}
+          </AnimatePresence>
+        </motion.div>
+        <div className="eq-stops" aria-hidden="true">
+          {EFFORTS.map((e, i) => (
+            <span key={e.id} className={cn("eq-stop", i === idx && "on", i < idx && "past", i === preview && "aim")} style={{ "--p": i / last } as CSSProperties}>
+              <b />{e.label}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
