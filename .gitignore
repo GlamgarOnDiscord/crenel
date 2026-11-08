@@ -10,3 +10,6 @@ web/shots/
 
 # agent worktrees
 .claude/
+
+# standalone executable build (scripts/build-sea.mjs)
+/build/

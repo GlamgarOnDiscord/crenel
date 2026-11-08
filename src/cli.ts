@@ -27,6 +27,7 @@ import { SEVERITIES } from "./report/render.js";
 import type { Severity } from "./core/types.js";
 import { spawn } from "node:child_process";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { VERSION } from "./version.js";
 
 // Default config file. `crenel.config.yaml`, falling back to the pre-rename
 // `bastion.config.yaml` when only that one exists, so older setups keep working.
@@ -61,7 +62,7 @@ options:
 
 // Flags that never take a value, so they do not swallow the following token
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
-const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify"]);
+const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
 const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report"]);
 
@@ -119,6 +120,11 @@ async function main(): Promise<number> {
   const { _, flags, warnings } = parseFlags(process.argv.slice(2));
   for (const w of warnings) process.stderr.write(`Attention: ${w}\n`);
   const cmd = _[0] ?? "help";
+
+  if (cmd === "version" || (flags.version && _.length === 0)) {
+    process.stdout.write(`crenel ${VERSION}\n`);
+    return 0;
+  }
 
   if (cmd === "list") {
     process.stdout.write("Available checks:\n");
@@ -429,6 +435,7 @@ async function main(): Promise<number> {
       "                 Slack and signed webhooks (secret on stdin, kept in .crenel/secrets.json, 0600)",
       "  crenel github-comment --report crenel.json   PR comment of the proven findings (GitHub Action, GITHUB_TOKEN)",
       "  crenel list                                show available checks",
+      "  crenel --version                           print the version",
       "",
       "Crenel only tests hosts you declare you own. Active checks stay off until",
       "you enable them in the config for your own staging.",

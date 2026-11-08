@@ -48,6 +48,7 @@ import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
 import { triageFinding } from "../agent/triage.js";
 import { generateRegressionFile } from "../generate/tests.js";
+import { embeddedAsset, embeddedKeys, isEmbedded } from "../core/embedded.js";
 
 export interface ServeOptions {
   configPath: string;
@@ -141,6 +142,8 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
 
 /** Locate web/dist next to the package (works from src/ with tsx and from dist/). */
 export function findWebDir(): string | null {
+  // The standalone executable serves the console embedded in itself (serveStatic).
+  if (isEmbedded()) return null;
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
     const cand = join(dir, "web", "dist");
@@ -492,6 +495,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   }
 
   function serveStatic(res: ServerResponse, pathname: string): void {
+    if (!webDir && embeddedKeys().has("web/index.html")) return serveEmbedded(res, pathname);
     if (!webDir) return send(res, 404, "Console not built: run `pnpm build` in web/ (the API is up).");
     const root = resolve(webDir);
     let file = resolve(root, "." + decodeURIComponent(pathname));
@@ -503,6 +507,22 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       "cache-control": file.endsWith("index.html") ? "no-store" : "public, max-age=3600",
     });
     res.end(readFileSync(file));
+  }
+
+  // Same rules as serveStatic, from the executable's embedded web/dist: a path
+  // is only ever a lookup key, so nothing outside the console can be read.
+  function serveEmbedded(res: ServerResponse, pathname: string): void {
+    let key: string;
+    try { key = "web/" + decodeURIComponent(pathname).replace(/^\/+/, ""); } catch { return send(res, 400, "bad path"); }
+    if (!embeddedKeys().has(key)) key = "web/index.html";
+    const body = embeddedAsset(key);
+    if (!body) return send(res, 404, "not found");
+    res.writeHead(200, {
+      "content-type": MIME[extname(key)] ?? "application/octet-stream",
+      "content-security-policy": CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+      "cache-control": key.endsWith("index.html") ? "no-store" : "public, max-age=3600",
+    });
+    res.end(body);
   }
 
   let port = opts.port ?? 4100;

@@ -20,7 +20,9 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "demo": "tsx src/cli.ts scan --config examples/crenel.config.yaml",
     "sync-denylist": "node scripts/sync-denylist.mjs",
-    "crenel": "tsx src/cli.ts"
+    "crenel": "tsx src/cli.ts",
+    "build:sea": "node scripts/build-sea.mjs",
+    "smoke:binary": "node scripts/smoke-binary.mjs build/release/crenel"
   },
   "engines": {
     "node": ">=20"
