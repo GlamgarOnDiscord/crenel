@@ -24,6 +24,7 @@ import { checkLiveness, verifierHost } from "../checks/key-liveness.js";
 import { xssOracle, sqliOracle, templateOracle, nonce } from "./inject.js";
 import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
+import { traversalPayloads, lfiOracle } from "./lfi.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -867,7 +868,36 @@ const exploreDomXssValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator];
+/* ---------------- explore.lfi ---------------- */
+// Path traversal / LFI: the model points at a parameter it thinks names a file;
+// the validator makes it read a well-known system file through standard traversal
+// encodings and proves it by that file's own content. Generic, no target signature.
+const exploreLfiValidator: Validator = {
+  class: "explore.lfi",
+  name: "path traversal / LFI (system-file content)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string" || typeof d.param !== "string") return no("need detail.url and detail.param (the file parameter)");
+    const url0 = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    const actor = parseActor(d.as);
+    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+    const leads: string[] = [];
+    for (const { payload, marker, what } of traversalPayloads()) {
+      try {
+        const req = injectParam(base, d.param as string, payload, where);
+        const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
+        const r = lfiOracle({ body: res.body, marker });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Path traversal in ${d.param} at ${pathOnly(url0)}: served ${what}`, evidence: { request: `${base.method} ${pathOnly(url0)} (${d.param}=${payload.slice(0, 40)})`, response: r.reason }, ceiling: "high" };
+      } catch (e) { leads.push((e as Error).message); }
+    }
+    return no(leads.length ? `not proven; some probes failed: ${leads.slice(0, 2).join("; ")}` : "no system-file content returned by any traversal payload");
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

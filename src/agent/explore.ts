@@ -91,7 +91,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -287,6 +287,7 @@ export class Explorer {
         `   ssrf: {url, param (ou gql avec __INJECT__), where?, callbackHost?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée. callbackHost doit être joignable depuis la cible.${ssrfCb}`,
         `   stored-xss: {storeUrl, storeParam (ou storeGql avec __INJECT__), storeWhere?, retrieveUrl, retrieveGql?}. Pour une XSS STOCKÉE: le validateur stocke un marqueur <svg> via la 1re requête puis vérifie qu'il est servi NON échappé par la 2e (retrieveUrl).`,
         `   dom-xss: {url, param, where?}. Pour une XSS DOM (reflétée par le JS de la page, pas dans le HTML brut): le validateur charge l'URL dans un vrai navigateur et prouve si le script injecté s'exécute (alert avec nonce).`,
+        `   lfi: {url, param, where?}. Path traversal / LFI: le validateur fait lire un fichier système connu via ../ (plusieurs encodages) et prouve par le contenu du fichier (ex. root:x:0:0 de /etc/passwd).`,
     ];
     const used = `Budget restant: ${b.maxCalls - turn + 1} tour(s) dont celui-ci, ${Math.max(0, b.maxRequests - this.requests)} requête(s), ~${Math.max(0, b.maxTokens - this.tokens)} jetons.`;
     const ctx = this.d.context?.length ? `\nCe que le plan fixe a déjà trouvé (inutile de le refaire):\n${fence(untrusted("plan", this.d.context.slice(0, 40).join("\n"), 4000))}` : "";
@@ -573,7 +574,7 @@ export class Explorer {
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
-  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
   return u ? [u] : null;

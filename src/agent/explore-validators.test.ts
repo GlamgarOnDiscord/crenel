@@ -291,3 +291,30 @@ test("explore.stored-xss proves stored XSS and denies an escaped sink", async ()
     assert.equal(safe.state, "unproven", "escaped sink must not be proven");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+// --- explore.lfi: path traversal returns /etc/passwd content ---
+test("explore.lfi proves path traversal and denies a param that ignores it", async () => {
+  const { readFileSync } = await import("node:fs");
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const f = u.searchParams.get("file") ?? "";
+    if (u.pathname === "/download") {
+      // vulnerable: strips nothing, reads the path (simulate /etc/passwd)
+      if (/etc\/passwd/.test(f.replace(/%2f/gi,"/").replace(/\.\.\//g,"../"))) { res.writeHead(200); res.end("root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:"); return; }
+      res.writeHead(200); res.end("not found"); return;
+    }
+    res.writeHead(200); res.end("static"); // /safe ignores file
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-lfi-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const mk = (p: string): Claim => ({ id: "l", class: "explore.lfi", source: "llm", detail: { url: p, param: "file" } });
+    const vuln = await validateClaim(mk("/download"), env);
+    assert.equal(vuln.state, "proven", vuln.reason);
+    assert.match(vuln.reason, /traversal/i);
+    const safe = await validateClaim(mk("/safe"), env);
+    assert.equal(safe.state, "unproven", "a param the server ignores must not be proven");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
