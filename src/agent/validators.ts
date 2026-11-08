@@ -25,6 +25,7 @@ import { xssOracle, sqliOracle, templateOracle, nonce } from "./inject.js";
 import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
+import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -897,7 +898,33 @@ const exploreLfiValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator];
+/* ---------------- explore.jwt-none ---------------- */
+// Broken JWT verification: the server accepts an unsigned alg:none token. The
+// model supplies a real token; the validator re-encodes it unsigned (optionally
+// escalating a claim) and proves it by a differential — forged accepted where
+// anonymous is denied. No secret, no target signature.
+const exploreJwtNoneValidator: Validator = {
+  class: "explore.jwt-none",
+  name: "JWT alg:none accepted (broken verification)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string" || typeof d.token !== "string") return no("need detail.url and detail.token (a valid JWT)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const forged = forgeNoneToken(d.token, d.override && typeof d.override === "object" ? d.override as Record<string, unknown> : undefined);
+    if (!forged) return no("detail.token is not a decodable JWT");
+    const read = async (headers: Record<string, string>) => { const r = await safeFetch(url, env.scope, { method: "GET", headers, maxBytes: 512 * 1024 }); return { status: r.status, body: r.body }; };
+    const forgedRes = await read({ authorization: `Bearer ${forged}` });
+    const anonRes = await read({});
+    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes });
+    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT verification broken at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a forged alg:none token`, response: r.reason }, ceiling: "critical" };
+    return no(r.reason);
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

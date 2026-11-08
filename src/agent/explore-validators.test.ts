@@ -318,3 +318,27 @@ test("explore.lfi proves path traversal and denies a param that ignores it", asy
     assert.equal(safe.state, "unproven", "a param the server ignores must not be proven");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+// --- explore.jwt-none: server accepts an unsigned alg:none token ---
+test("explore.jwt-none proves broken JWT verification, denies a server that rejects none", async () => {
+  const b64=(o:unknown)=>Buffer.from(JSON.stringify(o)).toString("base64url");
+  const validJwt=`${b64({alg:"HS256",typ:"JWT"})}.${b64({sub:"u1",role:"user"})}.sig`;
+  const mkSrv=(acceptNone:boolean)=>createServer((req,res)=>{
+    const auth=(req.headers.authorization??"").replace("Bearer ","");
+    const parts=auth.split(".");
+    if(parts.length<2){res.writeHead(401);res.end("no token");return;}
+    let alg="";try{alg=JSON.parse(Buffer.from(parts[0]!,"base64url").toString()).alg;}catch{}
+    if(alg==="none"&&!acceptNone){res.writeHead(401);res.end("none rejected");return;}
+    res.writeHead(200);res.end("welcome "+(()=>{try{return JSON.parse(Buffer.from(parts[1]!,"base64url").toString()).sub;}catch{return"?";}})());
+  });
+  for(const [accept,expect] of [[true,"proven"],[false,"unproven"]] as const){
+    const srv=mkSrv(accept); await new Promise<void>(r=>srv.listen(0,"127.0.0.1",r));
+    const base=`http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir=mkdtempSync(join(tmpdir(),"crenel-jwt-"));
+    try{
+      const env:ValidatorEnv={scope:new Scope({allowedHosts:["127.0.0.1"],allowPrivate:true,stagingUrl:base}),projectDir:dir,stagingUrl:base,checks:[],options:{}};
+      const v=await validateClaim({id:"j",class:"explore.jwt-none",source:"llm",detail:{url:"/me",token:validJwt}},env);
+      assert.equal(v.state,expect,`accept=${accept}: ${v.reason}`);
+    } finally { srv.close(); rmSync(dir,{recursive:true,force:true}); }
+  }
+});
