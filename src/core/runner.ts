@@ -17,6 +17,8 @@ export interface RunResult {
   checksRun: string[];
   /** Wall-clock duration of the run, in milliseconds. */
   durationMs?: number;
+  /** HTTP requests sent through the scoped client (each redirect hop counts). */
+  requests?: number;
 }
 
 export interface RunOptions {
@@ -76,5 +78,6 @@ export async function run(
     errors,
     checksRun,
     durationMs: Date.now() - started,
+    requests: scope.requestsSent,
   };
 }
