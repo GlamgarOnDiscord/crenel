@@ -4,7 +4,7 @@
 #   permissions:
 #     contents: read
 #     security-events: write   # upload-sarif (code scanning)
-#     pull-requests: write     # only with pr-comment: "true"
+#     pull-requests: write     # only with pr-comment: "true" and no GitHub App
 #   steps:
 #     - uses: actions/checkout@<sha>
 #     - uses: <owner>/crenel@<sha>
@@ -40,6 +40,18 @@ inputs:
   pr-comment:
     description: On pull_request events, keep one comment summarising the proven findings (needs pull-requests write; skipped on forks, whose token is read-only)
     default: "false"
+  app-client-id:
+    description: Optional GitHub App client ID, so the PR comment is posted as <app-name>[bot] with the app's logo (docs/INTEGRATIONS.md). Without it, GITHUB_TOKEN posts as github-actions[bot]
+    default: ""
+  app-id:
+    description: Legacy GitHub App ID, used when app-client-id is empty (create-github-app-token prefers the client ID)
+    default: ""
+  app-private-key:
+    description: The GitHub App's private key, from a secret (secrets.CRENEL_APP_PRIVATE_KEY)
+    default: ""
+  locale:
+    description: Language of the PR comment when options.integrations.locale is auto (en, fr); empty means auto
+    default: ""
 runs:
   using: composite
   steps:
@@ -69,11 +81,23 @@ runs:
       with:
         sarif_file: ${{ inputs.sarif }}
         category: crenel
+    # Optional GitHub App: an installation token limited to this repository,
+    # pull requests write and contents read. It expires with the job.
+    - id: app-token
+      if: ${{ always() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' && inputs.app-private-key != '' && (inputs.app-client-id != '' || inputs.app-id != '') }}
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-client-id || inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+        permission-pull-requests: write
+        permission-contents: read
     # Never fails the job: a read-only token or an API error is a warning.
     - if: ${{ always() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        CRENEL_COMMENT_AUTHOR: ${{ steps.app-token.outputs.app-slug && format('{0}[bot]', steps.app-token.outputs.app-slug) || 'github-actions[bot]' }}
+        CRENEL_LOCALE: ${{ inputs.locale }}
         CRENEL_CONFIG: ${{ inputs.config }}
         CRENEL_REPORT: ${{ inputs.report }}
       run: node "$GITHUB_ACTION_PATH/dist/cli.js" github-comment --report "$CRENEL_REPORT" --config "$CRENEL_CONFIG"

@@ -99,6 +99,54 @@ On `pull_request` events, `crenel github-comment --report crenel.json` lists the
 
 On a pull request from a fork the token is read-only, so the comment is skipped with a warning annotation and the job does not fail. Crenel never needs `pull_request_target`. The API host is the runner's `GITHUB_API_URL` (https only). Calls are journaled in `.crenel/audit.jsonl` next to the config.
 
+### Posting as a GitHub App (Crenel's name and logo)
+
+With `GITHUB_TOKEN` the comment is signed `github-actions[bot]`. To have it appear as your own app, `<app-name>[bot]` with the Crenel icon as avatar, create a GitHub App once and give the Action its credentials. Crenel does not create or host the app: it is yours, on your account, and costs nothing.
+
+References: [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app), [Creating a custom badge for your GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/creating-a-custom-badge-for-your-github-app), [Making authenticated API requests with a GitHub App in a GitHub Actions workflow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow), [actions/create-github-app-token](https://github.com/actions/create-github-app-token).
+
+1. **Register** it: Settings, Developer settings, GitHub Apps, New GitHub App.
+   - *GitHub App name*: for example `Crenel acme` (at most 34 characters, unique across GitHub; comments then show `crenel-acme[bot]`).
+   - *Homepage URL*: your repository's or your account's URL.
+   - *Webhook*: untick *Active* (the app is only used to authenticate).
+   - *Repository permissions*: **Pull requests: Read and write**, **Contents: Read-only** (Metadata: Read-only is added by GitHub). Nothing else.
+   - *Where can this GitHub App be installed?*: *Only on this account*.
+2. **Logo**: in the app's settings, under *Display information*, *Upload a logo*: `web/public/crenel-icon-512.png` (GitHub asks for a PNG, JPG or GIF under 1 MB and recommends 200 x 200 px; the 512 px file is 140 KB). Pick a badge background colour that matches the icon. This logo is the avatar of `<app-name>[bot]`.
+3. **Private key**: *Generate a private key*, and store the whole `.pem` file, BEGIN and END lines included, as the repository secret `CRENEL_APP_PRIVATE_KEY`. Store the app's **Client ID** as the repository variable `CRENEL_APP_CLIENT_ID` (the legacy App ID works too, as `app-id`).
+4. **Install** the app on the repositories Crenel scans (*Install App*, *Only select repositories*).
+5. Pass them to the Action:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+steps:
+  - uses: actions/checkout@<sha>
+  - uses: GlamgarOnDiscord/crenel@<sha>
+    with:
+      config: crenel.config.yaml
+      pr-comment: "true"
+      app-client-id: ${{ vars.CRENEL_APP_CLIENT_ID }}
+      app-private-key: ${{ secrets.CRENEL_APP_PRIVATE_KEY }}
+```
+
+The Action then runs `actions/create-github-app-token` (pinned by SHA, v3.3.0) with `permission-pull-requests: write` and `permission-contents: read`, so the installation token is limited to this repository and to those two permissions, and is revoked when the job ends. The job itself no longer needs `pull-requests: write`. The comment step is told who it posts as (`CRENEL_COMMENT_AUTHOR`, `<app-slug>[bot]`) and only edits that author's marked comment, so switching from `GITHUB_TOKEN` to an app starts a new comment instead of failing on the old one.
+
+Without `app-client-id` (or `app-id`) and `app-private-key`, the Action falls back to `GITHUB_TOKEN`. On a pull request from a fork, secrets are not passed to the workflow, so the app step is skipped, the fallback token is read-only, and the comment is skipped with a warning as above.
+
+### Logo inside the comment
+
+The comment always starts with the name **Crenel**. It also shows the logo in front of it when `options.integrations.github.logoUrl` is set:
+
+```yaml
+options:
+  integrations:
+    github:
+      logoUrl: https://example.org/crenel-icon-512.png   # https, reachable without a login
+```
+
+There is no default while Crenel's repository is private: GitHub shows images in comments through its image proxy, which [cannot display an image from a server that requires authentication](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-anonymized-urls), and a private repository's raw file URL requires one. Point it at a public copy of `web/public/crenel-icon-512.png` (your own site, a public repository) or leave it unset. Only an `https://` URL without quotes or spaces is used; anything else is ignored and the name alone is shown.
+
 ## Slack
 
 References: [Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/), [Block Kit blocks](https://docs.slack.dev/reference/block-kit/blocks/), [header block](https://docs.slack.dev/reference/block-kit/blocks/header-block/), [section block](https://docs.slack.dev/reference/block-kit/blocks/section-block/), [formatting text](https://docs.slack.dev/messaging/formatting-message-text/), [rate limits](https://docs.slack.dev/apis/web-api/rate-limits/).
@@ -151,6 +199,18 @@ export function verifyCrenel(secret, headers, rawBody, now = Math.floor(Date.now
 ```
 
 Store `X-Crenel-Delivery` ids for five minutes as well if you need to drop a duplicate inside the window. The same function ships as `verifyCrenelSignature` in `src/integrations/webhook.ts`.
+
+## Language
+
+The PR comment, the Slack message and the webhooks' human-readable fields (`summary`, the test `message`) exist in English and French, from one table (`src/integrations/i18n.ts`). Machine fields never change: event names, JSON keys, `severity` values and finding ids stay in English, and each webhook body says which language its prose is in (`locale`). Finding titles and fixes come from the checks, in English.
+
+```yaml
+options:
+  integrations:
+    locale: auto      # auto | en | fr
+```
+
+How `auto` decides, honestly: GitHub exposes no language for a pull request's author or for a repository (the event payload and the REST user object carry none, and a workflow receives no `Accept-Language`). So `auto` cannot follow the reader. It takes, in order: `CRENEL_LOCALE` (the Action's `locale` input sets it), then the locale of the process running Crenel (`LC_ALL`, `LC_MESSAGES`, `LANG`, the first one set, where `C` or `POSIX` mean English; then Node's `Intl` default), then English. On a CI runner that is the runner image's locale, not the author's: set `locale: fr` (or the Action's `locale: fr`) when your team reads French. An explicit `en` or `fr` in the config always wins.
 
 ## Commands
 
