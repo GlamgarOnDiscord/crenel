@@ -43,7 +43,7 @@ import type { RunResult } from "../core/runner.js";
 import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
 import { GrantSet, StateStore } from "../agent/state.js";
-import { claudeCli, type Llm } from "../agent/llm.js";
+import { claudeCli, selectLlm, type Llm } from "../agent/llm.js";
 import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/explore.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
@@ -95,6 +95,13 @@ const CSP = [
 ].join("; ");
 const MODES = new Set<Mode>(["ask", "readonly", "bypass"]);
 const MAX_BODY = 256 * 1024;
+// A custom model spec names a provider ("openai:gpt-4o-mini", "ollama:llama3.1",
+// "anthropic-api:claude-…"); a plain name (no ":") is the claude CLI. These are
+// the provider prefixes the engine understands (reported by /api/state).
+const CUSTOM_PROVIDERS = ["openai", "ollama", "anthropic-api"];
+// An env var NAME, upper case (same discipline as llm.ts): only the name of the
+// variable travels, never the key value.
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -170,6 +177,23 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   const llmFor = (model: string): Llm | null => (llmOn ? (opts.llmFactory ?? claudeCli)(model) : null);
   const config = (): Config => loadConfig(configPath);
 
+  // Resolve the model for a run. A plain name is the claude CLI (unchanged, and
+  // it still honours the test seam and the claude-available gate). A spec with a
+  // provider ("openai:…", "ollama:…", "anthropic-api:…") is an HTTP provider,
+  // which does not need the CLI: it is resolved by selectLlm. Keys are never in
+  // the body — only the NAME of an env var (apiKeyEnv); the value is read from
+  // process.env inside the provider at call time. A bad spec/connection -> 4xx.
+  function runLlm(model: string, baseUrl: string | undefined, apiKeyEnv: string | undefined, cfg: Config): Llm | null {
+    if (!model.includes(":")) return llmFor(model);
+    if (opts.llm === "off") throw new HttpError(400, "model access is off on this server (crenel serve --llm off)");
+    if (apiKeyEnv !== undefined && !ENV_NAME.test(apiKeyEnv)) throw new HttpError(400, "modelApiKeyEnv must be the NAME of an environment variable (A-Z, 0-9, _), never a key");
+    if (baseUrl !== undefined) { try { new URL(baseUrl); } catch { throw new HttpError(400, "modelBaseUrl must be a valid URL"); } }
+    const { llm, error } = selectLlm({ spec: model, baseUrl, apiKeyEnv, config: (cfg.options as Record<string, unknown>).llm });
+    if (error) throw new HttpError(400, error);
+    if (!llm) throw new HttpError(400, `unknown model spec: ${model.split(":")[0]}:…`);
+    return llm;
+  }
+
   // Journals of runs from earlier sessions: their state is rebuilt from disk.
   // A run that was still going when the server died is reported as stopped.
   function summaries(): RunSummary[] {
@@ -189,11 +213,14 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     const prompt = String(body.prompt ?? "").trim().slice(0, 4000);
     if (!prompt) throw new HttpError(400, "prompt required");
     const mode = (MODES.has(body.mode as Mode) ? body.mode : "ask") as Mode;
-    const model = typeof body.model === "string" ? body.model : "opus";
+    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "opus";
+    const modelBaseUrl = typeof body.modelBaseUrl === "string" && body.modelBaseUrl.trim() ? body.modelBaseUrl.trim() : undefined;
+    const modelApiKeyEnv = typeof body.modelApiKeyEnv === "string" && body.modelApiKeyEnv.trim() ? body.modelApiKeyEnv.trim() : undefined;
     // The console's exploration toggle; the config's choice when absent. Safety does not depend on it.
     const explore = (EXPLORE_MODES as readonly unknown[]).includes(body.explore) ? (body.explore as ExploreMode) : undefined;
     let cfg: Config;
     try { cfg = config(); } catch (err) { throw new HttpError(422, (err as Error).message); }
+    const llm = runLlm(model, modelBaseUrl, modelApiKeyEnv, cfg);
     const goalText = typeof body.goal === "string" ? body.goal : undefined;
     const goal = goalText ? parseGoal(goalText, (body.budget ?? {}) as Partial<GoalBudget>) : undefined;
     const notify = async (findings: import("../core/types.js").Finding[], run: string, counts: { proven: number; leads: number; fixed: number }) => {
@@ -202,7 +229,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       for (const rec of r.records) store.appendAudit({ ...rec });
       return { records: r.records as unknown as Record<string, unknown>[], skipped: r.skipped };
     };
-    const run = new AgentRun({ config: cfg, configPath, store, grants, llm: llmFor(model), checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore });
+    const run = new AgentRun({ config: cfg, configPath, store, grants, llm, checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore });
     runs.set(run.id, run);
     void run.start();
     return run;
@@ -217,6 +244,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       project: cfg?.project ?? null, configPath, configError,
       scope: cfg?.scope ?? null,
       llm: llmOn ? "claude -p" : null,
+      // Provider prefixes the engine can reach over HTTP (names only, no secret).
+      customProviders: opts.llm === "off" ? [] : CUSTOM_PROVIDERS,
       explore: cfg ? resolveExploreMode(cfg, llmOn) : "off",
       grants: [...grants],
       checks: REGISTRY.map((c) => ({ name: c.name, title: c.title, readOnly: c.readOnly })),

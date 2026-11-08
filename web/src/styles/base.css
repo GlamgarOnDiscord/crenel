@@ -813,6 +813,34 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .msel-foot kbd { margin-left: 4px; }
 .msel-foot kbd:first-child { margin-left: 0; }
 
+/* Custom-model entries in the list: a delete button that never selects the row,
+   and the "add a model" affordance. */
+.msel-del { opacity: 0; flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-faint); cursor: pointer; transition: opacity .12s var(--ease), background .12s var(--ease), color .12s var(--ease); }
+.msel-item:hover .msel-del, .msel-item[data-selected="true"] .msel-del { opacity: 1; }
+.msel-del:hover { background: var(--danger-wash, var(--hover)); color: var(--danger-ink); }
+.msel-add .msel-logo-add { color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; }
+.msel-add .msel-n { color: var(--fg-muted); }
+
+/* Config card for a custom model. Compact, same tokens as the rest of the pop. */
+.cmf { display: grid; gap: 10px; padding: 10px; max-height: min(70vh, 460px); overflow-y: auto; }
+.cmf-head { display: flex; align-items: center; gap: 8px; }
+.cmf-title { font-size: 13.5px; font-weight: 600; color: var(--fg); }
+.cmf-spec { margin-left: auto; font-size: 11.5px; color: var(--fg-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-provs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cmf-prov { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px; border: 0; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 11px; font-weight: 500; cursor: pointer; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
+.cmf-prov:hover { background: var(--hover); }
+.cmf-prov.on { color: var(--fg); background: var(--active); box-shadow: inset 0 0 0 1.5px var(--brand-line); }
+.cmf-field { display: grid; gap: 4px; }
+.cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
+.cmf-opt { font-size: 10.5px; font-weight: 400; color: var(--fg-ghost); }
+.cmf-in { width: 100%; background: var(--well); border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-strong); padding: 8px 10px; font-size: 13px; color: var(--fg); outline: none; transition: box-shadow .12s var(--ease); }
+.cmf-in::placeholder { color: var(--fg-ghost); }
+.cmf-in:focus { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--brand-ring); }
+.cmf-in[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger-line); }
+.cmf-hint { font-size: 11px; color: var(--fg-faint); }
+.cmf-err { font-size: 11px; color: var(--danger-ink); }
+.cmf-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+
 .ctxbtn { gap: 6px; padding: 0 8px; color: var(--fg-faint); }
 .ctx-card { z-index: 70; width: 240px; background: var(--panel-raised); border-radius: 14px; box-shadow: var(--shadow-pop); overflow: hidden; }
 .sendbtn[data-empty] { background: var(--active); color: var(--fg-ghost); box-shadow: none; cursor: default; }

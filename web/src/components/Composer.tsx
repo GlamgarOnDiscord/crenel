@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, Trash2, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { EXPLORES, GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type GoalId, type ModeId } from "../lib/workspace.tsx";
+import { EXPLORES, GOALS, MODELS, MODES, PROVIDERS, activeModelView, customSpec, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -45,21 +45,83 @@ function ExploreMenu({ placement }: { placement: "up" | "down" }) {
   );
 }
 
+/* The config card for a custom model: provider, model name, base URL, the NAME
+   of the env var holding the key (never the key), and an optional temperature.
+   Soft validation; nothing here is a secret. */
+function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; onSave: (d: ModelDraft) => void; onCancel: () => void }) {
+  const [draft, setDraft] = useState<ModelDraft>(() => initial ?? emptyDraft());
+  const [touched, setTouched] = useState(false);
+  const errors = validateDraft(draft);
+  const prov = providerOf(draft.provider);
+  const set = (patch: Partial<ModelDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const submit = () => { setTouched(true); if (Object.keys(errors).length === 0) onSave(draft); };
+  const spec = draft.name.trim() ? `${prov.prefix}:${draft.name.trim()}` : `${prov.prefix}:…`;
+  return (
+    <div className="cmf" role="group" aria-label="Configurer un modèle custom">
+      <div className="cmf-head">
+        <button type="button" className="tbtn icon" aria-label="Retour à la liste" onClick={onCancel}><ArrowLeft size={15} /></button>
+        <span className="cmf-title">Modèle custom</span>
+        <span className="cmf-spec mono" title="Spécification envoyée au moteur">{spec}</span>
+      </div>
+      <div className="cmf-provs" role="radiogroup" aria-label="Fournisseur">
+        {PROVIDERS.map((p) => (
+          <button key={p.id} type="button" role="radio" aria-checked={p.id === draft.provider}
+            className={cn("cmf-prov", p.id === draft.provider && "on")} onClick={() => set({ provider: p.id })}>
+            <ModelLogo provider={p.logo} size={14} /><span>{p.label}</span>
+          </button>
+        ))}
+      </div>
+      <label className="cmf-field">
+        <span className="cmf-lbl">Nom du modèle</span>
+        <input className="cmf-in" value={draft.name} placeholder={draft.provider === "ollama" ? "llama3.1" : "gpt-4o-mini"}
+          onChange={(e) => set({ name: e.target.value })} aria-invalid={touched && !!errors.name} autoFocus />
+        {touched && errors.name && <span className="cmf-err">{errors.name}</span>}
+      </label>
+      <label className="cmf-field">
+        <span className="cmf-lbl">Base URL <span className="cmf-opt">optionnel</span></span>
+        <input className="cmf-in mono" value={draft.baseUrl} placeholder={prov.basePlaceholder}
+          onChange={(e) => set({ baseUrl: e.target.value })} aria-invalid={touched && !!errors.baseUrl} />
+        {touched && errors.baseUrl && <span className="cmf-err">{errors.baseUrl}</span>}
+      </label>
+      <label className="cmf-field">
+        <span className="cmf-lbl">Variable d'environnement de la clé {prov.needsKey ? "" : <span className="cmf-opt">optionnel</span>}</span>
+        <input className="cmf-in mono" value={draft.apiKeyEnv} placeholder="nom de variable, ex. CRENEL_LLM_API_KEY"
+          onChange={(e) => set({ apiKeyEnv: e.target.value.toUpperCase() })} aria-invalid={touched && !!errors.apiKeyEnv}
+          autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+        <span className="cmf-hint">Le nom de la variable, jamais la clé. Le moteur lit sa valeur dans l'environnement.</span>
+        {touched && errors.apiKeyEnv && <span className="cmf-err">{errors.apiKeyEnv}</span>}
+      </label>
+      <label className="cmf-field">
+        <span className="cmf-lbl">Température <span className="cmf-opt">optionnel</span></span>
+        <input className="cmf-in" value={draft.temperature} placeholder="0,2" inputMode="decimal"
+          onChange={(e) => set({ temperature: e.target.value })} aria-invalid={touched && !!errors.temperature} />
+        {touched && errors.temperature && <span className="cmf-err">{errors.temperature}</span>}
+      </label>
+      <div className="cmf-actions">
+        <button type="button" className="btn quiet sm" onClick={onCancel}>Annuler</button>
+        <button type="button" className="btn sm" onClick={submit}>Enregistrer</button>
+      </div>
+    </div>
+  );
+}
+
 /* Model + effort in one compact trigger, as in the Codex composer: the AI
    Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
-   the EffortControl on top. */
+   the EffortControl on top, plus a "Modèles custom" group and its config card. */
 const VENDORS = ["Anthropic", "OpenAI", "Google", "Mistral AI"] as const;
 function ModelMenu({ placement }: { placement: "up" | "down" }) {
   const ws = useWorkspace();
   const [open, setOpen] = useState(false);
-  const model = modelOf(ws.model);
+  const [adding, setAdding] = useState(false);
+  const view = activeModelView(ws.model, ws.customModels);
   const effort = effortOf(ws.effort);
+  const closeMenu = () => { setOpen(false); setAdding(false); };
   return (
-    <ModelSelector open={open} onOpenChange={setOpen}>
+    <ModelSelector open={open} onOpenChange={(o) => { setOpen(o); if (!o) setAdding(false); }}>
       <ModelSelectorTrigger asChild>
-        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${model.label}, effort ${effort.label}`}>
-          <ModelLogo provider={model.provider} size={14} />
-          <span className="tlabel mb-name">{model.label}</span>
+        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${view.label}, effort ${effort.label}`}>
+          <ModelLogo provider={view.provider} size={14} />
+          <span className="tlabel mb-name">{view.label}</span>
           <span className="mb-sep" aria-hidden="true" />
           <EffortGauge level={effort.level} size={15} tone="muted" />
           <span className="tlabel mb-eff">{effort.label}</span>
@@ -67,25 +129,52 @@ function ModelMenu({ placement }: { placement: "up" | "down" }) {
         </button>
       </ModelSelectorTrigger>
       <ModelSelectorContent side={placement === "up" ? "top" : "bottom"} align="end">
-        <EffortControl value={ws.effort} onChange={ws.setEffort} />
-        <ModelSelectorCommand value={ws.model} label="Modèle">
-          <ModelSelectorInput placeholder="Rechercher un modèle" />
-          <ModelSelectorList>
-            <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
-            {VENDORS.map((v) => (
-              <ModelSelectorGroup key={v} heading={v}>
-                {MODELS.filter((m) => m.vendor === v).map((m) => (
-                  <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); setOpen(false); }} data-checked={m.id === ws.model || undefined}>
-                    <ModelSelectorLogo provider={m.provider} />
-                    <ModelSelectorName desc={m.desc}>{m.label}</ModelSelectorName>
-                    <Check size={14} className="msel-check" aria-hidden="true" />
-                  </ModelSelectorItem>
+        {adding ? (
+          <CustomModelForm
+            onCancel={() => setAdding(false)}
+            onSave={(d) => { const m = draftToModel(d); ws.addCustomModel(m); ws.setModel(m.id); closeMenu(); }}
+          />
+        ) : (
+          <>
+            <EffortControl value={ws.effort} onChange={ws.setEffort} />
+            <ModelSelectorCommand value={ws.model} label="Modèle">
+              <ModelSelectorInput placeholder="Rechercher un modèle" />
+              <ModelSelectorList>
+                <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
+                {VENDORS.map((v) => (
+                  <ModelSelectorGroup key={v} heading={v}>
+                    {MODELS.filter((m) => m.vendor === v).map((m) => (
+                      <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                        <ModelSelectorLogo provider={m.provider} />
+                        <ModelSelectorName desc={m.desc}>{m.label}</ModelSelectorName>
+                        <Check size={14} className="msel-check" aria-hidden="true" />
+                      </ModelSelectorItem>
+                    ))}
+                  </ModelSelectorGroup>
                 ))}
-              </ModelSelectorGroup>
-            ))}
-          </ModelSelectorList>
-        </ModelSelectorCommand>
-        <div className="msel-foot"><kbd>↑</kbd><kbd>↓</kbd> naviguer <kbd>⏎</kbd> choisir <kbd>Échap</kbd> fermer</div>
+                <ModelSelectorGroup heading="Modèles custom">
+                  {ws.customModels.map((m) => (
+                    <ModelSelectorItem key={m.id} value={m.id} keywords={[m.name, providerOf(m.provider).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                      <ModelSelectorLogo provider={providerOf(m.provider).logo} />
+                      <ModelSelectorName desc={customSpec(m)}>{m.name}</ModelSelectorName>
+                      <button type="button" className="msel-del" aria-label={`Supprimer ${m.name}`}
+                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); ws.removeCustomModel(m.id); }}>
+                        <Trash2 size={13} aria-hidden="true" />
+                      </button>
+                      <Check size={14} className="msel-check" aria-hidden="true" />
+                    </ModelSelectorItem>
+                  ))}
+                  <ModelSelectorItem value="__add-custom" keywords={["ajouter", "custom", "openai", "ollama", "anthropic", "local"]} className="msel-add" onSelect={() => setAdding(true)}>
+                    <span className="msel-logo msel-logo-add" aria-hidden="true"><Plus size={16} /></span>
+                    <ModelSelectorName desc="OpenAI compatible, Ollama, Anthropic API">Ajouter un modèle…</ModelSelectorName>
+                  </ModelSelectorItem>
+                </ModelSelectorGroup>
+              </ModelSelectorList>
+            </ModelSelectorCommand>
+            <div className="msel-foot"><kbd>↑</kbd><kbd>↓</kbd> naviguer <kbd>⏎</kbd> choisir <kbd>Échap</kbd> fermer</div>
+          </>
+        )}
       </ModelSelectorContent>
     </ModelSelector>
   );
