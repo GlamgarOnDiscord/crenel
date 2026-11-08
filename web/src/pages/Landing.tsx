@@ -83,8 +83,8 @@ export function Landing() {
 
       <section className="ln-wrap ln-stats" aria-label="En chiffres">
         <div><b>{CHECK_COUNT}</b><span>checks déterministes</span></div>
-        <div><b>22/22</b><span>failles trouvées sur notre banc</span></div>
-        <div><b>0/28</b><span>leurres signalés à tort</span></div>
+        <div><b>27/27</b><span>failles trouvées sur notre banc</span></div>
+        <div><b>0/34</b><span>leurres signalés à tort</span></div>
         <div><b>GET</b><span>par défaut, imposé par le client HTTP</span></div>
       </section>
 
