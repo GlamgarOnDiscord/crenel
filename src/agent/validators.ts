@@ -856,6 +856,15 @@ const exploreDomXssValidator: Validator = {
     if (tmpl) {
       const payloadEnc = encodeURIComponent(domXssPayload(t));
       full = resolveExploreUrl(d.url.replace(/__INJECT__/g, payloadEnc), env.stagingUrl) ?? url0;
+    } else if (d.url.includes("#")) {
+      // SPA hash route: the param lives in the fragment (…/#/search?q=…), not the
+      // main query. Inject there so the client router reads it.
+      const [head, ...fragParts] = d.url.split("#");
+      const frag = fragParts.join("#");
+      const [fpath, fquery = ""] = frag.split("?");
+      const fp = new URLSearchParams(fquery);
+      fp.set(d.param as string, domXssPayload(t));
+      full = resolveExploreUrl(`${head}#${fpath}?${fp.toString()}`, env.stagingUrl) ?? url0;
     } else {
       const base: ExploreRequest = { url: d.url, method: "GET", as: parseActor(d.as) };
       const req = injectParam(base, d.param as string, domXssPayload(t), where);
