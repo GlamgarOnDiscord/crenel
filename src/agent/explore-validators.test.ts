@@ -417,3 +417,29 @@ test("cors: a server reflecting any origin with credentials is proven; a fixed a
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
 });
+
+test("cross-actor: an endpoint public to anon that carries the owner's marker escalates to a proven anonymous leak", async () => {
+  // /obj/:id returns B's object (with B's marker) to EVERYONE incl. anon; a non-existent id -> 404.
+  // Claimed as attacker A, the validator must escalate to a proven broken-authentication leak (anon).
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    const m = u.pathname.match(/^\/obj\/([^/]+)$/);
+    if (!m) return json(404, {});
+    return m[1] === "6" ? json(200, { id: 6, owner: "acct_b_mk", item: "seat" }) : json(404, {});
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-anon-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+      projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a", marker: "acct_a_mk" }, b: { token: "tok-b", marker: "acct_b_mk" } } } },
+    };
+    const v = await validateClaim(claim("explore.cross-actor", { url: "/obj/6", attacker: "a", owner: "b", id: "6" }), env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.equal(v.ceiling, "critical");
+    assert.match(v.reason, /no token at all/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

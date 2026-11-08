@@ -537,11 +537,20 @@ const exploreCrossActorValidator: Validator = {
       control: `GET ${ctl} -> HTTP ${controlRes.status}; owner (${owner.toUpperCase()}) -> HTTP ${ownerRes.status}, sha256 ${sha(ownerRes.body).slice(0, 12)}`,
     };
     if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
-    // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out.
+    // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out —
+    // UNLESS that anonymous read carries the owner's own marker, which makes it a broken-authentication leak (worse
+    // than cross-tenant). A generic catalog served identically to everyone has no per-owner marker, so it stays public.
     if (attacker !== "anon") {
       const anonRes = await sendAs(req, "anon", env, url);
       evidence.control += `; anonymous -> HTTP ${anonRes.status}`;
       if (ok2xx(anonRes.status) && authzOracle({ attacker: anonRes, owner: ownerRes, control: controlRes, ownerMarkers: markers }).verdict === "leak") {
+        if (marker && anonRes.body.includes(marker)) {
+          const again = await sendAs(req, "anon", env, url);
+          if (ok2xx(again.status) && again.body.includes(marker)) {
+            const ev2: Evidence = { request: reqLine("GET", url, "anon"), response: `HTTP ${anonRes.status}\n${excerpt(anonRes.body)}`, sha256: sha(anonRes.body), control: `GET ${ctl} -> HTTP ${controlRes.status}; the anonymous body carries ${owner.toUpperCase()}'s marker` };
+            return { claimId: claim.id, state: "proven", validator: this.name, reason: `no token at all reads ${owner.toUpperCase()}'s object at ${path}: HTTP ${anonRes.status} and the body carries ${owner.toUpperCase()}'s marker (broken authentication, worse than cross-tenant)`, evidence: ev2, ceiling: "critical" };
+          }
+        }
         return no("an anonymous visitor gets the same object: public content, not a read across tenants (claim it for anon if that is the flaw)", evidence);
       }
     } else if (!marker) {
