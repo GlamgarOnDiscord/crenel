@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exposedSecrets } from "./exposed-secrets.js";
+import { PATTERNS } from "./exposed-secrets.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext } from "../core/types.js";
 
@@ -131,4 +132,13 @@ test("decoded views: keys split, joined, base64-encoded, escaped or reversed are
     assert.equal(hidden.state, "proven");
     assert.doesNotMatch(JSON.stringify(f), /51HiddenKeyAbcdefGhij0123/, "the key is redacted");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a private key needs its body: a lone or masked PEM header is not a key", () => {
+  const re = () => new RegExp(PATTERNS.find((p) => p.id === "private-key-block")!.regex.source, "g");
+  const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" + "x9Qk3".repeat(8);
+  assert.ok(re().test(`-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`));
+  assert.ok(re().test(`"-----BEGIN RSA PRIVATE KEY-----\\n${body}\\n"`), "escaped newlines in a JS string");
+  assert.ok(!re().test(`masked: "-----BEGIN PRIVATE KEY----- ••••"`));
+  assert.ok(!re().test(`grep -n '-----BEGIN PRIVATE KEY-----' infra/key.pem`));
 });

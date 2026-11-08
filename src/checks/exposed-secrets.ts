@@ -83,7 +83,7 @@ export const PATTERNS: SecretPattern[] = [
   { id: "npm-token", title: "npm access token", regex: /\bnpm_[A-Za-z0-9]{36}\b/g, severity: "high", sensitive: true },
   { id: "google-oauth-secret", title: "Google OAuth client secret", regex: /\bGOCSPX-[A-Za-z0-9_-]{20,}/g, severity: "high", sensitive: true },
   { id: "sendgrid-key", title: "SendGrid API key", regex: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, severity: "high", sensitive: true },
-  { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g, severity: "critical", sensitive: true },
+  { id: "private-key-block", title: "Private key block", regex: /-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----(?:\\[rn]|\s)+[A-Za-z0-9+\/=]{40,}/g, severity: "critical", sensitive: true },
   // A JWT is base64url, so "service_role" never appears in clear: decode the
   // payload and keep only tokens whose role is service_role (bypasses RLS).
   { id: "supabase-service-role", title: "Supabase service_role JWT", regex: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, severity: "critical", sensitive: true,
