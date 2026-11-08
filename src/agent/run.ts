@@ -116,6 +116,12 @@ export interface RunDeps {
   judge?: Judge;
   /** Override the checks (tests). Defaults to the registry. */
   checks?: Check[];
+  /**
+   * After the results: send new proven findings to the configured integrations
+   * (Slack, webhooks). Returns each delivery record, journaled by the run. These
+   * calls go to declared destinations, never to scan targets.
+   */
+  notify?: (findings: StoredFinding[], run: string, counts: { proven: number; leads: number; fixed: number }) => Promise<{ records: Record<string, unknown>[]; skipped: string[] }>;
   /** Run-level budget. */
   maxProbes?: number;
   maxMs?: number;
@@ -761,8 +767,30 @@ export class AgentRun {
     const leads = merged.filter((f) => f.state === "unproven").length;
     const fixed = merged.filter((f) => f.state === "fixed").length;
     this.journal.append("results", { proven, leads, fixed, ran: [...ran] });
+    if (this.deps.notify && !this.aborted && ran.size) await this.integrations(merged, { proven, leads, fixed });
     if (!this.aborted && this.intent !== "goal") await this.summary(merged);
     return merged;
+  }
+
+  /** Outbound notifications, journaled (host, event, status; never a secret). */
+  private async integrations(findings: StoredFinding[], counts: { proven: number; leads: number; fixed: number }): Promise<void> {
+    const t0 = Date.now();
+    try {
+      const { records, skipped } = await this.deps.notify!(findings, this.id, counts);
+      for (const r of records) this.journal.append("integration", r);
+      for (const s of skipped) this.journal.append("integration.skipped", { reason: s });
+      if (!records.length && !skipped.length) return;
+      this.ui({
+        kind: "tool", tool: "integrations.notify", args: `${records.filter((r) => r.ok).length}/${records.length} envoi(s)`, dur: ms(Date.now() - t0),
+        input: JSON.stringify({ proven: counts.proven }, null, 2),
+        lines: [
+          ...records.map((r) => `${String(r.integration)} ${String(r.event)} → ${String(r.host)}: ${r.ok ? "envoyé" : "non envoyé"}${r.status ? ` (${String(r.status)})` : ""}${r.error ? `, ${String(r.error)}` : ""}`),
+          ...skipped.map((s) => `ignoré: ${s}`),
+        ],
+      });
+    } catch (err) {
+      this.journal.append("integration.error", { message: (err as Error).message.slice(0, 200) });
+    }
   }
 
   private testsTool(findings: StoredFinding[]): void {

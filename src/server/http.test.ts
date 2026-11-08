@@ -11,6 +11,8 @@ import { exposedFiles } from "../checks/exposed-files.js";
 import type { Check } from "../core/types.js";
 import { headers } from "../checks/headers.js";
 import { readJournal, verifyJournal } from "../agent/journal.js";
+import type { FetchLike } from "../integrations/deliver.js";
+import { verifyCrenelSignature } from "../integrations/webhook.js";
 
 // fetch() drops a custom Host header, so the rebinding test goes through node:http.
 function rawStatus(base: string, path: string, headers: Record<string, string>): Promise<number> {
@@ -44,14 +46,14 @@ options:
 `;
 }
 
-async function setup(o: { active?: boolean; servesEnv?: boolean; checks?: Check[] } = {}): Promise<Ctx> {
+async function setup(o: { active?: boolean; servesEnv?: boolean; checks?: Check[]; fetch?: FetchLike } = {}): Promise<Ctx> {
   const dir = mkdtempSync(join(tmpdir(), "crenel-srv-"));
   const target = await startDemoTarget({ servesEnv: o.servesEnv });
   mkdirSync(join(dir, "dist"));
   writeFileSync(join(dir, "dist", "app.js"), 'const k = "sk_live_ABCDEFGHIJKLMNOP1234";\n');
   const cfgPath = join(dir, "crenel.config.yaml");
   writeFileSync(cfgPath, configYaml(target.url, o));
-  const srv = await startServer({ configPath: cfgPath, port: 0, token: "test-token", webDir: null, llm: "off", checks: o.checks ?? [exposedSecrets, headers] });
+  const srv = await startServer({ configPath: cfgPath, port: 0, token: "test-token", webDir: null, llm: "off", checks: o.checks ?? [exposedSecrets, headers], fetch: o.fetch, env: {} });
   return { dir, srv, target, cfgPath };
 }
 async function teardown(c: Ctx) {
@@ -251,4 +253,66 @@ test("toolbox backend: PUT /api/toolbox switches docker <-> wsl in the YAML, val
     if (prev === undefined) delete process.env.CRENEL_WSL; else process.env.CRENEL_WSL = prev;
     await teardown(c);
   }
+});
+
+test("integrations: Slack and a signed webhook set from the API, secrets kept out of responses and config, a scan notifies once and journals it", async () => {
+  const SLACK = "https://hooks.slack.com/services/T0AAAAAAA/B0BBBBBBB/abcdefghijklmnopqrstuvwx";
+  const sent: { url: string; headers: Record<string, string>; body: string }[] = [];
+  const fetchMock: FetchLike = async (url, init) => {
+    sent.push({ url, headers: init.headers, body: init.body ?? "" });
+    return { status: 200, headers: { get: () => null }, text: async () => (url.startsWith("https://hooks.slack.com") ? "ok" : "") };
+  };
+  const c = await setup({ fetch: fetchMock });
+  try {
+    const put = (path: string, body: unknown) => api(c, path, { method: "PUT", body: JSON.stringify(body) });
+    assert.equal((await put("/api/integrations/slack", { webhookUrl: "https://example.com/hook" })).status, 400);
+    const st = await (await put("/api/integrations/slack", { webhookUrl: SLACK })).json() as any;
+    assert.equal(st.slack.configured, true);
+    assert.equal(st.slack.enabled, true);
+    assert.deepEqual(st.allowedHosts, ["hooks.slack.com"]);
+    // A scan target cannot be a destination.
+    assert.equal((await post(c, "/api/integrations/webhooks", { name: "self", url: "https://127.0.0.1/hook" })).status, 422);
+    const created = await (await post(c, "/api/integrations/webhooks", { name: "ops", url: "https://hooks.example.com/crenel" })).json() as any;
+    assert.equal(created.secret.length >= 32, true);
+    const yaml = readFileSync(c.cfgPath, "utf8");
+    assert.doesNotMatch(yaml, /abcdefghijklmnop|B0BBBBBBB/);
+    assert.ok(!yaml.includes(created.secret));
+    const again = await (await api(c, "/api/integrations")).json() as any;
+    assert.doesNotMatch(JSON.stringify(again), /abcdefghijklmnop/);
+    assert.ok(!JSON.stringify(again).includes(created.secret));
+    assert.equal(again.webhooks[0].source, "file");
+
+    const t = await (await post(c, "/api/integrations/slack/test", {})).json() as any;
+    assert.equal(t.ok, true);
+    assert.equal(sent.at(-1)!.url, SLACK);
+
+    // A scan: the planted sk_live key is a new proven critical finding.
+    sent.length = 0;
+    const { id } = await (await post(c, "/api/runs", { prompt: "/scan", mode: "bypass" })).json() as { id: string };
+    const types: string[] = [];
+    await follow(c, id, (type) => { types.push(type); });
+    const slack = sent.filter((x) => x.url === SLACK);
+    assert.equal(slack.length, 1);
+    assert.match(slack[0]!.body, /Stripe/);
+    const hook = sent.filter((x) => x.url.startsWith("https://hooks.example.com"));
+    assert.ok(hook.length >= 2);
+    for (const h of hook) assert.ok(verifyCrenelSignature(created.secret, h.headers, h.body));
+    assert.ok(sent.every((x) => !x.url.includes("127.0.0.1")), "no notification to the scan target");
+    const journal = readJournal(join(c.dir, ".crenel", "runs", `${id}.jsonl`));
+    const recs = journal.filter((e) => e.type === "integration").map((e) => e.data as any);
+    assert.ok(recs.some((r) => r.integration === "slack" && r.ok && r.host === "hooks.slack.com"));
+    assert.ok(verifyJournal(journal).ok);
+    assert.doesNotMatch(readFileSync(join(c.dir, ".crenel", "runs", `${id}.jsonl`), "utf8") + readFileSync(join(c.dir, ".crenel", "audit.jsonl"), "utf8"), /abcdefghijklmnop/);
+
+    // Second scan: nothing new for Slack.
+    sent.length = 0;
+    const r2 = await (await post(c, "/api/runs", { prompt: "/scan", mode: "bypass" })).json() as { id: string };
+    await follow(c, r2.id);
+    assert.equal(sent.filter((x) => x.url === SLACK).length, 0);
+
+    assert.equal((await api(c, "/api/integrations/slack", { method: "DELETE" })).status, 200);
+    const off = await (await api(c, "/api/integrations")).json() as any;
+    assert.equal(off.slack.configured, false);
+    assert.equal(off.slack.enabled, false);
+  } finally { await teardown(c); }
 });

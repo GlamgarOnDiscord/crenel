@@ -24,6 +24,11 @@
 //   GET  /api/baseline/diff  POST /api/baseline
 //   GET  /api/authz  GET /api/tests (+ ?format=file)  GET /api/audit
 //   GET  /api/toolbox  PUT /api/toolbox {backend: docker|wsl, distro?}   optional toolbox
+//   GET  /api/integrations           destinations and their state (never a secret)
+//   PUT  /api/integrations/slack {webhookUrl?, enabled?, minSeverity?}   DELETE /api/integrations/slack
+//   POST /api/integrations/webhooks {name, url, events?, minSeverity?}   (returns a new secret once)
+//   DELETE /api/integrations/webhooks/:name
+//   POST /api/integrations/slack/test  POST /api/integrations/webhooks/:name/test
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -60,6 +65,10 @@ export interface ServeOptions {
   llmFactory?: (model: string) => Llm | null;
   /** Override checks (tests). */
   checks?: import("../core/types.js").Check[];
+  /** Outbound HTTP for integrations (tests mock it). */
+  fetch?: import("../integrations/deliver.js").FetchLike;
+  /** Environment for integration secrets (tests). */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface CrenelServer {
@@ -181,7 +190,13 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     try { cfg = config(); } catch (err) { throw new HttpError(422, (err as Error).message); }
     const goalText = typeof body.goal === "string" ? body.goal : undefined;
     const goal = goalText ? parseGoal(goalText, (body.budget ?? {}) as Partial<GoalBudget>) : undefined;
-    const run = new AgentRun({ config: cfg, configPath, store, grants, llm: llmFor(model), checks: opts.checks }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal });
+    const notify = async (findings: import("../core/types.js").Finding[], run: string, counts: { proven: number; leads: number; fixed: number }) => {
+      const { notify: send } = await import("../integrations/notify.js");
+      const r = await send({ config: cfg, stateDir: store.dir, findings, run, counts, fetch: opts.fetch, env: opts.env });
+      for (const rec of r.records) store.appendAudit({ ...rec });
+      return { records: r.records as unknown as Record<string, unknown>[], skipped: r.skipped };
+    };
+    const run = new AgentRun({ config: cfg, configPath, store, grants, llm: llmFor(model), checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal });
     runs.set(run.id, run);
     void run.start();
     return run;
@@ -346,6 +361,112 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       const next = writeConfigText(doc.toString());
       store.appendAudit({ at: new Date().toISOString(), kind: "toolbox-backend", backend, distro: typeof body.distro === "string" ? body.distro.trim() : undefined });
       return send(res, 200, { options: (next.options as Record<string, unknown>).toolbox });
+    }
+    if (seg[0] === "integrations") return integrations(method, seg.slice(1), body, res);
+    throw new HttpError(404, "not found");
+  }
+
+  // Integrations: destinations the user declares (Slack, signed webhooks).
+  // Non-secret settings go to options.integrations in the YAML (validated);
+  // secrets go to .crenel/secrets.json (0600) and are never sent back.
+  async function integrations(method: string, rest: string[], body: Record<string, unknown>, res: ServerResponse): Promise<void> {
+    const I = await import("../integrations/cli.js");
+    const { IntegrationsOptions, secretKey } = await import("../integrations/options.js");
+    const { SecretStore } = await import("../integrations/secrets.js");
+    const { isSlackWebhookUrl } = await import("../integrations/slack.js");
+    const { newWebhookSecret, MIN_SECRET_LENGTH } = await import("../integrations/webhook.js");
+    const secrets = new SecretStore(store.dir, opts.env);
+    const status = () => {
+      const recent = store.audit().filter((e) => e.kind === "integration").slice(-20).reverse();
+      return { ...I.integrationsStatus(config(), store.dir, opts.env), recent };
+    };
+    // Edit options.integrations in the YAML, validated before it is written.
+    const edit = (fn: (cur: Record<string, unknown>) => Record<string, unknown>) => {
+      const doc = parseDocument(readFileSync(configPath, "utf8"));
+      const cur = ((doc.toJS() as { options?: { integrations?: Record<string, unknown> } } | null)?.options?.integrations) ?? {};
+      const next = fn(structuredClone(cur));
+      const checked = IntegrationsOptions.safeParse(next);
+      if (!checked.success) throw new HttpError(422, `options.integrations: ${checked.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ")}`);
+      doc.setIn(["options", "integrations"], next);
+      writeConfigText(doc.toString());
+    };
+    const allowHost = (cur: Record<string, unknown>, host: string) => {
+      const hosts = Array.isArray(cur.allowedHosts) ? (cur.allowedHosts as string[]) : [];
+      if (config().scope.allowedHosts.some((h) => h.toLowerCase() === host)) throw new HttpError(422, `${host} is a scan target (scope.allowedHosts): it cannot also be a destination`);
+      cur.allowedHosts = [...new Set([...hosts, host])];
+    };
+    const audit = (e: Record<string, unknown>) => store.appendAudit({ at: new Date().toISOString(), ...e });
+
+    if (!rest[0] && method === "GET") return send(res, 200, status());
+
+    if (rest[0] === "slack") {
+      if (rest[1] === "test" && method === "POST") {
+        const r = await I.testIntegration("slack", config(), store.dir, { fetch: opts.fetch, env: opts.env });
+        store.appendAudit({ ...r });
+        return send(res, 200, r);
+      }
+      if (method === "PUT") {
+        const url = typeof body.webhookUrl === "string" ? body.webhookUrl.trim() : "";
+        if (url && !isSlackWebhookUrl(url)) throw new HttpError(400, "not a Slack Incoming Webhook URL (https://hooks.slack.com/services/…)");
+        const min = body.minSeverity;
+        if (min !== undefined && min !== "critical" && min !== "high") throw new HttpError(400, "minSeverity must be critical or high");
+        edit((cur) => {
+          const slack = { ...(cur.slack as Record<string, unknown> | undefined) };
+          if (typeof body.enabled === "boolean") slack.enabled = body.enabled;
+          else if (url) slack.enabled = true;
+          if (min) slack.minSeverity = min;
+          if (url) allowHost(cur, new URL(url).hostname);
+          cur.slack = slack;
+          return cur;
+        });
+        if (url) secrets.set(secretKey.slack, url);
+        audit({ kind: "integration-configured", integration: "slack", enabled: body.enabled, webhookUrlSaved: !!url });
+        return send(res, 200, status());
+      }
+      if (method === "DELETE") {
+        secrets.delete(secretKey.slack);
+        edit((cur) => { cur.slack = { ...(cur.slack as Record<string, unknown> | undefined), enabled: false }; return cur; });
+        audit({ kind: "integration-removed", integration: "slack" });
+        return send(res, 200, status());
+      }
+    }
+
+    if (rest[0] === "webhooks") {
+      const name = rest[1] ? decodeURIComponent(rest[1]) : undefined;
+      if (name && rest[2] === "test" && method === "POST") {
+        const r = await I.testIntegration(`webhook:${name}`, config(), store.dir, { fetch: opts.fetch, env: opts.env });
+        store.appendAudit({ ...r });
+        return send(res, 200, r);
+      }
+      if (!name && method === "POST") {
+        const hookName = String(body.name ?? "").trim().toLowerCase();
+        const url = String(body.url ?? "").trim();
+        let u: URL;
+        try { u = new URL(url); } catch { throw new HttpError(400, "a URL is required"); }
+        const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+        if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) throw new HttpError(400, "https required (plain http only to localhost)");
+        const given = typeof body.secret === "string" ? body.secret : "";
+        if (given && given.length < MIN_SECRET_LENGTH) throw new HttpError(400, `a signing secret needs at least ${MIN_SECRET_LENGTH} characters`);
+        edit((cur) => {
+          const hooks = (Array.isArray(cur.webhooks) ? cur.webhooks : []) as Record<string, unknown>[];
+          if (hooks.some((h) => h.name === hookName)) throw new HttpError(409, `a webhook named ${hookName} exists`);
+          allowHost(cur, u.hostname.toLowerCase());
+          hooks.push({ name: hookName, url, ...(Array.isArray(body.events) ? { events: body.events } : {}), ...(typeof body.minSeverity === "string" ? { minSeverity: body.minSeverity } : {}) });
+          cur.webhooks = hooks;
+          return cur;
+        });
+        const secret = given || newWebhookSecret();
+        secrets.set(secretKey.webhook(hookName), secret);
+        audit({ kind: "integration-configured", integration: `webhook:${hookName}`, host: u.hostname });
+        // The only time the secret leaves the machine's disk: shown once to the user who created it.
+        return send(res, 201, { ...status(), secret: given ? undefined : secret });
+      }
+      if (name && !rest[2] && method === "DELETE") {
+        edit((cur) => { cur.webhooks = ((Array.isArray(cur.webhooks) ? cur.webhooks : []) as Record<string, unknown>[]).filter((h) => h.name !== name); return cur; });
+        secrets.delete(secretKey.webhook(name));
+        audit({ kind: "integration-removed", integration: `webhook:${name}` });
+        return send(res, 200, status());
+      }
     }
     throw new HttpError(404, "not found");
   }
