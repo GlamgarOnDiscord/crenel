@@ -16,6 +16,12 @@ export function graphqlSuggestionsOracle(input: Observed): { verdict: "proven" |
   return { verdict: "denied", reason: "no GraphQL field suggestion in the response" };
 }
 
-/** Near-misses of universal fields: a server with suggestions on answers each with
- * "Did you mean …?". No schema knowledge needed. */
-export const SUGGESTION_PROBES = ["{ __typenam }", "{ __schem }", "{ __typ }"];
+/** Near-misses of universal/common field names: a server with suggestions on
+ * answers each with "Did you mean …?". graphql-js suggests meta-fields, graphql-core
+ * (Python) only real fields, so both the __typename near-misses and typos of the
+ * most common root fields are tried. No target-specific name, no schema knowledge. */
+export const SUGGESTION_PROBES = [
+  "{ __typenam }", "{ __schem }",
+  "{ usr }", "{ usrs }", "{ mee }", "{ nodee }", "{ serch }",
+  "{ postz }", "{ productz }", "{ orderz }", "{ commentz }", "{ itemz }",
+];

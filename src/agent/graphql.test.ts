@@ -14,6 +14,6 @@ test("graphql: non-graphql response -> denied", () => {
   const r = graphqlSuggestionsOracle({ status: 404, body: "not here" });
   assert.equal(r.verdict, "denied");
 });
-test("graphql: probes are universal near-misses of __typename/__schema", () => {
-  assert.ok(SUGGESTION_PROBES.length >= 1 && SUGGESTION_PROBES.every((p) => p.includes("__")));
+test("graphql: probes are GraphQL near-miss queries (no target-specific field)", () => {
+  assert.ok(SUGGESTION_PROBES.length >= 3 && SUGGESTION_PROBES.every((p) => p.trim().startsWith("{")));
 });
