@@ -476,3 +476,28 @@ test("injection: NoSQL operator injection on a single-param endpoint is proven v
     assert.match(v.reason, /NoSQL/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("reuse: a coupon that applies more than once (invalid rejected) is proven", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (u.pathname !== "/coupon" || req.method !== "POST") return json(404, {});
+    let chunks = ""; req.on("data", (c) => (chunks += c)); req.on("end", () => {
+      let body: any = {}; try { body = JSON.parse(chunks || "{}"); } catch { return json(400, {}); }
+      return body.code === "SAVE10" ? json(200, { valid: true, discount: 10 }) : json(404, { valid: false });
+    });
+    return undefined;
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-reuse-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
+      projectDir: dir, stagingUrl: base, checks: [], options: {},
+    };
+    const v = await validateClaim(claim("explore.reuse", { url: "/coupon", body: JSON.stringify({ code: "SAVE10" }), controlBody: JSON.stringify({ code: "NOPE" }), successMarkers: ["discount"] }), env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.equal(v.ceiling, "medium");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

@@ -28,6 +28,7 @@ import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
 import { massAssignOracle, buildBody } from "./massassign.js";
 import { corsOracle } from "./cors.js";
+import { reuseOracle } from "./reuse.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -1037,7 +1038,41 @@ const exploreCorsValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator];
+/* ---------------- explore.reuse ---------------- */
+// Business logic: a single-use artifact (coupon, credit, invite) applied more
+// than once. The validator replays the SAME application twice and an invalid one
+// as control; reuseOracle proves it only when both applications succeed and the
+// invalid one is rejected. Whether the artifact is single-use is the model's
+// reading. Mutating, so it needs active mode. See reuse.test.ts.
+const exploreReuseValidator: Validator = {
+  class: "explore.reuse",
+  name: "business-logic reuse (single-use artifact applied twice)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; method?: unknown; body?: unknown; contentType?: unknown; controlBody?: unknown; successMarkers?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (!env.scope.allowActiveTesting) return no("reuse replays a state-changing action: needs allowActiveTesting");
+    if (typeof d.url !== "string") return no("need detail.url");
+    if (typeof d.body !== "string") return no("need detail.body (the application that spends the artifact)");
+    if (typeof d.controlBody !== "string") return no("need detail.controlBody (the same shape with an invalid artifact, as a negative control)");
+    const markers = Array.isArray(d.successMarkers) ? d.successMarkers.filter((m): m is string => typeof m === "string" && m.length > 0).slice(0, 8) : [];
+    if (!markers.length) return no("need detail.successMarkers: strings that appear only when the artifact is actually applied");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const actor = parseActor(d.as);
+    const method = typeof d.method === "string" ? d.method : "POST";
+    const headers = { "content-type": typeof d.contentType === "string" ? d.contentType : "application/json" };
+    const send = async (body: string) => { const r = await sendAs({ url: d.url as string, method, headers, body, as: actor }, actor, env, url); return { status: r.status, body: r.body }; };
+    let first, second, control;
+    try { first = await send(d.body); second = await send(d.body); control = await send(d.controlBody); }
+    catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = reuseOracle({ first, second, control, successMarkers: markers });
+    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)} applied twice; invalid control rejected`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason);
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

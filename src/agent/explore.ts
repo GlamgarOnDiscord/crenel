@@ -91,7 +91,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -291,6 +291,7 @@ export class Explorer {
         `   jwt-none: {url, token, override?}. Donne un JWT valide; le validateur forge une version non signée (alg:none, claims modifiables via override) et prouve si le serveur l'accepte là où l'anonyme est refusé.`,
         `   mass-assignment: {url, field, value, update?, readUrl?, method?, bodyType?, as?}. Un champ que le client ne devrait pas pouvoir fixer (role, isAdmin, credits, plan, verified…): le validateur lit l'objet de l'acteur, fait un update SANS le champ (contrôle: il ne doit pas bouger) puis AVEC field=value, et prouve si la relecture montre exactement value. Mutant, sur l'objet de l'acteur, donc mode actif requis.`,
         `   cors: {url}. Mauvaise config CORS: le validateur envoie deux origines attaquantes distinctes et prouve si Access-Control-Allow-Origin les reflète toutes deux avec Allow-Credentials: true (lecture seule).`,
+        `   reuse: {url, body, controlBody, successMarkers:["texte présent seulement si l'artefact est appliqué"], method?, contentType?, as?}. Logique métier (coupon/crédit/invite à usage unique): le validateur applique DEUX fois le même artefact (body) et une fois un invalide (controlBody); prouvé si les deux applications réussissent et que l'invalide est rejeté. Mutant, mode actif requis.`,
     ];
     const used = `Budget restant: ${b.maxCalls - turn + 1} tour(s) dont celui-ci, ${Math.max(0, b.maxRequests - this.requests)} requête(s), ~${Math.max(0, b.maxTokens - this.tokens)} jetons.`;
     const ctx = this.d.context?.length ? `\nCe que le plan fixe a déjà trouvé (inutile de le refaire):\n${fence(untrusted("plan", this.d.context.slice(0, 40).join("\n"), 4000))}` : "";
@@ -578,7 +579,7 @@ export class Explorer {
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
-  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors") ? d.url : cls === "jwt-none" ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse") ? d.url : cls === "jwt-none" ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
   return u ? [u] : null;
