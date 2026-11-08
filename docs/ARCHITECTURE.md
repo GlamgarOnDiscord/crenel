@@ -71,6 +71,7 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 | `explore.mass-assignment` | A body field the client should not set is accepted and persisted | differential: the actor's own re-read shows the injected value; a control update without the field leaves it unchanged (active mode) |
 | `explore.cors` | CORS reflects any origin with credentials | differential: two distinct attacker origins are both reflected into `Access-Control-Allow-Origin` with `Allow-Credentials: true` (a wildcard is only a lead) |
 | `explore.reuse` | A single-use artifact (coupon, credit, invite) applied more than once | differential: the same application succeeds twice while an invalid artifact is rejected (active mode) |
+| `explore.graphql` | GraphQL field suggestions enabled, or query batching with no rate limit | suggestions: a near-miss of common fields returns "Did you mean" (read-only); batching: a batch of N queries runs as N results (active mode) |
 
 The older classes (`explore.replay`, `explore.cross-actor`, `explore.secret`,
 `explore.file-match`) replay a request, compare two actors, check a secret in a

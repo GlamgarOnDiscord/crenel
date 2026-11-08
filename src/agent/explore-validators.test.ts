@@ -554,3 +554,28 @@ test("graphql: a server with field suggestions on is proven", async () => {
     assert.equal(v.state, "proven", v.reason);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("graphql: query batching with no rate limit is proven", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    if (u.pathname !== "/graphql" || req.method !== "POST") { res.writeHead(404); res.end("{}"); return; }
+    let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+      let body: any; try { body = JSON.parse(c); } catch { res.writeHead(400); res.end("{}"); return; }
+      res.writeHead(200, { "content-type": "application/json" });
+      if (Array.isArray(body)) res.end(JSON.stringify(body.map(() => ({ data: { __typename: "Query" } })))); // batching on
+      else res.end(JSON.stringify({ data: { __typename: "Query" } })); // no suggestions
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-gqlb-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
+      projectDir: dir, stagingUrl: base, checks: [], options: {},
+    };
+    const v = await validateClaim(claim("explore.graphql", { url: "/graphql" }), env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.match(v.reason, /batching/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

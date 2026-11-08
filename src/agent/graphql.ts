@@ -25,3 +25,18 @@ export const SUGGESTION_PROBES = [
   "{ usr }", "{ usrs }", "{ mee }", "{ nodee }", "{ serch }",
   "{ postz }", "{ productz }", "{ orderz }", "{ commentz }", "{ itemz }",
 ];
+
+// Query batching: a JSON ARRAY of queries that the server runs in one request,
+// with no per-operation rate limit — DoS amplification / rate-limit bypass. The
+// proof is a differential the validator replays: a batch of N identical queries
+// comes back as an array of N results. Generic protocol behaviour, no signature.
+export function graphqlBatchOracle(input: { status: number; body: string; sent: number }): { verdict: "proven" | "lead" | "denied"; reason: string } {
+  const { sent } = input;
+  let j: unknown;
+  try { j = JSON.parse(input.body); } catch { return { verdict: "denied", reason: "the batch response is not JSON" }; }
+  if (Array.isArray(j) && j.length >= sent && sent >= 2) {
+    return { verdict: "proven", reason: `query batching is accepted with no rate limit: a batch of ${sent} queries ran and returned ${j.length} results in one request (DoS amplification)` };
+  }
+  if (Array.isArray(j)) return { verdict: "lead", reason: `the server returned an array of ${j.length} for a batch of ${sent}: review by hand` };
+  return { verdict: "denied", reason: "the server did not execute the batched array (batching off)" };
+}

@@ -29,7 +29,7 @@ import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
 import { massAssignOracle, buildBody } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
-import { graphqlSuggestionsOracle, SUGGESTION_PROBES } from "./graphql.js";
+import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -1109,7 +1109,19 @@ const exploreGraphqlValidator: Validator = {
         if (o.verdict === "lead") lead = o.reason;
       } catch (e) { lead = `probe failed: ${(e as Error).message}`; }
     }
-    return no(lead ?? "no GraphQL field suggestion");
+    // Query batching (needs active mode: a JSON array body is not a read). A batch
+    // of N identical queries that runs as N results proves batching with no rate limit.
+    if (env.scope.allowActiveTesting) {
+      try {
+        const n = 5;
+        const batch = JSON.stringify(Array.from({ length: n }, () => ({ query: "{ __typename }" })));
+        const r = await safeFetch(url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: batch, maxBytes: 128 * 1024 });
+        const o = graphqlBatchOracle({ status: r.status, body: r.body, sent: n });
+        if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL query batching at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} [${n}× { __typename }]`, response: o.reason }, ceiling: "medium" };
+        if (o.verdict === "lead" && !lead) lead = o.reason;
+      } catch (e) { if (!lead) lead = `batch probe failed: ${(e as Error).message}`; }
+    }
+    return no(lead ?? "no GraphQL field suggestion or batching");
   },
 };
 
