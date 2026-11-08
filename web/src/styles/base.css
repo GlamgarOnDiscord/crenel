@@ -569,6 +569,18 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .folder { position: relative; background: var(--panel); border-radius: var(--r-card); box-shadow: 0 0 0 1px var(--line); padding: 18px; display: grid; gap: 14px; align-content: start; transition: box-shadow .15s var(--ease); }
 .folder:hover { box-shadow: 0 0 0 1px var(--line-strong); }
 .folder.active { box-shadow: 0 0 0 1px var(--brand-line); }
+/* Integrations page: settings cards side by side, forms that wrap on a phone. */
+.integ-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.integ-form { display: grid; gap: 12px; }
+.integ-row2 { display: grid; grid-template-columns: minmax(0, 0.6fr) minmax(0, 1.4fr); gap: 12px; }
+.integ-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.integ-hosts { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.integ-secret { border-top: 1px solid var(--line-soft); display: grid; gap: 6px; padding-top: 14px; }
+.integ-secret-v { word-break: break-all; font-size: 12px; color: var(--fg); background: var(--well); border-radius: var(--r-control); padding: 6px 8px; }
+.integ-demo { margin: 0; }
+.integ-grid .codeblock { margin-top: 12px; }
+@media (max-width: 960px) { .integ-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .integ-row2 { grid-template-columns: minmax(0, 1fr); } .integ-grid .srow { flex-wrap: wrap; } }
 .folder:has(.stretched:focus-visible) { box-shadow: 0 0 0 1px var(--line), 0 0 0 3px var(--brand-ring); }
 .folder .fh { display: flex; align-items: center; gap: 12px; }
 .folder .nm { font-family: var(--f-ui); font-weight: 600; font-size: var(--t-title); background: none; border: 0; padding: 0; text-align: left; color: var(--fg); }
