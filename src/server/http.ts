@@ -23,6 +23,7 @@
 //   GET  /api/findings  GET /api/findings/:uid  POST /api/findings/:uid/triage (advice only)
 //   GET  /api/baseline/diff  POST /api/baseline
 //   GET  /api/authz  GET /api/tests (+ ?format=file)  GET /api/audit
+//   GET  /api/toolbox  PUT /api/toolbox {backend: docker|wsl, distro?}   optional toolbox
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -319,17 +320,32 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       return send(res, 200, store.tests());
     }
     if (p === "/api/audit") return send(res, 200, store.audit());
-    // Optional toolbox: read-only status for the console. Enabling it is a
-    // config change (options.toolbox.enabled), through PUT /api/config.
+    // Optional toolbox: status for the console. The backend (docker or wsl)
+    // is a config change: PUT /api/toolbox writes options.toolbox.backend (and
+    // wsl.distro) into the YAML, validated like PUT /api/config.
     if (p === "/api/toolbox" && method === "GET") {
-      const { dockerStatus, relayMode } = await import("../toolbox/docker.js");
+      const { backendFor } = await import("../toolbox/backend.js");
       const { toolboxOptions, TOOL_NAMES } = await import("../toolbox/run.js");
-      let options: unknown = null;
+      let options: ReturnType<typeof toolboxOptions> | null = null;
       let optionsError: string | undefined;
       try { options = toolboxOptions(config()); } catch (err) { optionsError = (err as Error).message; }
-      const st = await dockerStatus((options as { image?: string } | null)?.image);
+      const st = await backendFor(options ?? toolboxOptions({ ...config(), options: {} })).status();
       const egress = store.audit().filter((e) => e.kind === "egress").slice(-200);
-      return send(res, 200, { ...st, relay: relayMode(), tools: TOOL_NAMES, options, optionsError, egress });
+      // Docker fields stay at the top level for older consoles.
+      return send(res, 200, { ...(st.docker ?? {}), ...st, tools: TOOL_NAMES, toolStatus: st.tools, options, optionsError, egress });
+    }
+    if (p === "/api/toolbox" && method === "PUT") {
+      const backend = body.backend;
+      if (backend !== "docker" && backend !== "wsl") throw new HttpError(400, "backend must be docker or wsl");
+      const doc = parseDocument(readFileSync(configPath, "utf8"));
+      doc.setIn(["options", "toolbox", "backend"], backend);
+      if (typeof body.distro === "string" && body.distro.trim()) doc.setIn(["options", "toolbox", "wsl", "distro"], body.distro.trim());
+      const { ToolboxOptions } = await import("../toolbox/run.js");
+      const checked = ToolboxOptions.safeParse(((doc.toJS() as { options?: { toolbox?: unknown } } | null)?.options?.toolbox) ?? {});
+      if (!checked.success) throw new HttpError(422, `options.toolbox: ${checked.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ")}`);
+      const next = writeConfigText(doc.toString());
+      store.appendAudit({ at: new Date().toISOString(), kind: "toolbox-backend", backend, distro: typeof body.distro === "string" ? body.distro.trim() : undefined });
+      return send(res, 200, { options: (next.options as Record<string, unknown>).toolbox });
     }
     throw new HttpError(404, "not found");
   }

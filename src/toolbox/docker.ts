@@ -25,43 +25,24 @@
 //
 // Everything goes through `docker` argv arrays: no shell, no string building.
 
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startEgressProxy, type EgressProxy, type ProxyEvent } from "../core/egress-proxy.js";
 import type { Scope } from "../core/scope.js";
+import { execCapped, type ExecOptions, type ExecResult } from "./exec.js";
+
+export type { ExecResult } from "./exec.js";
 
 export const TOOLBOX_IMAGE = process.env.CRENEL_TOOLBOX_IMAGE ?? "crenel-toolbox:0.1.0";
 const LABEL = "crenel.toolbox=1";
 const RELAY_PORT = 3128;
 
-export interface ExecResult { code: number; stdout: string; stderr: string; timedOut: boolean }
 
 /** Run `docker <args>` without a shell. Output is capped (default 16 MB per stream). */
-export function docker(args: string[], o: { timeoutMs?: number; env?: NodeJS.ProcessEnv; maxBytes?: number; signal?: AbortSignal } = {}): Promise<ExecResult> {
-  const max = o.maxBytes ?? 16 * 1024 * 1024;
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(process.env.CRENEL_DOCKER ?? "docker", args, { env: o.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-    } catch (err) {
-      return resolve({ code: 127, stdout: "", stderr: (err as Error).message, timedOut: false });
-    }
-    let out = "", err = "", timedOut = false;
-    child.stdout.on("data", (b: Buffer) => { if (out.length < max) out += b.toString("utf8"); });
-    child.stderr.on("data", (b: Buffer) => { if (err.length < max) err += b.toString("utf8"); });
-    const t = o.timeoutMs ? setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, o.timeoutMs) : undefined;
-    const onAbort = () => child.kill("SIGKILL");
-    o.signal?.addEventListener("abort", onAbort, { once: true });
-    child.on("error", (e) => { err += e.message; });
-    child.on("close", (code) => {
-      if (t) clearTimeout(t);
-      o.signal?.removeEventListener("abort", onAbort);
-      resolve({ code: code ?? 1, stdout: out, stderr: err, timedOut });
-    });
-  });
+export function docker(args: string[], o: ExecOptions = {}): Promise<ExecResult> {
+  return execCapped(process.env.CRENEL_DOCKER ?? "docker", args, o);
 }
 
 export interface DockerStatus {

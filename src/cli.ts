@@ -4,7 +4,7 @@
 //   serve  local web console + JSON API (127.0.0.1, random token)
 //   list   show available checks
 //   init   write a starter config
-//   tools  optional confined toolbox (nuclei, katana, trufflehog) behind the scoped proxy
+//   tools  optional toolbox (nuclei, katana, trufflehog) behind the scoped proxy: Docker, or WSL on Windows
 //
 // Kept dependency-free (no arg parser) so the tool stays small and auditable.
 
@@ -278,6 +278,7 @@ async function main(): Promise<number> {
       return await toolsCommand({
         sub: _[1] ?? "status", config, configPath, json: !!flags.json,
         audit: typeof flags.audit === "string" ? flags.audit : undefined,
+        wsl: !!flags.wsl, yes: !!flags.yes,
         out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s),
       });
     } catch (err) {
@@ -365,7 +366,8 @@ async function main(): Promise<number> {
       "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog [--config path] [--json] [--audit log.jsonl]",
-      "                 optional Docker toolbox; its only network exit is Crenel's scoped proxy",
+      "                 optional toolbox (Docker, or a WSL distro on Windows); network only via Crenel's scoped proxy",
+      "  crenel tools  install --wsl [--yes]   apt-get install the allowlisted tools in the WSL distro (asks first)",
       "  crenel list                                show available checks",
       "",
       "Crenel only tests hosts you declare you own. Active checks stay off until",

@@ -171,12 +171,14 @@ export function katanaFindings(suggested: SuggestedResource[]): Finding[] {
 
 export interface SecretLead { detector: string; file: string; line: number; verified: boolean; fingerprint: string }
 
-/** Path relative to the mounted project (/project/...). */
-function projectRel(file: string): string {
-  return file.replace(/\\/g, "/").replace(/^\/project\/?/, "");
+/** Path relative to the project root as the tool saw it (/project in Docker, /mnt/c/... in WSL). */
+function projectRel(file: string, root: string): string {
+  const f = file.replace(/\\/g, "/");
+  const r = root.replace(/\/+$/, "");
+  return f === r ? "" : f.startsWith(`${r}/`) ? f.slice(r.length + 1) : f;
 }
 
-export function parseTrufflehog(text: string): { leads: SecretLead[]; findings: Finding[]; claims: Claim[]; raw: Untrusted; skipped: number } {
+export function parseTrufflehog(text: string, projectRoot = "/project"): { leads: SecretLead[]; findings: Finding[]; claims: Claim[]; raw: Untrusted; skipped: number } {
   const { rows, bad } = jsonLines(text);
   let skipped = bad;
   const leads: SecretLead[] = [];
@@ -187,7 +189,7 @@ export function parseTrufflehog(text: string): { leads: SecretLead[]; findings: 
     const meta = (((r.SourceMetadata ?? {}) as Record<string, unknown>).Data ?? {}) as Record<string, unknown>;
     const fsMeta = (meta.Filesystem ?? {}) as Record<string, unknown>;
     const detector = clean(r.DetectorName, 60);
-    const file = projectRel(clean(fsMeta.file, 300));
+    const file = projectRel(clean(fsMeta.file, 300), projectRoot);
     const line = Number(fsMeta.line ?? 0) || 0;
     if (!detector || !file || file.includes("..")) { skipped++; continue; }
     // Never keep the secret: a hash to deduplicate, nothing else.

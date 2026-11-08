@@ -123,7 +123,7 @@ test("nuclei does not run without scope.allowActiveTesting, even from the CLI", 
   const { runTool } = await import("./run.js");
   const config = { project: "t", projectDir: ".", checks: [], options: {}, scope: { allowedHosts: ["127.0.0.1"], allowActiveTesting: false, allowPrivate: true, stagingUrl: "http://127.0.0.1:4580" } };
   const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
-  const out = await runTool({ tool: "nuclei", config, projectDir: ".", scope, checks: REGISTRY, status: { available: true, image: "x", imagePresent: true } });
+  const out = await runTool({ tool: "nuclei", config, projectDir: ".", scope, checks: REGISTRY, status: { backend: "docker", ready: true, tools: { nuclei: { ready: true }, katana: { ready: true }, trufflehog: { ready: true } } } });
   assert.equal(out.ran, false);
   assert.match(out.reason ?? "", /allowActiveTesting/);
 });

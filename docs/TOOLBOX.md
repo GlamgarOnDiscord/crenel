@@ -1,6 +1,6 @@
 # Toolbox: external tools behind Crenel's perimeter
 
-Crenel can run three open-source tools in a Docker container:
+Crenel can run three open-source tools in a Docker container (default), or, on Windows, from a WSL distribution such as Kali Linux ([WSL backend](#wsl-backend-windows-opt-in), weaker confinement):
 
 | Tool | Version | What it does here | Network |
 |---|---|---|---|
@@ -83,6 +83,7 @@ nuclei and katana target `scope.stagingUrl`. In the console (or the API), `/tool
 options:
   toolbox:
     enabled: false        # include the tools in agent full scans
+    backend: docker       # or wsl (Windows), see "WSL backend"
     ratePerSec: 10        # shared by the run, max 50
     maxRequests: 10000    # then the proxy refuses everything
     timeoutSec: 1200
@@ -120,6 +121,80 @@ A direct probe passes only if no HTTP status line came back at all.
 Docker Desktop cannot share a host Unix socket with a container, so on those platforms (or with `CRENEL_PROXY_MODE=tcp`) the relay also joins the default bridge and dials `host.docker.internal`, where the proxy listens on the host loopback. The tool container is unchanged (internal network only); the relay then has a route out, but only runs `socat` with fixed arguments to the proxy. **This path has not been tested by us** (developed and tested on Linux only). Run `crenel tools selftest` first: if a probe fails, do not use the toolbox on that machine.
 
 Environment knobs: `CRENEL_TOOLBOX_IMAGE` (image tag), `CRENEL_DOCKER` (docker binary), `CRENEL_PROXY_MODE` (`unix` or `tcp`), `CRENEL_PROXY_BIND` (listen address in tcp mode).
+
+On Windows without Docker, see the [WSL backend](#wsl-backend-windows-opt-in).
+
+## WSL backend (Windows, opt-in)
+
+On Windows, the same tools can run from a WSL distribution (Kali Linux by default) instead of the Docker image. It is off by default and only used when the config says so:
+
+```yaml
+options:
+  toolbox:
+    backend: wsl            # docker (default) | wsl
+    wsl:
+      distro: kali-linux    # any installed distro: `wsl -l -q`
+      # proxyHost: 172.22.32.1   # only if auto-detection fails, see below
+```
+
+The console's *Paramètres* page has the same switch (it writes `options.toolbox.backend` through `PUT /api/toolbox`).
+
+```bash
+crenel tools status                 # backend, distro present, default user, each tool, templates
+crenel tools install --wsl          # prints every step, asks "yes", then installs (see below)
+crenel tools selftest               # proxy probes from the distro, and whether direct egress is open
+crenel tools nuclei --config crenel.config.yaml
+```
+
+### What is the same as Docker
+
+- The allowlist: only nuclei, katana and trufflehog, built by the same argv builders (`nucleiArgv`, `katanaArgv`, `trufflehogArgv`): same nuclei tags allowlist and denylist, `-ni`, `-duc`, bounded katana, trufflehog with `--no-verification`. The WSL runner refuses any other program, and runs each one with `wsl.exe -d <distro> --cd ~ --exec timeout ...` (an argv array: no Windows shell, no Linux shell).
+- nuclei loads only a filtered template set: `crenel tools install --wsl` downloads the same pinned `nuclei-templates` release as the Dockerfile (checked against the same sha256), runs the same `nuclei-filter.mjs` on it, then makes it root-owned and read-only. Crenel writes a marker with the filter's hash; nuclei is refused on WSL until the marker matches this Crenel's filter and pinned release. Template downloads are disabled in the tool's environment.
+- nuclei still needs `scope.allowActiveTesting: true`; katana and nuclei go through the gate exactly like the Docker tools (`tools.katana`, `tools.nuclei` ask in *ask* mode).
+- The scoped egress proxy (declared hosts only, private and metadata addresses refused, DNS pinned, read-only methods on plain HTTP, request budget, rate limit, journal), the outputs parsed as untrusted by the same adapters, the same validators to turn a lead into a proof.
+- trufflehog needs no network: on WSL it is given a proxy that refuses everything, so a stray request through the proxy settings is refused and journalled.
+
+### What the WSL backend does NOT guarantee (compared to Docker)
+
+| Guarantee | Docker backend | WSL backend |
+|---|---|---|
+| The tool cannot reach the network except through the proxy | yes: internal-only network, no route, no DNS | **no**: the tool is *pointed* at the proxy (`-proxy` flag and `HTTP(S)_PROXY`/`ALL_PROXY` passed by `WSLENV`), not *forced*. A tool that ignored those settings, a bug in its proxy handling, or its own DNS lookups can reach any host the machine can reach |
+| trufflehog has no network at all | yes: `--network none` | no: a refusing proxy, not a missing route |
+| Read-only root filesystem, no capabilities, `no-new-privileges` | yes | no: the tool runs as the distro's default user, with that user's rights in the distro |
+| Memory, CPU and pids caps | yes | no (only the wall-clock timeout) |
+| Project mounted read-only | yes | no: read through `/mnt/<drive>` with the Windows user's rights (trufflehog does not write, but nothing enforces it) |
+| Pinned binaries | yes: release archives checked by sha256 | no: the tools are Kali's apt packages, at whatever version the distro has (the nuclei *templates* are pinned and filtered) |
+
+What still holds: the proxy cannot be talked into anything outside the scope, every request that goes through it is journalled, and the tools that Crenel can start are the allowlisted ones only. `crenel tools selftest` on WSL reports direct egress as `OPEN` when a request without the proxy gets an answer; that is expected under WSL, and it is the reason to prefer Docker when you can. Tools that cannot be pointed at a proxy are not offered on the WSL backend.
+
+### Root, and passwords
+
+`wsl -d <distro> -u root` runs a command as root without a password. Crenel uses it **only** in `crenel tools install --wsl`, after printing every step and getting an explicit `yes` (or `--yes`): `apt-get update`, `apt-get install --no-install-recommends nuclei katana trufflehog curl ca-certificates`, removing the previous template set, then `chown`/`chmod` to make the new one root-owned and read-only. The download and unpacking of the templates run as the default user, and the filter runs from Crenel on the Windows side (through `\\wsl.localhost\<distro>\`).
+
+Crenel never asks for, stores or logs a password. The tools always run as the distro's default user; if that user is root (`id -u` is 0), the backend refuses to run anything: create a regular user and make it the default (`kali-linux config --default-user <name>`).
+
+### How the tools reach the proxy
+
+The proxy runs in Crenel on Windows. Where it listens depends on WSL's networking mode (read with `wslinfo --networking-mode`, or from the kernel name):
+
+- **mirrored** (`networkingMode=mirrored` in `.wslconfig`) and **WSL 1**: the distro shares Windows' loopback; the proxy listens on `127.0.0.1` only.
+- **NAT** (WSL 2's default): the proxy listens on the Windows side of the WSL virtual switch, the distro's default gateway (a private address, refused otherwise), and on nothing else. The Windows firewall may block it the first time: allow it for that interface only, or switch to mirrored networking.
+- Anything else, or a failed detection: set `options.toolbox.wsl.proxyHost`.
+
+The proxy asks for its per-run credential in every case, so another process that can reach that address cannot borrow it.
+
+### Testing on a real Windows machine
+
+The WSL code is developed on Linux and tested in CI with a fake `wsl.exe` (`src/toolbox/fixtures/fake-wsl.mjs`: UTF-16 output, `WSLENV`, `-u root`, tools that talk to the proxy). **It has not been run by us on Windows yet.** To check it on yours:
+
+1. `wsl --install -d kali-linux`, open it once and create the default user (not root).
+2. In `crenel.config.yaml`: `options.toolbox.backend: wsl`, a `scope.stagingUrl` you own (for example `node examples/vulnerable-app/server.mjs` on Windows, with `allowPrivate: true` and `127.0.0.1` declared).
+3. `crenel tools status`: the distro, `uid` not 0, the networking mode and the proxy address.
+4. `crenel tools install --wsl`, read the steps, type `yes`. Then `crenel tools status` again: three tools present, templates filtered.
+5. `crenel tools selftest`: `PASS` for the three proxy probes (403, 403, 200); the direct probes are informative.
+6. `crenel tools trufflehog`, `crenel tools katana`, then `crenel tools nuclei` with `allowActiveTesting: true`; check `.crenel/audit.jsonl` for the `egress` lines.
+
+Environment knobs: `CRENEL_WSL` (path of `wsl.exe`; the tests point it at the fake).
 
 ## Pinning
 

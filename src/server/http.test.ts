@@ -228,3 +228,27 @@ test("a full scan runs the live-site checks under the gate, and the replay valid
     assert.ok(c.target.seen.every((r) => r.method === "GET"));
   } finally { await teardown(c); }
 });
+
+test("toolbox backend: PUT /api/toolbox switches docker <-> wsl in the YAML, validated; GET reports the WSL status", async () => {
+  const c = await setup();
+  const prev = process.env.CRENEL_WSL;
+  process.env.CRENEL_WSL = join(c.dir, "no-wsl-here");
+  try {
+    const put = (body: unknown) => api(c, "/api/toolbox", { method: "PUT", body: JSON.stringify(body) });
+    assert.equal((await put({ backend: "podman" })).status, 400);
+    const before = readFileSync(c.cfgPath, "utf8");
+    assert.equal((await put({ backend: "wsl", distro: "kali; rm -rf /" })).status, 422);
+    assert.equal(readFileSync(c.cfgPath, "utf8"), before, "an invalid distro never reaches the file");
+    const ok = await (await put({ backend: "wsl" })).json() as any;
+    assert.equal(ok.options.backend, "wsl");
+    assert.match(readFileSync(c.cfgPath, "utf8"), /toolbox:\n\s+backend: wsl/);
+    const st = await (await api(c, "/api/toolbox")).json() as any;
+    assert.equal(st.backend, "wsl");
+    assert.equal(st.ready, false);
+    assert.match(st.reason, /WSL is not installed/);
+    assert.equal((await (await put({ backend: "docker" })).json() as any).options.backend, "docker");
+  } finally {
+    if (prev === undefined) delete process.env.CRENEL_WSL; else process.env.CRENEL_WSL = prev;
+    await teardown(c);
+  }
+});

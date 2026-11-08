@@ -36,7 +36,7 @@ import { estimateTokens, type Llm } from "./llm.js";
 import { GOAL_LABEL, parseGoal, runGoal, type GoalCheck, type GoalSpec } from "./goal.js";
 import { uidOf, type AuthzMatrix, type StateStore, type StoredFinding, type StoredTest } from "./state.js";
 import { z } from "zod";
-import { dockerStatus } from "../toolbox/docker.js";
+import { backendFor } from "../toolbox/backend.js";
 import { runTool, toolboxOptions, type ToolName } from "../toolbox/run.js";
 
 export type Decision = "once" | "always" | "deny";
@@ -370,15 +370,21 @@ export class AgentRun {
   private async toolboxTool(name: ToolName): Promise<{ found: { f: Finding; v?: ClaimVerdict }[]; ran: boolean }> {
     const tool = `tools.${name}`;
     const t0 = Date.now();
-    const input = JSON.stringify({ outil: name, conteneur: name === "trufflehog" ? "--network none, projet en lecture seule" : "réseau interne, sortie unique: proxy à périmètre", cible: name === "trufflehog" ? "projectDir" : this.scope.stagingUrl }, null, 2);
     let opts;
     try { opts = toolboxOptions(this.deps.config); } catch (err) {
       this.ui({ kind: "note", tone: "warn", text: `${tool}: ${(err as Error).message}` });
       return { found: [], ran: false };
     }
-    const st = await dockerStatus(opts.image);
-    if (!st.available || !st.imagePresent) {
-      this.ui({ kind: "note", tone: "muted", text: `${tool}: boîte à outils désactivée (${st.reason}). Le reste du scan continue.` });
+    const wsl = opts.backend === "wsl";
+    const where = wsl
+      ? (name === "trufflehog" ? `WSL ${opts.wsl.distro}, utilisateur non root, proxy qui refuse tout` : `WSL ${opts.wsl.distro}, utilisateur non root, trafic dirigé vers le proxy à périmètre (non forcé)`)
+      : (name === "trufflehog" ? "--network none, projet en lecture seule" : "réseau interne, sortie unique: proxy à périmètre");
+    const input = JSON.stringify({ outil: name, [wsl ? "wsl" : "conteneur"]: where, cible: name === "trufflehog" ? "projectDir" : this.scope.stagingUrl }, null, 2);
+    const backend = backendFor(opts);
+    const st = await backend.status();
+    const blocker = !st.ready ? st.reason : st.tools[name]?.ready ? null : st.tools[name]?.reason;
+    if (blocker) {
+      this.ui({ kind: "note", tone: "muted", text: `${tool}: boîte à outils désactivée (${blocker.replace(/^toolbox off: /, "")}). Le reste du scan continue.` });
       return { found: [], ran: false };
     }
     if (name !== "trufflehog") {
@@ -403,14 +409,14 @@ export class AgentRun {
     });
     const uid = this.ui({ kind: "tool", tool, args: name, input, lines: ["…"], dur: "" });
     const r = await runTool({
-      tool: name, config: this.deps.config, projectDir: this.projectDir, scope, checks: this.checks, signal: this.ac.signal, status: st,
+      tool: name, config: this.deps.config, projectDir: this.projectDir, scope, checks: this.checks, signal: this.ac.signal, status: st, backend,
       onEvent: (e) => this.deps.store.appendAudit({ ...e, run: this.id }),
     });
     this.unattended = false;
     const verdictOf = new Map(r.verdicts.map((v) => [v.claimId.replace(/^claim:/, ""), v]));
     const lines = r.ran
       ? [`${r.findings.length} piste(s), ${r.findings.filter((f) => f.state === "proven").length} prouvée(s) par un validateur Crenel`,
-        r.network === "none" ? "aucun réseau (--network none)" : `${r.proxy?.requests ?? 0} requête(s) via le proxy, ${r.proxy?.refused ?? 0} refusée(s)`,
+        r.network === "none" ? "aucun réseau (--network none)" : `${r.proxy?.requests ?? 0} requête(s) via le proxy, ${r.proxy?.refused ?? 0} refusée(s)${r.network === "wsl+proxy" ? " (WSL: proxy indiqué à l'outil, pas imposé)" : ""}`,
         ...(r.timedOut ? ["arrêté: délai dépassé"] : []),
         ...r.suggestions.slice(0, 5).map((s) => `route à déclarer dans la matrice: ${s.path}`)]
       : [`non lancé: ${r.reason}`];
