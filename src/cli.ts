@@ -61,9 +61,9 @@ options:
 
 // Flags that never take a value, so they do not swallow the following token
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
-const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm"]);
+const BOOLEAN_FLAGS = new Set(["verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
-const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host"]);
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report"]);
 
 function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
@@ -177,6 +177,13 @@ async function main(): Promise<number> {
         allowActiveTesting: config.scope.allowActiveTesting,
         stagingUrl: config.scope.stagingUrl,
       });
+    }
+
+    // Integrations (Slack, webhooks) only when asked: a scan never calls out
+    // to a destination by itself. See docs/INTEGRATIONS.md.
+    if (flags.notify) {
+      const { notifyAfterScan } = await import("./integrations/cli.js");
+      await notifyAfterScan(config, configPath, result.findings, (m) => process.stderr.write(`${m}\n`));
     }
 
     // Baseline: diff against a saved snapshot, and/or update it.
@@ -300,6 +307,42 @@ async function main(): Promise<number> {
     }
   }
 
+  if (cmd === "integrations") {
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 2;
+    }
+    const { integrationsCommand } = await import("./integrations/cli.js");
+    try {
+      return await integrationsCommand({
+        sub: _[1] ?? "status", arg: _[2], config, configPath, json: !!flags.json,
+        out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s),
+        stdin: async () => { const chunks: Buffer[] = []; for await (const c of process.stdin) chunks.push(c as Buffer); return Buffer.concat(chunks).toString("utf8"); },
+      });
+    } catch (err) {
+      process.stderr.write(`crenel integrations: ${(err as Error).message}\n`);
+      return 2;
+    }
+  }
+
+  if (cmd === "github-comment") {
+    // In a GitHub Action: one PR comment summarising the proven findings of a
+    // JSON report (crenel scan --out), with the workflow's GITHUB_TOKEN.
+    if (typeof flags.report !== "string") {
+      process.stderr.write("crenel github-comment --report crenel.json\n");
+      return 2;
+    }
+    const { githubCommentCommand } = await import("./integrations/cli.js");
+    return githubCommentCommand({
+      reportPath: flags.report, configPath: (flags.config as string) ?? defaultConfigPath(),
+      out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s),
+    });
+  }
+
   if (cmd === "triage") {
     // Experimental: LLM triage of leads via the local Claude CLI. Advice only.
     const configPath = (flags.config as string) ?? defaultConfigPath();
@@ -372,7 +415,8 @@ async function main(): Promise<number> {
       "  crenel init   [--config path] [--force]   write a starter config",
       "  crenel scan   [--config path] [--json] [--out file.json] [--sarif file.sarif] [--junit file.xml]",
       "                 [--fail-on critical|high|medium|low] [--baseline file.json] [--update-baseline]",
-      "                 [--audit log.jsonl] [--verbose]",
+      "                 [--audit log.jsonl] [--notify] [--verbose]",
+      "                 --notify: send new proven findings to the configured Slack and webhooks",
       "  crenel serve  [--config path] [--port 4100] [--open] [--llm]      local web console and API",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
       "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
@@ -381,6 +425,9 @@ async function main(): Promise<number> {
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",
       "                 optional toolbox (Docker, or a WSL distro on Windows); network only via Crenel's scoped proxy",
       "  crenel tools  install --wsl [--yes]   apt-get install the allowlisted tools in the WSL distro (asks first)",
+      "  crenel integrations status|test slack|test webhook:<name>|set-secret slack|webhook:<name> [--json]",
+      "                 Slack and signed webhooks (secret on stdin, kept in .crenel/secrets.json, 0600)",
+      "  crenel github-comment --report crenel.json   PR comment of the proven findings (GitHub Action, GITHUB_TOKEN)",
       "  crenel list                                show available checks",
       "",
       "Crenel only tests hosts you declare you own. Active checks stay off until",
