@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, Check, Copy, Eye, FileCode2, FlaskConical, Github, Hand, KeyRound, LayoutDashboard,
-  ListChecks, Radar, ShieldCheck, Users, Zap,
+  ArrowRight, Check, Copy, Eye, FileCode2, Github, Hand, KeyRound,
+  ListChecks, Radar, ShieldCheck, Zap,
 } from "lucide-react";
 import { Mark, Wordmark, Mascot } from "../brand/Logo.tsx";
-import { Shimmer } from "../components/ai/shimmer.tsx";
 import { REPO_URL, DOCS_URL } from "../lib/links.ts";
 import "@fontsource/instrument-serif/latin-400.css";
 import "@fontsource/instrument-serif/latin-400-italic.css";
-import { BundleFigure, CiFigure, GateFigure, MatrixFigure, ProofBenchFigure } from "../components/iso/IsoFigures.tsx";
+import { ProofBenchFigure } from "../components/iso/IsoFigures.tsx";
+import { HeroAgent } from "../components/landing/HeroAgent.tsx";
+import { FeatureCards } from "../components/landing/FeatureCards.tsx";
 import "../styles/landing.css";
 import "../styles/iso.css";
 
@@ -55,6 +56,11 @@ function useReveal() {
   return ref;
 }
 
+// Four-point star used as the sparkle accent.
+function Spark() {
+  return <svg viewBox="0 0 10 10"><path d="M5 0 C5.4 3.2 6.8 4.6 10 5 C6.8 5.4 5.4 6.8 5 10 C4.6 6.8 3.2 5.4 0 5 C3.2 4.6 4.6 3.2 5 0Z" /></svg>;
+}
+
 // Pill badge flanked by two hairlines ending in a diamond.
 function Badge({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
@@ -80,53 +86,6 @@ function InstallField() {
         {done ? <Check size={15} /> : <Copy size={15} />}<span>{done ? "Copié" : "Copier"}</span>
       </button>
       <span className="sr-only" aria-live="polite">{done ? "Copié dans le presse-papiers" : ""}</span>
-    </div>
-  );
-}
-
-// The console as the product shot: sidebar, the agent transcript, the proof.
-function ConsoleShot() {
-  return (
-    <div className="lx-shot" aria-label="Aperçu de la console Crenel" role="img">
-      <div className="lx-shot-glow" aria-hidden="true" />
-      <div className="lx-app" aria-hidden="true">
-        <aside className="lx-app-side">
-          <div className="lx-app-brand"><Mark size={18} /><b>crenel</b></div>
-          <div className="lx-app-search mono">Rechercher <kbd>⌘K</kbd></div>
-          <span className="lx-app-h">Espace</span>
-          <span className="lx-app-nav on"><LayoutDashboard size={13} />Vue d'ensemble</span>
-          <span className="lx-app-nav"><Radar size={13} />Scans</span>
-          <span className="lx-app-nav"><ShieldCheck size={13} />Failles<em>3</em></span>
-          <span className="lx-app-nav"><Users size={13} />Autorisation</span>
-          <span className="lx-app-nav"><FlaskConical size={13} />Tests</span>
-          <span className="lx-app-h">Cibles</span>
-          <span className="lx-app-nav"><i className="lx-dot a" />acme-app</span>
-          <span className="lx-app-nav"><i className="lx-dot" />acme-staging</span>
-        </aside>
-        <main className="lx-app-main">
-          <div className="lx-app-top">
-            <span className="lx-crumb">Cibles / acme-app / <b>Agent</b></span>
-            <span className="mode"><Eye size={12} />Lecture seule</span>
-          </div>
-          <div className="lx-app-body mono">
-            <div className="u">› Scanne acme-app, et prouve ce que tu trouves</div>
-            <div className="r"><i className="b" />scan.secrets <s>(bundle en ligne)</s></div>
-            <div className="x"><span className="t crit">CRIT</span> sk_live_ dans assets/index-4f2a.js <span className="p">prouvé</span></div>
-            <div className="r"><i className="b a" /><Shimmer>authz.matrix</Shimmer> <s>(compte A → objet de B)</s></div>
-            <div className="lx-perm">Envoyer 4 GET à staging.acme.app ? <span className="on">Autoriser une fois</span><span>Toujours</span><span>Refuser</span></div>
-            <div className="x"><span className="t high">HAUTE</span> GET /api/projects/proj_b_1 → 200 ×3 <span className="p">prouvé</span></div>
-            <div className="x"><span className="g">gardé</span> 3 tests de régression prêts pour la CI</div>
-          </div>
-        </main>
-        <aside className="lx-app-proof">
-          <span className="lx-app-h">Preuve · authz.matrix</span>
-          <div className="pf"><b>Propriétaire</b><span>B lit proj_b_1</span><em className="ok">200</em></div>
-          <div className="pf hot"><b>Attaquant</b><span>A lit proj_b_1</span><em className="bad">200 ×3</em></div>
-          <div className="pf"><b>Contrôle</b><span>sans session</span><em>401</em></div>
-          <div className="pf-foot">Rejouable · <span className="mono">crenel replay f_7c2</span></div>
-        </aside>
-      </div>
-      <div className="lx-scan" aria-hidden="true"><span className="lx-scan-chip mono">{CHECK_COUNT} checks</span></div>
     </div>
   );
 }
@@ -170,6 +129,11 @@ export function Landing() {
       <header className="lx-hero">
         <div className="lx-curtain" aria-hidden="true"><i className="lx-pillar" /></div>
         <div className="lx-wrap lx-hero-in">
+          <div className="lx-hero-logo" aria-hidden="true">
+            <i className="ring r1" /><i className="ring r2" />
+            <span className="orbit o1"><Spark /></span><span className="orbit o2"><Spark /></span><span className="orbit o3"><Spark /></span>
+            <Mark size={76} mood="hello" />
+          </div>
           <Badge><span className="lx-tag mono">MIT</span>Open source, lecture seule par défaut</Badge>
           <h1>Attaquez votre app<br /><span className="lx-serif">avant qu'on le fasse.</span></h1>
           <p className="lx-sub">Crenel cherche les secrets exposés et les failles d'autorisation entre comptes, prouve chacune par une requête rejouable, puis la garde en CI.</p>
@@ -182,7 +146,7 @@ export function Landing() {
           </div>
           <Link to="/app/overview" className="lx-textlink">Ouvrir la console <ArrowRight size={14} /></Link>
         </div>
-        <div className="lx-wrap lx-hero-shot"><ConsoleShot /></div>
+        <div className="lx-wrap lx-hero-shot"><HeroAgent /></div>
       </header>
 
       {/* ---------- Checks marquee ---------- */}
@@ -218,24 +182,7 @@ export function Landing() {
           <span className="lx-kicker">Crenel, dans votre terminal et votre CI, pour…</span>
           <h2 id="p-t">Passer d'une liste d'alertes<br />à des failles prouvées.</h2>
         </div>
-        <div className="lx-bento">
-          <article className="lx-card" data-reveal>
-            <BundleFigure />
-            <p className="lx-card-t"><b>Le bundle relu, chunk par chunk.</b> Chaque fichier JS servi est lu, source maps comprises. Une clé n'est vérifiée en direct que si vous l'autorisez.</p>
-          </article>
-          <article className="lx-card" data-reveal>
-            <MatrixFigure />
-            <p className="lx-card-t"><b>Autorisation entre comptes.</b> Chaque objet de B lu par A, par C et sans session. Un 200 qui ne devrait pas l'être est une faille, rejouée avant d'être signalée.</p>
-          </article>
-          <article className="lx-card" data-reveal>
-            <GateFigure />
-            <p className="lx-card-t"><b>Vous gardez la main.</b> Une question avant chaque sonde réseau, sur les seuls hôtes déclarés. Chaque envoi est écrit dans un journal chaîné.</p>
-          </article>
-          <article className="lx-card" data-reveal>
-            <CiFigure />
-            <p className="lx-card-t"><b>Gardé en CI.</b> Chaque preuve devient un test de régression. Sans correctif, le build reste rouge.</p>
-          </article>
-        </div>
+        <FeatureCards />
       </section>
 
       {/* ---------- Bench tiles ---------- */}

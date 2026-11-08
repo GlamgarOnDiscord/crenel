@@ -28,6 +28,5 @@
 .iso .press.down .face, .iso .press:hover .face.top, .iso .press.on .face { stroke: var(--iso-live); }
 .iso .press.on .face.top { fill: color-mix(in srgb, var(--iso-live) 10%, #26282C); }
 @media (prefers-reduced-motion: reduce) { .iso .press { transition: none; } }
-/* In the landing bento every plate gets the same drawing area, so cards line up. */
-.lx-card .iso svg { aspect-ratio: 4 / 3; }
+/* In the landing, the plate keeps a steady drawing area. */
 .lx-why-art .iso svg { aspect-ratio: 5 / 4; }
