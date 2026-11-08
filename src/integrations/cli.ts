@@ -15,6 +15,8 @@ import { isSlackWebhookUrl, sendSlack, slackTestMessage } from "./slack.js";
 import { MIN_SECRET_LENGTH, sendWebhook } from "./webhook.js";
 import { notify } from "./notify.js";
 import { postPrComment } from "./github.js";
+import { postCheckRun } from "./checks.js";
+import type { Severity } from "../core/types.js";
 import { messages, resolveLocale } from "./i18n.js";
 
 export const stateDirOf = (configPath: string) => join(dirname(resolve(configPath)), ".crenel");
@@ -145,5 +147,21 @@ export async function githubCommentCommand(o: { reportPath: string; configPath: 
   // A workflow command on stdout: shows as a warning annotation on the run.
   if (r.action === "skipped") o.out(`::warning::Crenel PR comment skipped: ${r.reason}\n`);
   else o.out(`PR comment ${r.action}${r.url ? `: ${r.url}` : ""}\n`);
+  return 0;
+}
+
+/** `crenel github-check --report crenel.json --fail-on high`: a "Crenel" check run under the GitHub App; never fails the job. */
+export async function githubCheckCommand(o: { reportPath: string; configPath: string; failOn: string; project?: string; out: (s: string) => void; err: (s: string) => void; fetch?: FetchLike; env?: NodeJS.ProcessEnv }): Promise<number> {
+  let report: { project?: string; findings?: Finding[] };
+  try { report = JSON.parse(readFileSync(o.reportPath, "utf8")); } catch (err) { o.err(`Cannot read the report ${o.reportPath}: ${(err as Error).message}\n`); return 2; }
+  if (!Array.isArray(report.findings)) { o.err(`${o.reportPath} is not a Crenel JSON report (crenel scan --out)\n`); return 2; }
+  const failOn = (["critical", "high", "medium", "low", "info", "none"].includes(o.failOn) ? o.failOn : "high") as Severity | "none";
+  let io: ReturnType<typeof integrationsOptions> | null = null;
+  try { io = integrationsOptions(loadConfig(o.configPath)); } catch { /* no config: defaults */ }
+  const r = await postCheckRun({ findings: report.findings, project: o.project ?? report.project ?? "project", failOn, env: o.env, fetch: o.fetch, locale: resolveLocale(io?.locale, o.env) });
+  const store = new StateStore(stateDirOf(o.configPath));
+  for (const rec of r.records) store.appendAudit({ ...rec });
+  if (r.action === "skipped") o.out(`::warning::Crenel check run skipped: ${r.reason}\n`);
+  else o.out(`Check run created (${r.conclusion})${r.url ? `: ${r.url}` : ""}\n`);
   return 0;
 }

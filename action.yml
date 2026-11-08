@@ -49,6 +49,9 @@ inputs:
   app-private-key:
     description: The GitHub App's private key, from a secret (secrets.CRENEL_APP_PRIVATE_KEY)
     default: ""
+  check-run:
+    description: With a GitHub App that has "Checks read and write", add a "Crenel" check run (app name and logo, summary, line annotations) to the commit
+    default: "true"
   locale:
     description: Language of the PR comment when options.integrations.locale is auto (en, fr); empty means auto
     default: ""
@@ -101,6 +104,29 @@ runs:
         CRENEL_CONFIG: ${{ inputs.config }}
         CRENEL_REPORT: ${{ inputs.report }}
       run: node "$GITHUB_ACTION_PATH/dist/cli.js" github-comment --report "$CRENEL_REPORT" --config "$CRENEL_CONFIG"
+    # Check run under the app's name and logo. A separate token, because the
+    # app may not have accepted the Checks permission yet: then this step only
+    # warns and the PR comment above is unaffected.
+    - id: check-token
+      if: ${{ always() && inputs.check-run == 'true' && inputs.app-private-key != '' && (inputs.app-client-id != '' || inputs.app-id != '') }}
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-client-id || inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+        permission-checks: write
+    - if: ${{ always() && steps.check-token.outputs.token != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
+        CRENEL_LOCALE: ${{ inputs.locale }}
+        CRENEL_CONFIG: ${{ inputs.config }}
+        CRENEL_REPORT: ${{ inputs.report }}
+        CRENEL_FAIL_ON: ${{ inputs.fail-on }}
+      run: node "$GITHUB_ACTION_PATH/dist/cli.js" github-check --report "$CRENEL_REPORT" --config "$CRENEL_CONFIG" --fail-on "$CRENEL_FAIL_ON"
+    - if: ${{ always() && inputs.check-run == 'true' && inputs.app-private-key != '' && steps.check-token.outputs.token == '' }}
+      shell: bash
+      run: echo "::warning::Crenel check run skipped: the GitHub App has no Checks permission yet (Repository permissions, Checks, Read and write, then accept it on the installation)"
     - shell: bash
       env:
         CRENEL_EXIT: ${{ steps.scan.outputs.exit }}

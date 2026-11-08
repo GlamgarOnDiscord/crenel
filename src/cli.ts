@@ -357,6 +357,19 @@ async function main(): Promise<number> {
     });
   }
 
+  if (cmd === "github-check") {
+    // In a GitHub Action with a GitHub App token: a "Crenel" check run with a summary and line annotations.
+    if (typeof flags.report !== "string") {
+      process.stderr.write("crenel github-check --report crenel.json [--fail-on high]\n");
+      return 2;
+    }
+    const { githubCheckCommand } = await import("./integrations/cli.js");
+    return githubCheckCommand({
+      reportPath: flags.report, configPath: (flags.config as string) ?? defaultConfigPath(), failOn: String(flags["fail-on"] ?? "high"),
+      out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s),
+    });
+  }
+
   if (cmd === "explore") {
     // Free exploration alone: the model picks its requests and reads within the
     // declared perimeter; only the generic validators decide what is proven.
@@ -501,6 +514,7 @@ async function main(): Promise<number> {
       "  crenel integrations status|test slack|test webhook:<name>|set-secret slack|webhook:<name> [--json]",
       "                 Slack and signed webhooks (secret on stdin, kept in .crenel/secrets.json, 0600)",
       "  crenel github-comment --report crenel.json   PR comment of the proven findings (GitHub Action, GITHUB_TOKEN)",
+      "  crenel github-check --report crenel.json     \"Crenel\" check run with annotations (GitHub Action, GitHub App token)",
       "  crenel list                                show available checks",
       "  crenel --version                           print the version",
       "",

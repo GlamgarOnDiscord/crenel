@@ -27,6 +27,8 @@ export interface Messages {
   prMore(n: number): string;
   prFooter(leads: number, codeScanningUrl?: string): string;
   prRunLink: string;
+  /** Check run annotation prefix for an unproven finding */
+  lead: string;
   /** Slack */
   slackText(n: number, bySeverity: string, project: string): string;
   slackHeader(n: number, project: string): string;
@@ -50,6 +52,7 @@ const en: Messages = {
   prMore: (n) => `…and ${n} more.`,
   prFooter: (leads, url) => `Each proven finding has a replayable proof${url ? ` in [code scanning](${url})` : ""}. ${leads} ${leads === 1 ? "lead" : "leads"} not listed: a lead is not proven and never fails the build.`,
   prRunLink: "Workflow run",
+  lead: "Lead (not proven)",
   slackText: (n, by, project) => `Crenel: ${n} new proven ${n === 1 ? "finding" : "findings"} (${by}) on ${project}`,
   slackHeader: (n, project) => `${n} new proven ${n === 1 ? "finding" : "findings"}: ${project}`,
   slackFields: { severity: "Severity", check: "Check", location: "Location" },
@@ -72,6 +75,7 @@ const fr: Messages = {
   prMore: (n) => `…et ${n} de plus.`,
   prFooter: (leads, url) => `Chaque faille prouvée a une preuve rejouable${url ? ` dans le [code scanning](${url})` : ""}. ${leads} ${leads <= 1 ? "piste non listée" : "pistes non listées"} : une piste n'est pas prouvée et ne casse jamais le build.`,
   prRunLink: "Exécution du workflow",
+  lead: "Piste (non prouvée)",
   slackText: (n, by, project) => `Crenel : ${n} ${n <= 1 ? "nouvelle faille prouvée" : "nouvelles failles prouvées"} (${by}) sur ${project}`,
   slackHeader: (n, project) => `${n} ${n <= 1 ? "nouvelle faille prouvée" : "nouvelles failles prouvées"} : ${project}`,
   slackFields: { severity: "Sévérité", check: "Contrôle", location: "Emplacement" },
