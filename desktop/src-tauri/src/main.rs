@@ -209,7 +209,10 @@ async fn open_project(app: AppHandle, webview: Webview, engine: State<'_, Engine
             }
         }
     });
-    Ok(link.to_string())
+    // Open the console itself (/app), not the landing page at /.
+    let mut console = link;
+    console.set_path("/app");
+    Ok(console.to_string())
 }
 
 fn main() {
