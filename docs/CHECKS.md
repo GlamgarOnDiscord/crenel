@@ -15,6 +15,7 @@ empty list runs every read-only check.
 | dependency-risk | Malicious locked versions, install scripts, non-registry deps, no lockfile | yes (denylist) | no |
 | ci-hardening | `pull_request_target`, unpinned actions, install without `--ignore-scripts` | no (leads) | no |
 | headers | Missing security headers and cookie flags | yes (live response) | yes (stagingUrl) |
+| cloudflare-access | Not a check: one info lead per declared host that answered with Cloudflare Access's login instead of the app (every live check treats it as not reached). Service tokens: [USAGE.md](USAGE.md#hosts-behind-cloudflare-access) | no (info lead) | from any live check |
 | cloudflare-audit | Normalised output of Cloudflare's security-audit-skill | passes its verdict through | no |
 | mcp-surface | Committed agent/MCP config and the servers it declares | no (leads) | no |
 | dockerfile | Container hardening in your Dockerfile(s) | no (leads) | no |
