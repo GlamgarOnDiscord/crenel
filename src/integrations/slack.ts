@@ -32,8 +32,9 @@ export interface SlackMessage { text: string; blocks: Record<string, unknown>[] 
 
 export function slackFindingsMessage(findings: Finding[], ctx: { project: string; run?: string }): SlackMessage {
   const n = findings.length;
-  const worst = findings.some((f) => f.severity === "critical") ? "critical" : "high";
-  const text = clip(`Crenel: ${n} new proven ${worst === "critical" ? "critical" : "high"} finding${n > 1 ? "s" : ""} on ${ctx.project}`, 150);
+  const bySev = (["critical", "high", "medium", "low", "info"] as Severity[])
+    .map((s) => [s, findings.filter((f) => f.severity === s).length] as const).filter(([, c]) => c > 0).map(([s, c]) => `${c} ${s}`).join(", ");
+  const text = clip(`Crenel: ${n} new proven finding${n > 1 ? "s" : ""} (${bySev}) on ${ctx.project}`, 150);
   const blocks: Record<string, unknown>[] = [
     { type: "header", text: { type: "plain_text", text: clip(`${n} new proven finding${n > 1 ? "s" : ""}: ${ctx.project}`, 150), emoji: false } },
   ];

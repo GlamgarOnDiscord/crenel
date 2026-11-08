@@ -172,6 +172,7 @@ test("notify: only new proven findings at the threshold, marked once delivered, 
   const slack = m.calls.filter((c) => c.url.startsWith("https://hooks.slack.com"));
   assert.equal(slack.length, 1);
   assert.match(slack[0]!.body, /2 new proven findings/);
+  assert.equal(JSON.parse(slack[0]!.body).text, "Crenel: 2 new proven findings (1 critical, 1 high) on acme");
   assert.doesNotMatch(slack[0]!.body, /"med"|lead/);
   const hooks = m.calls.filter((c) => c.url.startsWith("https://hooks.example.com"));
   assert.deepEqual(hooks.map((c) => c.headers["x-crenel-event"]), ["finding.proven", "finding.proven", "finding.proven", "run.completed"]);
