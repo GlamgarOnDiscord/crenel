@@ -529,3 +529,28 @@ test("injection: NoSQL auth bypass via a multi-field JSON body template is prove
     assert.match(v.reason, /NoSQL/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("graphql: a server with field suggestions on is proven", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    if (u.pathname !== "/graphql" || req.method !== "POST") { res.writeHead(404); res.end("{}"); return; }
+    let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+      const q = (() => { try { return JSON.parse(c).query as string; } catch { return ""; } })();
+      res.writeHead(200, { "content-type": "application/json" });
+      // suggestions enabled: a near-miss of __typename gets a "Did you mean" hint
+      if (/__typenam|__schem|__typ\b/.test(q)) res.end(JSON.stringify({ errors: [{ message: 'Cannot query field. Did you mean "__typename"?' }] }));
+      else res.end(JSON.stringify({ data: {} }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-gql-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+      projectDir: dir, stagingUrl: base, checks: [], options: {},
+    };
+    const v = await validateClaim(claim("explore.graphql", { url: "/graphql" }), env);
+    assert.equal(v.state, "proven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

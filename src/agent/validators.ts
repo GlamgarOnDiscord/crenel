@@ -29,6 +29,7 @@ import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
 import { massAssignOracle, buildBody } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
+import { graphqlSuggestionsOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -1085,7 +1086,34 @@ const exploreReuseValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator];
+/* ---------------- explore.graphql ---------------- */
+// GraphQL field suggestions enabled (schema disclosure even with introspection
+// off). Universal near-miss probes of __typename; a "Did you mean" answer proves
+// it. Read-only (a query-only POST). Generic protocol behaviour. See graphql.test.ts.
+const exploreGraphqlValidator: Validator = {
+  class: "explore.graphql",
+  name: "GraphQL field suggestions enabled (schema disclosure)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url (the GraphQL endpoint)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    let lead: string | undefined;
+    for (const probe of SUGGESTION_PROBES) {
+      try {
+        const r = await safeFetch(url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: probe }), maxBytes: 128 * 1024 });
+        const o = graphqlSuggestionsOracle({ status: r.status, body: r.body });
+        if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL field suggestions at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} ${probe}`, response: o.reason }, ceiling: "low" };
+        if (o.verdict === "lead") lead = o.reason;
+      } catch (e) { lead = `probe failed: ${(e as Error).message}`; }
+    }
+    return no(lead ?? "no GraphQL field suggestion");
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
