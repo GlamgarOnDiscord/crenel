@@ -1,0 +1,5 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+# the engine is copied here by CI (scripts/build-sea.mjs output, renamed per target triple)
+src-tauri/binaries/

@@ -1,0 +1,30 @@
+:root {
+  --bg: #08090B; --panel: #0E0F12; --line: #1C1D22; --line-strong: #2A2B31;
+  --fg: #EDEDEF; --fg-muted: #A2A3AA; --fg-faint: #7E7F88;
+  --brand: #F2B01E; --brand-ring: rgba(242, 176, 30, 0.5); --on-brand: #17110A;
+  --danger-ink: #FF7B7B; --danger-line: rgba(239, 68, 68, 0.3);
+  --f-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--f-ui); -webkit-font-smoothing: antialiased; display: grid; place-items: center; }
+.start { width: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+.mascot { width: 96px; height: 96px; }
+h1 { margin: 0; font-size: 30px; letter-spacing: -0.01em; }
+.lede { margin: 0; color: var(--fg-muted); }
+code { font-family: var(--f-mono); font-size: 12.5px; }
+.path { word-break: break-all; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+button { font: inherit; border-radius: 8px; padding: 9px 16px; cursor: pointer; border: 1px solid var(--line-strong); }
+button:disabled { opacity: .5; cursor: progress; }
+button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--brand-ring); }
+.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
+.secondary { background: var(--panel); color: var(--fg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.panel p { margin: 0; }
+.muted { color: var(--fg-muted); }
+.busy { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--fg-muted); }
+.error { margin: 0; width: 100%; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5 var(--f-mono); color: var(--danger-ink); border: 1px solid var(--danger-line); border-radius: 10px; padding: 12px; max-height: 40vh; overflow: auto; }
+.foot { margin: 8px 0 0; font-size: 12px; color: var(--fg-faint); }
+[hidden] { display: none !important; }

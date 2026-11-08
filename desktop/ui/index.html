@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crenel</title>
+  <link rel="stylesheet" href="start.css">
+  <script src="start.js" defer></script>
+</head>
+<body>
+  <main class="start">
+    <img class="mascot" src="crenel-hello.svg" alt="" width="96" height="96">
+    <h1>Crenel</h1>
+    <p class="lede">Pick the project folder to guard. Crenel reads its <code>crenel.config.yaml</code> and opens the console. Everything runs on this machine, on 127.0.0.1.</p>
+
+    <div class="actions">
+      <button id="pick" class="primary" type="button">Choose a project folder…</button>
+      <button id="recent" class="secondary" type="button" hidden></button>
+    </div>
+
+    <section id="noconfig" class="panel" hidden>
+      <p><strong>No <code>crenel.config.yaml</code> in</strong> <code id="noconfig-dir" class="path"></code></p>
+      <p class="muted">Crenel can write a starter config there: read-only checks only, no host is tested until you declare one you own.</p>
+      <div class="actions">
+        <button id="create" class="primary" type="button">Create the config and open</button>
+        <button id="cancel" class="secondary" type="button">Cancel</button>
+      </div>
+    </section>
+
+    <p id="busy" class="busy" hidden><img src="crenel-loader.svg" alt="" width="20" height="20"> <span id="busy-text">Starting the engine…</span></p>
+    <pre id="error" class="error" role="alert" hidden></pre>
+
+    <p class="foot muted">Crenel <span id="version"></span> · File › Open project (Ctrl/⌘ O) comes back here.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "crenel-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Crenel desktop app (Tauri v2): a window around the console served by the bundled crenel engine.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}
