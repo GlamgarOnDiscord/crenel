@@ -12,11 +12,16 @@
 // full body, so the proof can be replayed and compared later.
 
 import { createHash, randomBytes } from "node:crypto";
-import { safeFetch, type SafeResponse } from "../core/net.js";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve, sep } from "node:path";
+import { readOnlyPost, safeFetch, type SafeResponse } from "../core/net.js";
 import type { Scope } from "../core/scope.js";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { scanBaas, readOneRow, type SupabasePair } from "../checks/baas-exposure.js";
 import { sameIdentity } from "../checks/authz-matrix.js";
+import { isPlaceholder, PATTERNS } from "../checks/exposed-secrets.js";
+import { checkLiveness, verifierHost } from "../checks/key-liveness.js";
+import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
 
@@ -43,6 +48,8 @@ export interface ClaimVerdict {
   validator: string | null;
   reason: string;
   evidence?: Evidence;
+  /** The highest severity this proof supports (generic validators): a model's severity is capped to it. */
+  ceiling?: Severity;
 }
 
 export interface ValidatorEnv {
@@ -308,7 +315,320 @@ const plainHttpValidator: Validator = {
   },
 };
 
-export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator];
+/* ---------------- generic validators (free exploration) ----------------
+ *
+ * A model exploring freely finds things no check's schema describes (a route
+ * shape nobody declared, a debug endpoint with a custom name). Its claims are
+ * proven by these four validators, which do not depend on any check: they
+ * replay requests and read files themselves, with the config's accounts and
+ * the disk, and each one has a negative control. What they prove is stated
+ * exactly (who obtains what, and what the control obtained), and the severity
+ * a model proposes is capped by what the proof shows. A claim none of them can
+ * prove stays an unproven lead, kept with the model's reasoning.
+ */
+
+export type Actor = "a" | "b" | "c" | "anon";
+export const ACTORS: readonly Actor[] = ["a", "b", "c", "anon"];
+
+/** A request as a model describes it. Credentials are never in it: `as` names a configured account. */
+export interface ExploreRequest {
+  method?: string;
+  /** Absolute URL, or a path resolved against the stagingUrl. */
+  url: string;
+  as?: Actor;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+/** Absolute http(s) URL for `url`, a path being resolved against `base`; null when it is neither. */
+export function resolveExploreUrl(url: string, base?: string): string | null {
+  try {
+    const u = /^[a-z][a-z0-9+.-]*:/i.test(url) ? new URL(url) : base ? new URL(url, base.endsWith("/") ? base : base + "/") : null;
+    if (!u || (u.protocol !== "http:" && u.protocol !== "https:")) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+// Headers a model may not set: credentials come from the config (`as`), framing is the client's.
+const BLOCKED_HEADERS = /^(authorization|cookie|host|content-length|transfer-encoding|connection|proxy-.*|cf-access-.*|x-forwarded-.*|forwarded)$/i;
+
+/** The model's headers, minus credentials and framing, at most 10, no CR/LF. */
+export function cleanHeaders(h: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h ?? {}).slice(0, 10)) {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(k) || BLOCKED_HEADERS.test(k) || typeof v !== "string" || /[\r\n]/.test(v) || v.length > 500) continue;
+    out[k.toLowerCase()] = v;
+  }
+  return out;
+}
+
+/** Bearer token of a configured account, from options.authz-matrix.accounts (never from a model). */
+export function actorToken(options: Record<string, unknown>, actor: Actor | undefined): string | undefined {
+  if (!actor || actor === "anon") return undefined;
+  return ((options["authz-matrix"] ?? {}) as AuthzOptions).accounts?.[actor]?.token || undefined;
+}
+
+export function actorMarker(options: Record<string, unknown>, actor: Actor): string | undefined {
+  if (actor === "anon") return undefined;
+  return ((options["authz-matrix"] ?? {}) as AuthzOptions).accounts?.[actor]?.marker || undefined;
+}
+
+/** Send a model-described request as `actor`, through the scoped client. */
+export async function sendAs(req: ExploreRequest, actor: Actor | undefined, env: Pick<ValidatorEnv, "scope" | "options" | "stagingUrl">, urlOverride?: string): Promise<SafeResponse> {
+  const url = urlOverride ?? resolveExploreUrl(req.url, env.stagingUrl);
+  if (!url) throw new Error(`not an http(s) URL: ${String(req.url).slice(0, 120)}`);
+  const token = actorToken(env.options, actor);
+  if (actor && actor !== "anon" && !token) throw new Error(`no token configured for account ${actor.toUpperCase()}`);
+  const headers = { ...cleanHeaders(req.headers), ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  const method = (req.method ?? "GET").toUpperCase();
+  return safeFetch(url, env.scope, { method, headers, body: req.body, maxBytes: 512 * 1024 });
+}
+
+const isReadRequest = (r: ExploreRequest, url: string) => {
+  const m = (r.method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD" || (m === "POST" && readOnlyPost(url, r.body) !== null);
+};
+
+/** The same URL with its object id (or, without one, its last path segment) replaced by one that cannot exist. */
+export function controlUrl(url: string, id?: string): string {
+  const fake = `crenel-nonexistent-${randomBytes(6).toString("hex")}`;
+  const u = new URL(url);
+  if (id && id.length >= 3) {
+    const enc = encodeURIComponent(id);
+    if (u.pathname.includes(enc) || u.pathname.includes(id)) { u.pathname = u.pathname.split(enc).join(fake).split(id).join(fake); return u.toString(); }
+    let hit = false;
+    for (const [k, v] of [...u.searchParams]) if (v === id) { u.searchParams.set(k, fake); hit = true; }
+    if (hit) return u.toString();
+  }
+  const segs = u.pathname.split("/");
+  const last = segs.length - 1 - [...segs].reverse().findIndex((s) => s !== "");
+  if (last >= 1 && last < segs.length && segs[last]) segs[last] = fake; else segs.push(fake);
+  u.pathname = segs.join("/");
+  return u.toString();
+}
+
+const reqLine = (method: string, url: string, actor?: Actor) => `${method} ${url}\nauthorization: ${!actor || actor === "anon" ? "(none)" : `Bearer <${actor.toUpperCase()}_TOKEN>`}`;
+const parseActor = (x: unknown): Actor | undefined => (ACTORS as readonly unknown[]).includes(x) ? (x as Actor) : undefined;
+
+function parseRequest(x: unknown): ExploreRequest | null {
+  if (!x || typeof x !== "object") return null;
+  const r = x as Record<string, unknown>;
+  if (typeof r.url !== "string" || !r.url) return null;
+  return {
+    url: r.url, method: typeof r.method === "string" ? r.method : undefined, as: parseActor(r.as),
+    headers: r.headers && typeof r.headers === "object" ? (r.headers as Record<string, string>) : undefined,
+    body: typeof r.body === "string" ? r.body : undefined,
+  };
+}
+
+/* explore.replay: replay the request, check what the model said it returns,
+ * then a negative control (same request without credentials or as another
+ * actor) and a path control (an object that cannot exist) must NOT return it.
+ * Proven only when the expected text is another account's marker: a replayed
+ * fact with no such oracle stays a lead, with its evidence. */
+const exploreReplayValidator: Validator = {
+  class: "explore.replay",
+  name: "request-replay (expected status and body, negative control)",
+  async validate(claim, env) {
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    const req = parseRequest(claim.detail.request);
+    if (!req) return no("no request to replay");
+    const url = resolveExploreUrl(req.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!isReadRequest(req, url)) return no(`${(req.method ?? "GET").toUpperCase()} changes state: a write is never replayed (it would write again)`);
+    const expect = (claim.detail.expect ?? {}) as { status?: unknown; bodyIncludes?: unknown };
+    const includes = (Array.isArray(expect.bodyIncludes) ? expect.bodyIncludes : []).filter((s): s is string => typeof s === "string" && s.length > 0).slice(0, 5);
+    if (!includes.some((s) => s.length >= 6)) return no("no expected body text of 6 characters or more: a status alone proves nothing");
+    // Text the request itself carries would be an echo, not data the server holds.
+    const sent = `${url} ${JSON.stringify(req.headers ?? {})} ${req.body ?? ""}`.toLowerCase();
+    let sentDecoded = sent;
+    try { sentDecoded = decodeURIComponent(sent); } catch { /* keep */ }
+    const echoed = includes.find((s) => sent.includes(s.toLowerCase()) || sentDecoded.includes(s.toLowerCase()));
+    if (echoed) return no(`"${echoed}" is in the request itself: an echo is not data`);
+    const actor = req.as ?? "anon";
+    const method = (req.method ?? "GET").toUpperCase();
+    const res = await sendAs(req, actor, env, url);
+    const status = typeof expect.status === "number" ? expect.status : undefined;
+    const missing = includes.filter((s) => !res.body.includes(s));
+    const evidence: Evidence = { request: reqLine(method, url, actor), response: `HTTP ${res.status}\n${excerpt(res.body)}`, sha256: sha(res.body) };
+    if (status !== undefined && res.status !== status) return no(`HTTP ${res.status}, the claim expected ${status}`, evidence);
+    if (!ok2xx(res.status)) return no(`HTTP ${res.status}: not a successful read`, evidence);
+    if (missing.length) return no(`the body does not contain ${missing.map((s) => `"${s.slice(0, 40)}"`).join(", ")}`, evidence);
+    // Negative controls: none of them may return any of the expected texts.
+    const ctlActor = parseActor((claim.detail.control as { as?: unknown } | undefined)?.as);
+    const controls: { label: string; actor: Actor; url: string }[] = [];
+    if (actor !== "anon") controls.push({ label: "without credentials", actor: "anon", url });
+    if (ctlActor && ctlActor !== actor && ctlActor !== "anon") controls.push({ label: `as account ${ctlActor.toUpperCase()}`, actor: ctlActor, url });
+    controls.push({ label: "an object that cannot exist", actor, url: controlUrl(url, typeof claim.detail.id === "string" ? claim.detail.id : undefined) });
+    const seen: string[] = [];
+    for (const c of controls) {
+      let r: SafeResponse;
+      try { r = await sendAs(req, c.actor, env, c.url); } catch (err) { return no(`the control (${c.label}) could not be sent: ${(err as Error).message}`, evidence); }
+      seen.push(`${c.label}: ${method} ${c.url} -> HTTP ${r.status}`);
+      const leaked = includes.filter((s) => r.body.includes(s));
+      if (ok2xx(r.status) && leaked.length) return no(`the control (${c.label}) also returns "${leaked[0]!.slice(0, 40)}": the text is not specific to this request`, { ...evidence, control: seen.join("; ") });
+    }
+    // A replay proves a fact (who obtains what). It is a flaw only when a deterministic oracle says so:
+    // the marker of an account other than the requester in the body is that account's data.
+    const foreign = (["a", "b", "c"] as const).filter((k) => k !== actor).map((k) => [k, actorMarker(env.options, k)] as const).find(([, m]) => m && includes.includes(m) && res.body.includes(m));
+    const fact = `${actor === "anon" ? "without credentials" : `as account ${actor.toUpperCase()}`}, ${method} ${pathOnly(url)} returns ${includes.map((s) => `"${s.slice(0, 40)}"`).join(", ")}; ${controls.map((c) => c.label).join(" and ")} do not`;
+    if (!foreign) {
+      return no(`replayed (${fact}), but nothing in it is another account's data: whether it is a flaw is the model's reading. Expect another account's marker, or use the secret class for a key`, { ...evidence, control: seen.join("; ") });
+    }
+    return {
+      claimId: claim.id, state: "proven", validator: this.name,
+      reason: `${fact}; the body carries account ${foreign[0].toUpperCase()}'s marker`,
+      evidence: { ...evidence, control: seen.join("; ") },
+      ceiling: "critical",
+    };
+  },
+};
+
+/* explore.cross-actor: the same URL read by the owner (B), the attacker and
+ * anonymous; the oracle of authz-matrix decides, with a control id. */
+const exploreCrossActorValidator: Validator = {
+  class: "explore.cross-actor",
+  name: "cross-actor diff (owner, attacker, anonymous, control id)",
+  async validate(claim, env) {
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    const url = resolveExploreUrl(String(claim.detail.url ?? ""), env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    const owner = parseActor(claim.detail.owner) ?? "b";
+    const attacker = parseActor(claim.detail.attacker) ?? "a";
+    if (owner === "anon") return no("the owner must be a configured account");
+    if (owner === attacker) return no("owner and attacker are the same account");
+    const opts = (env.options["authz-matrix"] ?? {}) as AuthzOptions;
+    const ownerToken = actorToken(env.options, owner);
+    if (!ownerToken) return no(`no token for account ${owner.toUpperCase()}: the owner's own read is the baseline`);
+    if (attacker !== "anon") {
+      const t = actorToken(env.options, attacker);
+      if (!t) return no(`no token for account ${attacker.toUpperCase()}`);
+      const same = sameIdentity(t, ownerToken);
+      if (same) return no(`accounts ${attacker.toUpperCase()} and ${owner.toUpperCase()} ${same}: not two tenants`);
+    }
+    const path = pathOnly(url);
+    const templ = (p: string) => new RegExp("^" + p.split("?")[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/:id/g, "[^/]+") + "$");
+    if ((opts.publicByDesign ?? []).some((p) => p.startsWith("/") && templ(p).test(new URL(url).pathname)) || (opts.resources ?? []).some((r) => r.public && templ(r.path).test(new URL(url).pathname))) {
+      return no(`${path} is public by design (trust boundary in the config)`);
+    }
+    const req: ExploreRequest = { url };
+    const ownerRes = await sendAs(req, owner, env, url);
+    if (!ok2xx(ownerRes.status)) return no(`the owner (${owner.toUpperCase()}) gets HTTP ${ownerRes.status}: no object to compare`);
+    const marker = actorMarker(env.options, owner);
+    if (marker && !ownerRes.body.includes(marker)) return no(`the owner's response does not carry ${owner.toUpperCase()}'s marker: not shown to be ${owner.toUpperCase()}'s object`);
+    const id = typeof claim.detail.id === "string" ? claim.detail.id : undefined;
+    const ctl = controlUrl(url, id);
+    const attackerRes = await sendAs(req, attacker, env, url);
+    const controlRes = await sendAs(req, attacker, env, ctl);
+    const markers = marker ? [marker] : [];
+    const o = authzOracle({ attacker: attackerRes, owner: ownerRes, control: controlRes, ownerMarkers: markers });
+    const who = attacker === "anon" ? "no token at all" : `account ${attacker.toUpperCase()}'s token`;
+    const evidence: Evidence = {
+      request: reqLine("GET", url, attacker), response: `HTTP ${attackerRes.status}\n${excerpt(attackerRes.body)}`, sha256: sha(attackerRes.body),
+      control: `GET ${ctl} -> HTTP ${controlRes.status}; owner (${owner.toUpperCase()}) -> HTTP ${ownerRes.status}, sha256 ${sha(ownerRes.body).slice(0, 12)}`,
+    };
+    if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
+    // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out.
+    if (attacker !== "anon") {
+      const anonRes = await sendAs(req, "anon", env, url);
+      evidence.control += `; anonymous -> HTTP ${anonRes.status}`;
+      if (ok2xx(anonRes.status) && authzOracle({ attacker: anonRes, owner: ownerRes, control: controlRes, ownerMarkers: markers }).verdict === "leak") {
+        return no("an anonymous visitor gets the same object: public content, not a read across tenants (claim it for anon if that is the flaw)", evidence);
+      }
+    } else if (!marker) {
+      return no("an anonymous read can only be told from public content by the owner's marker: declare accounts.b.marker", evidence);
+    }
+    // Stable: a second read gives the same verdict.
+    const again = await sendAs(req, attacker, env, url);
+    if (authzOracle({ attacker: again, owner: ownerRes, control: controlRes, ownerMarkers: markers }).verdict !== "leak") return no("the second replay did not reproduce", evidence);
+    return { claimId: claim.id, state: "proven", validator: this.name, reason: `${who} reads ${owner.toUpperCase()}'s object at ${path}: ${o.reason}`, evidence, ceiling: "critical" };
+  },
+};
+
+/* explore.secret: a secret of a known shape in a response, not echoed from the request. */
+const exploreSecretValidator: Validator = {
+  class: "explore.secret",
+  name: "secret-in-response (key pattern, optional liveness)",
+  async validate(claim, env) {
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    const req = parseRequest(claim.detail.request);
+    if (!req) return no("no request to replay");
+    const url = resolveExploreUrl(req.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!isReadRequest(req, url)) return no("only a read is replayed");
+    const actor = req.as ?? "anon";
+    const res = await sendAs(req, actor, env, url);
+    const sent = `${url} ${JSON.stringify(req.headers ?? {})} ${req.body ?? ""}`;
+    const evidence = (what: string): Evidence => ({ request: reqLine((req.method ?? "GET").toUpperCase(), url, actor), response: `HTTP ${res.status}\n${what}`, sha256: sha(res.body) });
+    if (!ok2xx(res.status)) return no(`HTTP ${res.status}`, evidence("(no body kept)"));
+    for (const p of PATTERNS) {
+      if (p.sensitive === false) continue;
+      p.regex.lastIndex = 0;
+      for (const m of res.body.matchAll(new RegExp(p.regex.source, "g"))) {
+        const key = m[0];
+        if (isPlaceholder(key) || sent.includes(key)) continue;
+        if (p.accept && !p.accept(key, res.body, m.index ?? 0)) continue;
+        const masked = `${key.slice(0, Math.min(12, key.length - 4))}…${key.slice(-4)}`;
+        let live = "";
+        if ((env.options.explore as { secretLiveness?: boolean } | undefined)?.secretLiveness && verifierHost(p.id)) {
+          const r = await checkLiveness(p.id, key, env.scope);
+          live = r.liveness === "unknown" ? `; liveness unknown${r.host && !env.scope.isHostAllowed(`https://${r.host}/`) ? ` (declare ${r.host} to check it)` : ""}` : `; liveness: ${r.liveness} (HTTP ${r.status} from ${r.host})`;
+          if (r.liveness === "revoked") return { claimId: claim.id, state: "proven", validator: this.name, reason: `${p.title} served at ${pathOnly(url)}, revoked${live}`, evidence: evidence(`${p.title}: ${masked}`), ceiling: "low" };
+        }
+        return { claimId: claim.id, state: "proven", validator: this.name, reason: `${p.title} served at ${pathOnly(url)} to ${actor === "anon" ? "anyone" : `account ${actor.toUpperCase()}`}${live}`, evidence: evidence(`${p.title}: ${masked}`), ceiling: p.severity };
+      }
+    }
+    return no("no secret of a known shape in the response (publishable keys and placeholders do not count)", evidence("(no secret)"));
+  },
+};
+
+/* explore.file-match: the quoted text is in the file, inside the project. */
+const exploreFileValidator: Validator = {
+  class: "explore.file-match",
+  name: "file-content match in the repository",
+  async validate(claim, env) {
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    const rel = String(claim.detail.file ?? "").replace(/\\/g, "/");
+    const text = String(claim.detail.text ?? "");
+    if (text.trim().length < 12) return no("the quote must be 12 characters or more");
+    const full = insideProject(env.projectDir, rel);
+    if (!full) return no(`${rel || "(no file)"} is not a file inside the project`);
+    const st = statSync(full);
+    if (st.size > 2 * 1024 * 1024) return no("file over 2 MB");
+    const body = readFileSync(full, "utf8");
+    if (body.slice(0, 8000).includes("\u0000")) return no("binary file");
+    const line = Number(claim.detail.line ?? 0) || 0;
+    const lines = body.split("\n");
+    const at = line ? (lines[line - 1] ?? "").includes(text.split("\n")[0]!) && body.includes(text) : body.includes(text);
+    if (!at) return no(line ? `the quote is not at ${rel}:${line}` : `the quote is not in ${rel}`);
+    const n = line || body.slice(0, body.indexOf(text)).split("\n").length;
+    return {
+      claimId: claim.id, state: "proven", validator: this.name, reason: `the quoted code is at ${rel}:${n} (what it means is the model's reading)`,
+      evidence: { request: `${rel}:${n}`, response: excerpt(text, 300), sha256: sha(body) }, ceiling: "medium",
+    };
+  },
+};
+
+/** Absolute path of `rel` when it is a regular file inside `root` (symlinks resolved), else null. */
+export function insideProject(root: string, rel: string): string | null {
+  if (!rel || rel.includes("\u0000") || isAbsolute(rel)) return null;
+  try {
+    const base = realpathSync(root);
+    const full = realpathSync(resolve(base, rel));
+    if (full !== base && !full.startsWith(base + sep)) return null;
+    return statSync(full).isFile() ? full : null;
+  } catch {
+    return null;
+  }
+}
+
+const pathOnly = (url: string) => { try { const u = new URL(url); return u.pathname + u.search; } catch { return url; } };
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator];
+
+export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
 /** Route a claim to its validator. No validator: unproven, labelled. A validator that throws: unproven. */
 export async function validateClaim(claim: Claim, env: ValidatorEnv, validators = VALIDATORS): Promise<ClaimVerdict> {
