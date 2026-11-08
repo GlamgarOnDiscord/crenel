@@ -213,7 +213,11 @@ export class Explorer {
       const out = await this.tool("bundle.fetch", {});
       const page = this.bundle?.find((f) => f.kind === "html");
       const links = page ? [...new Set([...page.body.matchAll(/(?:href|src|action)=["']([^"'#]+)["']/gi)].map((m) => m[1]!))].slice(0, 40) : [];
-      this.history.push(`[reconnaissance, avant le premier tour]\n→ bundle.fetch {}\n${out.text}` + (links.length ? `\nLiens de la page d'accueil:\n${fence(untrusted("links", links.join("\n"), 2000))}` : ""));
+      // API endpoints the served scripts cite: the richest map to enumerate and attack.
+      const eps = this.bundle ? [...new Set(this.bundle.filter((f) => f.kind !== "map").flatMap((f) => extractEndpoints(f.body)))].slice(0, 60) : [];
+      this.history.push(`[reconnaissance, avant le premier tour]\n→ bundle.fetch {}\n${out.text}`
+        + (eps.length ? `\nEndpoints API cités par les scripts (à énumérer et attaquer en priorité):\n${fence(untrusted("endpoints", eps.join("\n"), 3000))}` : "")
+        + (links.length ? `\nLiens de la page d'accueil:\n${fence(untrusted("links", links.join("\n"), 2000))}` : ""));
     }
     for (let turn = 1; turn <= this.d.budget.maxCalls; turn++) {
       if (this.ac.signal.aborted) break;
