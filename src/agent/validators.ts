@@ -27,6 +27,7 @@ import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle } from "./jwt.js";
 import { massAssignOracle, buildBody } from "./massassign.js";
+import { corsOracle } from "./cors.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -980,7 +981,34 @@ const exploreMassAssignValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator];
+/* ---------------- explore.cors ---------------- */
+// Reflects an arbitrary Origin with credentials. The validator sends its OWN two
+// distinct attacker origins and the oracle decides; a read-only GET, no active
+// mode. Generic: no target signature, a wildcard is only a lead. See cors.test.ts.
+const exploreCorsValidator: Validator = {
+  class: "explore.cors",
+  name: "CORS reflects any origin with credentials",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const o1 = `https://crenel-evil-${nonce("o")}.example`, o2 = `https://crenel-attacker-${nonce("o")}.test`;
+    const probe = async (origin: string) => {
+      const r = await safeFetch(url, env.scope, { method: "GET", headers: { origin }, maxBytes: 64 * 1024 });
+      return { acao: r.headers.get("access-control-allow-origin"), acac: r.headers.get("access-control-allow-credentials") };
+    };
+    let r1, r2;
+    try { r1 = await probe(o1); r2 = await probe(o2); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const v = corsOracle({ o1, r1, o2, r2 });
+    if (v.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `CORS misconfiguration at ${pathOnly(url)}: ${v.reason}`, evidence: { request: `GET ${pathOnly(url)} with Origin: ${o1} (and ${o2})`, response: v.reason }, ceiling: v.ceiling };
+    return no(v.reason);
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

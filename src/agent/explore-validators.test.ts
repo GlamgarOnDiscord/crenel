@@ -391,3 +391,29 @@ test("mass-assignment: without active mode it refuses", async () => {
     assert.match(v.reason, /active/i);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("cors: a server reflecting any origin with credentials is proven; a fixed allowlist is not", async () => {
+  for (const vulnerable of [true, false]) {
+    const srv = createServer((req, res) => {
+      const origin = req.headers.origin as string | undefined;
+      const h: Record<string, string> = { "content-type": "application/json" };
+      if (origin) {
+        h["access-control-allow-origin"] = vulnerable ? origin : "https://trusted.app"; // reflect vs fixed
+        h["access-control-allow-credentials"] = "true";
+      }
+      res.writeHead(200, h); res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-cors-"));
+    try {
+      const env: ValidatorEnv = {
+        scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+        projectDir: dir, stagingUrl: base, checks: [], options: {},
+      };
+      const v = await validateClaim(claim("explore.cors", { url: "/api" }), env);
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.equal(v.ceiling, "high"); }
+      else assert.equal(v.state, "unproven", v.reason);
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
