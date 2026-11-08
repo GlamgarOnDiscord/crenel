@@ -11,17 +11,26 @@ import type { ProxyEvent } from "../core/egress-proxy.js";
 import type { Check, Finding } from "../core/types.js";
 import { validateClaim, type Claim, type ClaimVerdict } from "../agent/validators.js";
 import type { Untrusted } from "../agent/untrusted.js";
-import { dockerStatus, runConfined, TOOLBOX_IMAGE, type DockerStatus } from "./docker.js";
-import { katanaFindings, parseKatana, parseNuclei, parseTrufflehog, suggestResources, type SuggestedResource, type Route } from "./adapters.js";
+import { TOOLBOX_IMAGE } from "./docker.js";
+import { backendFor, type Backend, type BackendStatus } from "./backend.js";
+import { BACKENDS, TOOL_NAMES, type ToolName } from "./names.js";
+import { DEFAULT_DISTRO, DISTRO_RE, type WslExec } from "./wsl.js";
+import { katanaFindings, parseHttpx, parseKatana, parseNuclei, parseTrufflehog, suggestResources, type LiveHost, type SuggestedResource, type Route } from "./adapters.js";
 import { ALLOWED_TAGS, DENIED_TAGS } from "../../toolbox/nuclei-filter.mjs";
 
-export const TOOL_NAMES = ["nuclei", "katana", "trufflehog"] as const;
-export type ToolName = (typeof TOOL_NAMES)[number];
+export { TOOL_NAMES, type ToolName } from "./names.js";
 
 export const ToolboxOptions = z.object({
   /** Include the tools in agent runs (full scan). The CLI command works either way. */
   enabled: z.boolean().default(false),
+  /** Where the tools run: the Docker image (default) or a WSL distribution (Windows). */
+  backend: z.enum(BACKENDS).default("docker"),
   image: z.string().default(TOOLBOX_IMAGE),
+  wsl: z.object({
+    distro: z.string().regex(DISTRO_RE, "a WSL distribution name (letters, digits, . _ -)").default(DEFAULT_DISTRO),
+    /** Address the proxy listens on and the tools dial; auto-detected when omitted. */
+    proxyHost: z.string().optional(),
+  }).strict().default({ distro: DEFAULT_DISTRO }),
   ratePerSec: z.number().positive().max(50).default(10),
   maxRequests: z.number().int().positive().max(50_000).default(10_000),
   timeoutSec: z.number().int().positive().max(7200).default(1200),
@@ -63,8 +72,10 @@ export interface ToolRunInput {
   checks: Check[];
   onEvent?: (e: ProxyEvent) => void;
   signal?: AbortSignal;
-  /** Override for tests. */
-  status?: DockerStatus;
+  /** Overrides for tests (and to reuse a status already read). */
+  status?: BackendStatus;
+  backend?: Backend;
+  wslExec?: WslExec;
 }
 
 export interface ToolRunOutput {
@@ -76,18 +87,21 @@ export interface ToolRunOutput {
   verdicts: ClaimVerdict[];
   suggestions: SuggestedResource[];
   routes: Route[];
+  /** httpx: the declared hosts that answered. */
+  hosts?: LiveHost[];
   raw?: Untrusted;
   exit?: number;
   timedOut?: boolean;
-  network?: "none" | "internal+proxy";
+  network?: "none" | "internal+proxy" | "wsl+proxy";
+  backend?: "docker" | "wsl";
   proxy?: { requests: number; refused: number };
   stderrTail?: string;
 }
 
-export function nucleiArgv(target: string, proxy: string, o: ToolboxOptions): string[] {
+export function nucleiArgv(target: string, proxy: string, o: ToolboxOptions, templatesDir = "/opt/nuclei-templates"): string[] {
   const exclude = [...new Set([...DENIED_TAGS, ...o.nuclei.excludeTags.map((t) => t.toLowerCase())])];
   return [
-    "nuclei", "-u", target, "-t", "/opt/nuclei-templates/http",
+    "nuclei", "-u", target, "-t", `${templatesDir}/http`,
     "-tags", (o.nuclei.tags.length ? o.nuclei.tags.map((t) => t.toLowerCase()) : ALLOWED_TAGS).join(","), "-etags", exclude.join(","), "-pt", "http",
     "-jsonl", "-silent", "-nc", "-omit-raw", "-duc", "-ni", "-no-stdin",
     "-proxy", proxy, "-rl", String(Math.max(1, Math.floor(o.ratePerSec))), "-c", String(o.nuclei.concurrency),
@@ -104,8 +118,27 @@ export function katanaArgv(target: string, proxy: string, o: ToolboxOptions): st
   ];
 }
 
-export function trufflehogArgv(): string[] {
-  return ["trufflehog", "filesystem", "/project", "--json", "--no-update", "--no-verification"];
+/** Declared hosts httpx may probe: plain host names and IPv4 literals, at most 50. */
+export function httpxTargets(allowedHosts: string[]): string[] {
+  return [...new Set(allowedHosts.map((h) => h.trim().toLowerCase()).filter((h) => /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(h)))].slice(0, 50);
+}
+
+/**
+ * httpx on the declared hosts: both schemes (-nf), status, title, Server,
+ * technologies from httpx's local fingerprints. No redirect following (the tool
+ * would leave the scope; the proxy would refuse anyway), no ASN/CDN lookups
+ * (third-party services), no favicon, no screenshots, no path or method probing.
+ */
+export function httpxArgv(hosts: string[], proxy: string, o: ToolboxOptions): string[] {
+  return [
+    "httpx", "-u", hosts.join(","), "-nf", "-sc", "-title", "-server", "-td",
+    "-json", "-silent", "-nc", "-duc", "-http-proxy", proxy,
+    "-rl", String(Math.max(1, Math.floor(o.ratePerSec))), "-t", "5", "-timeout", "10", "-retries", "0",
+  ];
+}
+
+export function trufflehogArgv(projectRoot = "/project"): string[] {
+  return ["trufflehog", "filesystem", projectRoot, "--json", "--no-update", "--no-verification"];
 }
 
 /** Run one tool. Never throws: a missing Docker or a failed container setup returns ran=false with the reason. */
@@ -121,28 +154,41 @@ async function runToolInner(i: ToolRunInput): Promise<ToolRunOutput> {
   const base: ToolRunOutput = { tool: i.tool, ran: false, findings: [], verdicts: [], suggestions: [], routes: [] };
   let o: ToolboxOptions;
   try { o = toolboxOptions(i.config); } catch (err) { return { ...base, reason: (err as Error).message }; }
-  const st = i.status ?? (await dockerStatus(o.image));
-  if (!st.available || !st.imagePresent) return { ...base, reason: `toolbox off: ${st.reason}` };
+  const backend = i.backend ?? backendFor(o, { wslExec: i.wslExec });
+  const st = i.status ?? (await backend.status());
+  base.backend = st.backend;
+  const t = st.tools[i.tool];
+  if (!st.ready || !t?.ready) return { ...base, reason: t?.reason ?? `toolbox off: ${st.reason}` };
   const target = i.config.scope.stagingUrl;
-  if (i.tool !== "trufflehog" && !target) return { ...base, reason: "no scope.stagingUrl: nothing to point the tool at" };
-  const limits = { timeoutMs: o.timeoutSec * 1000, memory: o.memory };
-  const proxy = { ratePerSec: o.ratePerSec, maxRequests: o.maxRequests };
+  if ((i.tool === "nuclei" || i.tool === "katana") && !target) return { ...base, reason: "no scope.stagingUrl: nothing to point the tool at" };
+  const common = { tool: i.tool, scope: i.scope, projectDir: undefined as string | undefined, limits: { timeoutMs: o.timeoutSec * 1000, memory: o.memory }, proxy: { ratePerSec: o.ratePerSec, maxRequests: o.maxRequests }, signal: i.signal };
+  const meta = (r: { code: number; timedOut: boolean; network: ToolRunOutput["network"]; proxy?: { requests: number; refused: number }; stderr: string }) =>
+    ({ exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr) });
 
   if (i.tool === "trufflehog") {
-    // No network at all: liveness, when asked for, is exposed-secrets' job on replay.
-    const r = await runConfined({ tool: "trufflehog", scope: null, argv: trufflehogArgv(), projectDir: i.projectDir, image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
-    const p = parseTrufflehog(r.stdout);
+    // No network: liveness, when asked for, is exposed-secrets' job on replay.
+    const r = await backend.run({ ...common, network: false, projectDir: i.projectDir, onEvent: i.onEvent, build: (p) => trufflehogArgv(p.projectRoot) }, st);
+    const p = parseTrufflehog(r.stdout, r.projectRoot);
     const verdicts = await replay(p.claims, i);
-    return finish({ ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr) }, p.findings, verdicts);
+    return finish({ ...base, ran: true, raw: p.raw, ...meta(r) }, p.findings, verdicts);
   }
 
   if (i.tool === "nuclei") {
     // Thousands of templates, some of them sending payloads: active testing, never by default.
     if (!i.config.scope.allowActiveTesting) return { ...base, reason: "nuclei is active testing: set scope.allowActiveTesting: true for your own staging" };
-    const r = await runConfined({ tool: "nuclei", scope: i.scope, argv: [], argvWithProxy: (px) => nucleiArgv(target!, px, o), image: o.image, limits, proxy, onEvent: i.onEvent, signal: i.signal });
+    const r = await backend.run({ ...common, network: true, onEvent: i.onEvent, build: (p) => nucleiArgv(target!, p.proxy, o, p.templatesDir) }, st);
     const p = parseNuclei(r.stdout, i.scope, target);
     const verdicts = await replay(p.claims, i);
-    return finish({ ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr) }, p.findings, verdicts);
+    return finish({ ...base, ran: true, raw: p.raw, ...meta(r) }, p.findings, verdicts);
+  }
+
+  if (i.tool === "httpx") {
+    const hosts = httpxTargets(i.config.scope.allowedHosts);
+    if (!hosts.length) return { ...base, reason: "no declared host to probe (scope.allowedHosts)" };
+    const r = await backend.run({ ...common, network: true, onEvent: i.onEvent, build: (p) => httpxArgv(hosts, p.proxy, o) }, st);
+    const p = parseHttpx(r.stdout, i.scope, target);
+    const verdicts = await replay(p.claims, i);
+    return { ...finish({ ...base, ran: true, raw: p.raw, ...meta(r) }, p.findings, verdicts), hosts: p.hosts };
   }
 
   // katana's own JSON output drops responses it deems duplicates (two 401s
@@ -155,12 +201,12 @@ async function runToolInner(i: ToolRunInput): Promise<ToolRunOutput> {
       try { const u = new URL(e.target); seen.push({ method: e.method, url: e.target, path: u.pathname, status: e.status }); } catch { /* ignore */ }
     }
   };
-  const r = await runConfined({ tool: "katana", scope: i.scope, argv: [], argvWithProxy: (px) => katanaArgv(target!, px, o), image: o.image, limits, proxy, onEvent, signal: i.signal });
+  const r = await backend.run({ ...common, network: true, onEvent, build: (p) => katanaArgv(target!, p.proxy, o) }, st);
   const p = parseKatana(r.stdout, i.scope);
   const routes = mergeRoutes(p.routes, seen);
   const declared = ((i.config.options["authz-matrix"] ?? {}) as { resources?: { path: string }[] }).resources ?? [];
   const suggestions = suggestResources(routes, declared);
-  return { ...base, ran: true, raw: p.raw, exit: r.code, timedOut: r.timedOut, network: r.network, proxy: r.proxy, stderrTail: tail(r.stderr), routes, suggestions, findings: katanaFindings(suggestions) };
+  return { ...base, ran: true, raw: p.raw, ...meta(r), routes, suggestions, findings: katanaFindings(suggestions) };
 }
 
 /** Union of routes, one per method + origin + path. */

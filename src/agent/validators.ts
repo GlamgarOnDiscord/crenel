@@ -283,7 +283,32 @@ const fileReplayValidator: Validator = {
   },
 };
 
-export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator];
+/* ---------------- http.plain-served ---------------- */
+
+// A declared host said to answer over plain http:// (an httpx lead): one GET
+// over http://, redirect not followed, through the scoped client. Proven only
+// on a 200; a redirect, an error or a host off the scope stays a lead.
+const plainHttpValidator: Validator = {
+  class: "http.plain-served",
+  name: "plain-http-reread",
+  async validate(claim, env) {
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    let u: URL;
+    try { u = new URL(String(claim.detail.url ?? "")); } catch { return no("no URL to re-read"); }
+    if (u.protocol !== "http:") return no("only an http:// URL is re-read");
+    if (!env.scope.isHostAllowed(u.toString())) return no(`${u.hostname} is not a declared host`);
+    const url = `http://${u.host}/`;
+    const res = await safeFetch(url, env.scope, { followRedirects: false });
+    if (res.status !== 200) return no(`http:// answers ${res.status}${res.headers.get("location") ? ` -> ${res.headers.get("location")}` : ""}`);
+    const head = [...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n");
+    return {
+      claimId: claim.id, state: "proven", validator: this.name, reason: "200 over plain http://, no redirect",
+      evidence: { request: `GET ${url} (redirect not followed)`, response: `HTTP ${res.status}\n${excerpt(head, 600)}`, sha256: sha(head) },
+    };
+  },
+};
+
+export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator];
 
 /** Route a claim to its validator. No validator: unproven, labelled. A validator that throws: unproven. */
 export async function validateClaim(claim: Claim, env: ValidatorEnv, validators = VALIDATORS): Promise<ClaimVerdict> {

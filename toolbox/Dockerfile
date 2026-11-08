@@ -1,4 +1,4 @@
-# Crenel toolbox: nuclei, katana and trufflehog, and nothing else.
+# Crenel toolbox: nuclei, katana, trufflehog and httpx, and nothing else.
 #
 #   crenel tools build        (or: docker build -t crenel-toolbox:0.1.0 toolbox/)
 #
@@ -21,16 +21,19 @@ ARG TARGETARCH
 ARG NUCLEI_VERSION=3.11.1
 ARG KATANA_VERSION=1.8.0
 ARG TRUFFLEHOG_VERSION=3.99.8
+ARG HTTPX_VERSION=1.12.0
 ARG TEMPLATES_VERSION=10.5.1
 WORKDIR /dl
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
       amd64) NUCLEI_SHA=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6; \
              KATANA_SHA=cb027ae99d0757061b70c07a15c7a80f62c5a535ab52c4a329f80c4b0a7309d2; \
-             TRUFFLEHOG_SHA=7c3b02f160f28929a467e29e20fba98746e0729f6e37c3c25761e4f8789abe08 ;; \
+             TRUFFLEHOG_SHA=7c3b02f160f28929a467e29e20fba98746e0729f6e37c3c25761e4f8789abe08; \
+             HTTPX_SHA=9d8439e8b6c9aa7d1e2314817a392e00d5178da3af5652f7475f88868f418f76 ;; \
       arm64) NUCLEI_SHA=8044e3d9768ba0a744b2872c1a87e813006f013da97ca9f50f7661a4203bec07; \
              KATANA_SHA=80e269210727a855511ffac8dfb01297b2344742acec71a35e8ba4a67a90f0f2; \
-             TRUFFLEHOG_SHA=a0382d83dd58c967af5dd0175cc732c62c836ab1d15dc9ae71b01a2d3f0911b2 ;; \
+             TRUFFLEHOG_SHA=a0382d83dd58c967af5dd0175cc732c62c836ab1d15dc9ae71b01a2d3f0911b2; \
+             HTTPX_SHA=fd7b123c1dfbc3d69f19f524e4eebcd6ec06b9a6cbd56813c76f11645197331e ;; \
       *) echo "unsupported arch ${TARGETARCH}"; exit 1 ;; \
     esac; \
     A="${TARGETARCH:-amd64}"; \
@@ -38,16 +41,19 @@ RUN set -eu; \
     wget -q -O nuclei.zip "$GH/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${A}.zip"; \
     wget -q -O katana.zip "$GH/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_${A}.zip"; \
     wget -q -O trufflehog.tgz "$GH/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_${A}.tar.gz"; \
+    wget -q -O httpx.zip "$GH/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_${A}.zip"; \
     wget -q -O templates.tgz "$GH/projectdiscovery/nuclei-templates/archive/refs/tags/v${TEMPLATES_VERSION}.tar.gz"; \
     printf '%s  %s\n' \
       "$NUCLEI_SHA" nuclei.zip \
       "$KATANA_SHA" katana.zip \
       "$TRUFFLEHOG_SHA" trufflehog.tgz \
+      "$HTTPX_SHA" httpx.zip \
       30fe1cfaced4635f886e4a2673641bba86998dceec28e468274524e789aa56eb templates.tgz \
       | sha256sum -c -; \
     mkdir -p bin templates; \
     unzip -q -o nuclei.zip nuclei -d bin; \
     unzip -q -o katana.zip katana -d bin; \
+    unzip -q -o httpx.zip httpx -d bin; \
     tar -xzf trufflehog.tgz -C bin trufflehog; \
     tar -xzf templates.tgz -C templates --strip-components=1; \
     chmod 0755 bin/*
@@ -62,12 +68,13 @@ RUN node /filter/nuclei-filter.mjs /templates && find /templates -type d -empty 
 FROM ${ALPINE}
 RUN apk add --no-cache ca-certificates=20261020-r0 socat=1.8.1.3-r0 \
  && addgroup -g 65532 crenel && adduser -D -H -u 65532 -G crenel -h /tmp/home crenel
-COPY --from=fetch /dl/bin/nuclei /dl/bin/katana /dl/bin/trufflehog /usr/local/bin/
+COPY --from=fetch /dl/bin/nuclei /dl/bin/katana /dl/bin/trufflehog /dl/bin/httpx /usr/local/bin/
 COPY --from=filter /templates /opt/nuclei-templates
 COPY entrypoint.sh /usr/local/bin/crenel-entrypoint
 RUN chmod 0755 /usr/local/bin/crenel-entrypoint && chmod -R a-w /opt/nuclei-templates
-LABEL org.opencontainers.image.title="crenel-toolbox" \
-      org.opencontainers.image.description="nuclei (filtered templates), katana, trufflehog for Crenel; network only through Crenel's egress proxy" \
+LABEL crenel.tools="nuclei,katana,trufflehog,httpx" \
+      org.opencontainers.image.title="crenel-toolbox" \
+      org.opencontainers.image.description="nuclei (filtered templates), katana, trufflehog, httpx for Crenel; network only through Crenel's egress proxy" \
       org.opencontainers.image.licenses="MIT"
 ENV HOME=/tmp/home \
     NUCLEI_TEMPLATES=/opt/nuclei-templates \

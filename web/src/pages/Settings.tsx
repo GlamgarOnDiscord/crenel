@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Topbar } from "../components/Shell.tsx";
 import { Button, Card, Toggle } from "../components/ui.tsx";
 import { useWorkspace } from "../lib/workspace.tsx";
@@ -8,6 +8,7 @@ import "../components/bencho/Counter.css";
 import { SlideConfirm } from "../components/bencho/SlideConfirm.tsx";
 import "../components/bencho/SlideConfirm.css";
 import { useToast } from "../components/toast.tsx";
+import { apiFetch, isLive } from "../data/api.ts";
 
 function Row({ title, desc, control }: { title: string; desc: string; control: React.ReactNode }) {
   return (
@@ -21,6 +22,40 @@ function Row({ title, desc, control }: { title: string; desc: string; control: R
 function PolicyToggle({ title, desc, initial }: { title: string; desc: string; initial: boolean }) {
   const [on, setOn] = useState(initial);
   return <Row title={title} desc={desc} control={<Toggle on={on} onChange={setOn} label={title} />} />;
+}
+
+interface ToolboxState { backend: "docker" | "wsl"; ready: boolean; reason?: string; options?: { wsl?: { distro?: string } } | null }
+
+/** options.toolbox.backend: the Docker image (default) or a WSL distro on Windows. Written to the config by the server. */
+function ToolboxCard() {
+  const toast = useToast();
+  const [st, setSt] = useState<ToolboxState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!isLive()) return;
+    apiFetch<ToolboxState>("api/toolbox").then(setSt).catch(() => {});
+  }, []);
+  const wsl = st?.backend === "wsl";
+  const distro = st?.options?.wsl?.distro ?? "kali-linux";
+  const status = !st ? "Désactivé par défaut. Les outils passent par le proxy à périmètre, sous WSL ils y sont dirigés, pas confinés."
+    : st.ready ? `${wsl ? `WSL, distribution ${distro}` : "Docker"}: prêt.` : `${wsl ? `WSL, distribution ${distro}` : "Docker"}: ${st.reason ?? "indisponible"}.`;
+  async function toggle(on: boolean) {
+    if (!isLive()) { setSt({ backend: on ? "wsl" : "docker", ready: false, reason: "démo, rien n'est écrit", options: null }); return; }
+    setBusy(true);
+    try {
+      await apiFetch("api/toolbox", { method: "PUT", body: { backend: on ? "wsl" : "docker" } });
+      setSt(await apiFetch<ToolboxState>("api/toolbox"));
+      toast({ type: "success", title: on ? "Outils WSL activés" : "Retour à Docker", description: "options.toolbox.backend écrit dans la config." });
+    } catch (err) {
+      toast({ type: "error", title: "Config non modifiée", description: (err as Error).message });
+    } finally { setBusy(false); }
+  }
+  return (
+    <Card title="Boîte à outils" meta="nuclei, katana, trufflehog, httpx">
+      <Row title={`Utiliser WSL (${distro}) au lieu de Docker`} desc={status}
+        control={<Toggle on={wsl} onChange={(v) => { if (!busy) void toggle(v); }} label="Utiliser WSL au lieu de Docker" />} />
+    </Card>
+  );
 }
 
 export function Settings() {
@@ -51,6 +86,8 @@ export function Settings() {
           <PolicyToggle title="Bloquer sur les pistes" desc="Déconseillé: une piste n'est pas prouvée." initial={false} />
           <PolicyToggle title="Refuser les scripts d'install en CI" desc="Installe avec --ignore-scripts (recommandé)." initial />
         </Card>
+
+        <ToolboxCard />
 
         <Card title="Membres" actions={<Button variant="ghost" size="sm">Inviter</Button>}>
           {[["Tom", "propriétaire"], ["Pierre", "admin"]].map(([n, r]) => (

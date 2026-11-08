@@ -4,6 +4,6 @@
 set -eu
 mkdir -p "$HOME"
 case "${1:-}" in
-  nuclei|katana|trufflehog|socat) exec "$@" ;;
-  *) echo "crenel-toolbox: only nuclei, katana, trufflehog (and the socat relay) run in this image" >&2; exit 64 ;;
+  nuclei|katana|trufflehog|httpx|socat) exec "$@" ;;
+  *) echo "crenel-toolbox: only nuclei, katana, trufflehog, httpx (and the socat relay) run in this image" >&2; exit 64 ;;
 esac

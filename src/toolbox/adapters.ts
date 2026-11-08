@@ -171,12 +171,14 @@ export function katanaFindings(suggested: SuggestedResource[]): Finding[] {
 
 export interface SecretLead { detector: string; file: string; line: number; verified: boolean; fingerprint: string }
 
-/** Path relative to the mounted project (/project/...). */
-function projectRel(file: string): string {
-  return file.replace(/\\/g, "/").replace(/^\/project\/?/, "");
+/** Path relative to the project root as the tool saw it (/project in Docker, /mnt/c/... in WSL). */
+function projectRel(file: string, root: string): string {
+  const f = file.replace(/\\/g, "/");
+  const r = root.replace(/\/+$/, "");
+  return f === r ? "" : f.startsWith(`${r}/`) ? f.slice(r.length + 1) : f;
 }
 
-export function parseTrufflehog(text: string): { leads: SecretLead[]; findings: Finding[]; claims: Claim[]; raw: Untrusted; skipped: number } {
+export function parseTrufflehog(text: string, projectRoot = "/project"): { leads: SecretLead[]; findings: Finding[]; claims: Claim[]; raw: Untrusted; skipped: number } {
   const { rows, bad } = jsonLines(text);
   let skipped = bad;
   const leads: SecretLead[] = [];
@@ -187,7 +189,7 @@ export function parseTrufflehog(text: string): { leads: SecretLead[]; findings: 
     const meta = (((r.SourceMetadata ?? {}) as Record<string, unknown>).Data ?? {}) as Record<string, unknown>;
     const fsMeta = (meta.Filesystem ?? {}) as Record<string, unknown>;
     const detector = clean(r.DetectorName, 60);
-    const file = projectRel(clean(fsMeta.file, 300));
+    const file = projectRel(clean(fsMeta.file, 300), projectRoot);
     const line = Number(fsMeta.line ?? 0) || 0;
     if (!detector || !file || file.includes("..")) { skipped++; continue; }
     // Never keep the secret: a hash to deduplicate, nothing else.
@@ -208,4 +210,63 @@ export function parseTrufflehog(text: string): { leads: SecretLead[]; findings: 
     claims.push({ id: `claim:${id}`, class: "check.replay-file", source: "agent", detail: { check: "exposed-secrets", file, line, from: id } });
   }
   return { leads, findings, claims, raw: untrusted("tool:trufflehog", text), skipped };
+}
+
+/* ---------------- httpx ---------------- */
+
+export interface LiveHost { url: string; host: string; scheme: string; status: number; title?: string; server?: string; tech: string[]; location?: string }
+
+/** A Server header that names a version: "nginx/1.18.0", "Apache/2.4.41 (Ubuntu)". */
+const VERSIONED_SERVER = /^[A-Za-z][\w.-]*\/\d+(\.\d+)+/;
+
+/**
+ * httpx over the declared hosts: which of them answer, on which scheme, with
+ * what server and technologies (local fingerprints, no lookup). Two kinds of
+ * leads, nothing else:
+ *   - a declared host other than the staging host answering 200 over plain
+ *     http:// (transport covers the staging host): replayed by plain-http-reread;
+ *   - a Server header with a version number (nothing in Crenel reads it): info.
+ */
+export function parseHttpx(text: string, scope: Scope, stagingUrl?: string): { hosts: LiveHost[]; findings: Finding[]; claims: Claim[]; raw: Untrusted; skipped: number } {
+  const { rows, bad } = jsonLines(text);
+  let skipped = bad;
+  const staging = (() => { try { return stagingUrl ? new URL(stagingUrl).hostname.toLowerCase() : ""; } catch { return ""; } })();
+  const hosts: LiveHost[] = [];
+  const findings: Finding[] = [];
+  const claims: Claim[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.failed === true) { skipped++; continue; }
+    let u: URL;
+    try { u = new URL(String(r.url ?? "")); } catch { skipped++; continue; }
+    if (!/^https?:$/.test(u.protocol) || !scope.isHostAllowed(u.toString())) { skipped++; continue; }
+    const status = typeof r.status_code === "number" ? r.status_code : 0;
+    const url = `${u.protocol}//${u.host}/`;
+    if (!status || seen.has(url)) continue;
+    seen.add(url);
+    const server = clean(r.webserver, 80) || undefined;
+    const tech = Array.isArray(r.tech) ? (r.tech as unknown[]).slice(0, 12).map((t) => clean(t, 60)).filter(Boolean) : [];
+    const h: LiveHost = { url, host: u.hostname.toLowerCase(), scheme: u.protocol.slice(0, -1), status, tech, ...(r.title ? { title: clean(r.title, 120) } : {}), ...(server ? { server } : {}), ...(r.location ? { location: clean(r.location, 200) } : {}) };
+    hosts.push(h);
+    if (h.scheme === "http" && status === 200 && h.host !== staging) {
+      const id = `toolbox.httpx:plain-http:${u.host}`;
+      findings.push({
+        id, check: "toolbox.httpx", state: "unproven", severity: "medium", location: url,
+        title: `httpx: ${u.host} répond en HTTP clair au lieu de rediriger`,
+        description: `${TOOL_NOTE} httpx a reçu 200 sur ${url}${h.title ? ` (« ${h.title} »)` : ""}. Un hôte déclaré servi en clair se lit et se modifie sur le réseau.`,
+        remediation: "Rediriger http:// vers https:// (301 ou 308) et poser HSTS. plain-http-reread le rejoue pour le prouver.",
+      });
+      claims.push({ id: `claim:${id}`, class: "http.plain-served", source: "agent", detail: { url, from: id } });
+    }
+    if (server && VERSIONED_SERVER.test(server) && !seen.has(`server:${u.hostname}`)) {
+      seen.add(`server:${u.hostname}`);
+      findings.push({
+        id: `toolbox.httpx:server-version:${u.hostname}`, check: "toolbox.httpx", state: "unproven", severity: "info", location: url,
+        title: `httpx: l'en-tête Server de ${u.hostname} donne une version (${server})`,
+        description: `${TOOL_NOTE} Une version exacte aide à choisir un exploit connu; elle ne prouve aucune faille.`,
+        remediation: "Masquer la version (server_tokens off pour nginx, ServerTokens Prod pour Apache) et garder le serveur à jour.",
+      });
+    }
+  }
+  return { hosts, findings, claims, raw: untrusted("tool:httpx", text), skipped };
 }
