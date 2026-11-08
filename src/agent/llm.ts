@@ -34,7 +34,8 @@ function runCli(args: string[], input: string, call: LlmCall = {}): Promise<stri
     child.stdout.on("data", (d) => { if (out.length < 1_000_000) out += d; });
     child.stderr.on("data", (d) => { if (err.length < 10_000) err += d; });
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`claude exited ${code}: ${err.trim().slice(0, 200)}`))));
+    // The CLI prints some errors (API errors, refused input) on stdout: keep its tail too.
+    child.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`claude exited ${code}: ${(err.trim() || out.trim().slice(-300)).slice(0, 300)}`))));
     child.stdin.end(input);
   });
 }

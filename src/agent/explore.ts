@@ -199,6 +199,15 @@ export class Explorer {
 
   async run(): Promise<ExploreResult> {
     this.d.emit("explore.start", { mode: this.d.mode, budget: this.d.budget, llm: this.d.llm.label });
+    // Reconnaissance before the first model call, deterministic and cheap: the
+    // page and the routes its scripts cite, so the first turn already has
+    // something to work on (a model call costs more than a few GETs).
+    if (this.d.config.scope.stagingUrl && this.d.budget.maxRequests >= 10) {
+      const out = await this.tool("bundle.fetch", {});
+      const page = this.bundle?.find((f) => f.kind === "html");
+      const links = page ? [...new Set([...page.body.matchAll(/(?:href|src|action)=["']([^"'#]+)["']/gi)].map((m) => m[1]!))].slice(0, 40) : [];
+      this.history.push(`[reconnaissance, avant le premier tour]\n→ bundle.fetch {}\n${out.text}` + (links.length ? `\nLiens de la page d'accueil:\n${fence(untrusted("links", links.join("\n"), 2000))}` : ""));
+    }
     for (let turn = 1; turn <= this.d.budget.maxCalls; turn++) {
       if (this.ac.signal.aborted) break;
       const over = this.overBudget();

@@ -86,7 +86,7 @@ test("explore: an out-of-scope request is refused, nothing is sent, the run goes
     assert.equal(refused.length, 3);
     assert.ok(String(refused[0]!.reason).includes("evil.example"));
     assert.ok(!events(t.run, "net").some((e) => String(e.url).includes("evil.example") || String(e.url).includes("169.254")), "no request left for an undeclared host");
-    assert.equal(t.hits.length, 0);
+    assert.deepEqual(t.hits, ["GET / anon"], "only the reconnaissance of the declared target");
   } finally { t.close(); }
 });
 
@@ -96,14 +96,14 @@ test("explore: a write is refused in assist, and in full the gate asks every tim
   try {
     await assist.run.start();
     assert.ok(String(events(assist.run, "explore.refused")[0]!.reason).includes("full"));
-    assert.equal(assist.hits.length, 0);
+    assert.deepEqual(assist.hits.filter((h) => !h.startsWith("GET ")), []);
   } finally { assist.close(); }
   // Full exploration, allowActiveTesting off: refused by the code before the gate.
   const off = await setup({ explore: "full", active: false, script: [w] });
   try {
     await off.run.start();
     assert.ok(String(events(off.run, "explore.refused")[0]!.reason).includes("allowActiveTesting"));
-    assert.equal(off.hits.length, 0);
+    assert.deepEqual(off.hits.filter((h) => !h.startsWith("GET ")), []);
   } finally { off.close(); }
   // Full, active on, ask mode with a standing grant for the host: the write is still asked for, and denied.
   const t = await setup({ explore: "full", active: true, mode: "ask", grants: ["127.0.0.1"], script: [w] });
@@ -115,7 +115,7 @@ test("explore: a write is refused in assist, and in full the gate asks every tim
     assert.ok(p.requests[0]!.startsWith("PATCH"));
     t.run.decide(p.id, "deny");
     await done;
-    assert.deepEqual(t.hits, [], "nothing reached the server");
+    assert.deepEqual(t.hits.filter((h) => !h.startsWith("GET ")), [], "no write reached the server");
     assert.ok(String(events(t.run, "explore.refused")[0]!.reason).includes("porte"));
   } finally { t.close(); }
 });
