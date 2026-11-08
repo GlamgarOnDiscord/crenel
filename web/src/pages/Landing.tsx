@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, Check, Copy, Eye, FileCode2, FlaskConical, Github, GitPullRequest, Hand, KeyRound, LayoutDashboard,
-  ListChecks, Lock, MousePointer2, Radar, ShieldCheck, Sparkles, Users, Zap,
+  ArrowRight, Check, Copy, Eye, FileCode2, FlaskConical, Github, Hand, KeyRound, LayoutDashboard,
+  ListChecks, Radar, ShieldCheck, Users, Zap,
 } from "lucide-react";
 import { Mark, Wordmark, Mascot } from "../brand/Logo.tsx";
 import { Shimmer } from "../components/ai/shimmer.tsx";
 import { REPO_URL, DOCS_URL } from "../lib/links.ts";
 import "@fontsource/instrument-serif/latin-400.css";
 import "@fontsource/instrument-serif/latin-400-italic.css";
+import { BundleFigure, CiFigure, GateFigure, MatrixFigure, ProofBenchFigure } from "../components/iso/IsoFigures.tsx";
 import "../styles/landing.css";
+import "../styles/iso.css";
 
 /* Landing page. Dark product page lit by an amber curtain of light: a hero
    with a framed console shot rising out of the beam, a marquee of the real
-   checks, a "why" split card, a bento of what Crenel does (each card a small
-   live vignette), the bench numbers as tiles, the method, and a closing card
+   checks, a "why" split card around the proof bench, a bento of what Crenel
+   does (each card an interactive isometric figure, components/iso), the bench numbers as tiles, the method, and a closing card
    under the same curtain. Every number here is checked against the engine:
    42 checks in src/core/registry.ts, `node bench/run.mjs` → 27/27 flaws found,
    0/34 decoys flagged, on 23 cases. */
@@ -143,85 +145,6 @@ function Marquee({ items, reverse }: { items: string[]; reverse?: boolean }) {
   );
 }
 
-/* ---------- Bento vignettes ---------- */
-
-function BundleVignette() {
-  return (
-    <div className="vg vg-browser">
-      <div className="vg-bar"><i /><i /><i /><span className="lx-url"><Lock size={10} />acme.app/assets/index-4f2a.js</span></div>
-      <pre className="vg-code mono">
-        <span className="lx-d">{"// chunk 14 / 31 · source map servie"}</span>{"\n"}
-        {"import { loadStripe } from \"@stripe/stripe-js\";\n"}
-        {"const pk = \"pk_live_51N…aQ\";\n"}
-        {"const stripe = new Stripe("}<mark>"sk_live_51N…q8"</mark>{");\n"}
-        <span className="lx-d">{"// supabase: anon key, table profiles sans RLS"}</span>{"\n"}
-        {"const sb = createClient(URL, ANON_KEY);"}
-      </pre>
-      <div className="vg-sweep"><span className="mono">secrets</span></div>
-    </div>
-  );
-}
-
-function ProofVignette() {
-  return (
-    <div className="vg vg-proof">
-      <div className="vg-bubble">
-        <Sparkles size={13} />
-        <div><b>Piste trouvée</b><span>authz.matrix · /api/projects/:id</span></div>
-      </div>
-      <div className="vg-notes">
-        <div className="vg-note"><span className="ic">B</span><div><b>Propriétaire</b><span>B lit proj_b_1 → 200</span></div><time className="mono">00:01</time></div>
-        <div className="vg-note hot"><span className="ic a">A</span><div><b>Attaquant</b><span>A lit proj_b_1 → 200, rejoué 3 fois</span></div><time className="mono">00:02</time></div>
-        <div className="vg-note"><span className="ic">∅</span><div><b>Contrôle négatif</b><span>sans session → 401</span></div><time className="mono">00:03</time></div>
-      </div>
-      <div className="vg-reply">Prouvé. Le test est prêt.</div>
-    </div>
-  );
-}
-
-function MatrixVignette() {
-  return (
-    <div className="vg vg-matrix">
-      <div className="vg-toast"><span className="ic">!</span><div><b>proj_b_1 lisible par A</b><span>1 faille, 2 contrôles au vert</span></div></div>
-      <div className="vg-orbs">
-        <span className="orb a">A<em>3</em></span>
-        <span className="orb b">B</span>
-        <span className="orb n">anon<em className="ok">0</em></span>
-        <svg viewBox="0 0 300 120" preserveAspectRatio="none"><path d="M60 70 C 110 20, 170 20, 150 62" /><path d="M150 62 C 180 100, 220 100, 245 72" className="ok" /></svg>
-      </div>
-    </div>
-  );
-}
-
-function ControlVignette() {
-  return (
-    <div className="vg vg-control">
-      <div className="vg-rings"><i /><i /><i /></div>
-      <span className="vg-you">Vous</span>
-      <div className="vg-modes">
-        <span className="on">Demander<MousePointer2 size={15} className="cur" /></span>
-        <span>Lecture seule</span>
-        <span>Bypass</span>
-      </div>
-    </div>
-  );
-}
-
-function CiVignette() {
-  return (
-    <div className="vg vg-ci">
-      <div className="vg-comment">La régression revient sur cette PR. Le build est bloqué jusqu'au correctif.</div>
-      <div className="vg-run">
-        <div className="lx-hd"><GitPullRequest size={13} /><b>fix/projects-scope</b><span className="mono">#128</span></div>
-        <div className="lx-row ok"><Check size={12} />A ne lit pas le projet de B</div>
-        <div className="lx-row ok"><Check size={12} />Webhook Stripe signé</div>
-        <div className="lx-row bad"><span>×</span>Clé serveur absente du bundle</div>
-      </div>
-      <div className="vg-avatar"><Mascot size={54} mood="idle" /></div>
-    </div>
-  );
-}
-
 export function Landing() {
   useEffect(() => { document.title = "Crenel · prouvé, puis gardé"; }, []);
   const ref = useReveal();
@@ -278,22 +201,7 @@ export function Landing() {
           <h2 id="w-t" className="lx-serif-h">Trois cents alertes,<br />aucune preuve,<br />plus aucune confiance.</h2>
         </div>
         <div className="lx-why" data-reveal>
-          <div className="lx-why-art" aria-hidden="true">
-            <div className="lx-flow">
-              <div className="lx-flow-hd"><b>Preuve en trois requêtes</b><span className="lx-faces"><i>A</i><i>B</i><i>∅</i></span></div>
-              <div className="lx-flow-grid">
-                <div className="node n1"><i className="lx-d am" /><b>B lit proj_b_1</b><span className="mono">200</span></div>
-                <div className="node n2"><i className="lx-d rd" /><b>A lit proj_b_1</b><span className="mono">200 ×3</span></div>
-                <div className="node n3"><i className="lx-d" /><b>Sans session</b><span className="mono">401</span></div>
-                <div className="node n4 ok"><Check size={13} /><b>Test généré</b><span className="mono">authz.test.ts</span></div>
-                <svg className="wires" viewBox="0 0 400 260" preserveAspectRatio="none">
-                  <path d="M120 52 V 130 H 230" /><path d="M120 130 V 208 H 230" /><path d="M300 130 V 190" />
-                </svg>
-                <span className="lx-cursor c1"><MousePointer2 size={16} /><em>compte A</em></span>
-                <span className="lx-cursor c2"><MousePointer2 size={16} /><em>rejoué ×3</em></span>
-              </div>
-            </div>
-          </div>
+          <div className="lx-why-art"><ProofBenchFigure /></div>
           <div className="lx-why-copy">
             <span className="lx-why-mark"><Mark size={44} /></span>
             <h3>Pourquoi Crenel</h3>
@@ -311,25 +219,21 @@ export function Landing() {
           <h2 id="p-t">Passer d'une liste d'alertes<br />à des failles prouvées.</h2>
         </div>
         <div className="lx-bento">
-          <article className="lx-card big" data-reveal>
+          <article className="lx-card" data-reveal>
+            <BundleFigure />
             <p className="lx-card-t"><b>Le bundle relu, chunk par chunk.</b> Chaque fichier JS servi est lu, source maps comprises. Une clé n'est vérifiée en direct que si vous l'autorisez.</p>
-            <BundleVignette />
-          </article>
-          <article className="lx-card big" data-reveal>
-            <p className="lx-card-t"><b>Prouvé, pas supposé.</b> Propriétaire, attaquant, contrôle négatif. Sans rejeu, ce n'est qu'une piste, et Crenel l'écrit.</p>
-            <ProofVignette />
           </article>
           <article className="lx-card" data-reveal>
-            <MatrixVignette />
-            <p className="lx-card-t"><b>Autorisation entre comptes.</b> Chaque ressource lue par A, par B et sans session, lecture et écriture.</p>
+            <MatrixFigure />
+            <p className="lx-card-t"><b>Autorisation entre comptes.</b> Chaque objet de B lu par A, par C et sans session. Un 200 qui ne devrait pas l'être est une faille, rejouée avant d'être signalée.</p>
           </article>
           <article className="lx-card" data-reveal>
-            <ControlVignette />
-            <p className="lx-card-t"><b>Vous gardez la main.</b> Une question avant chaque sonde réseau, sur les seuls hôtes déclarés.</p>
+            <GateFigure />
+            <p className="lx-card-t"><b>Vous gardez la main.</b> Une question avant chaque sonde réseau, sur les seuls hôtes déclarés. Chaque envoi est écrit dans un journal chaîné.</p>
           </article>
           <article className="lx-card" data-reveal>
-            <CiVignette />
-            <p className="lx-card-t"><b>Gardé en CI.</b> Chaque preuve devient un test de régression qui bloque le build.</p>
+            <CiFigure />
+            <p className="lx-card-t"><b>Gardé en CI.</b> Chaque preuve devient un test de régression. Sans correctif, le build reste rouge.</p>
           </article>
         </div>
       </section>
