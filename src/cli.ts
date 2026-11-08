@@ -20,7 +20,7 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
-import { claudeCli, detectClaude } from "./agent/llm.js";
+import { claudeCli, DEFAULT_MODEL, detectClaude } from "./agent/llm.js";
 import { crawlLiveBundle } from "./checks/live-bundle.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
@@ -442,7 +442,7 @@ async function main(): Promise<number> {
     }
     const result = await runGuarded(config, configPath, !!flags.verbose);
     if (!result) return 2;
-    const model = typeof flags.model === "string" ? flags.model : "opus";
+    const model = typeof flags.model === "string" ? flags.model : DEFAULT_MODEL;
     const max = typeof flags.max === "string" ? Number(flags.max) : 3;
     process.stdout.write(`Triaging ${Math.min(max, result.findings.filter((f) => f.state === "unproven").length)} lead(s) via claude -p (${model})...\n\n`);
     const advice = await triageLeads(result.findings, model, max);
@@ -469,7 +469,7 @@ async function main(): Promise<number> {
       process.stderr.write("review-bundle needs scope.stagingUrl: the page whose JavaScript is reviewed.\n");
       return 2;
     }
-    const model = typeof flags.model === "string" ? flags.model : "opus";
+    const model = typeof flags.model === "string" ? flags.model : DEFAULT_MODEL;
     const llm = claudeCli(model);
     if (!llm || !(await detectClaude())) {
       process.stderr.write(`review-bundle needs the claude CLI (model ${model}).\n`);
@@ -502,8 +502,8 @@ async function main(): Promise<number> {
       "  crenel serve  [--config path] [--port 4100] [--open] [--llm]      local web console and API",
       "                 [--exit-with-stdin]: stop when stdin closes (used by the desktop app)",
       "  bastion generate-tests [--config path] [--out file.test.ts]  regression test per finding",
-      "  crenel triage [--config path] [--model opus] [--max 3]  LLM triage of leads (claude -p)",
-      "  crenel review-bundle [--config path] [--model opus] [--max 20] [--out review.json]",
+      "  crenel triage [--config path] [--model opus-4-8] [--max 3]  LLM triage of leads (claude -p)",
+      "  crenel review-bundle [--config path] [--model opus-4-8] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
       "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--max-calls N] [--json] [--state dir]",
       "                 free exploration by the model (claude -p); claims proven only by a validator's replay",

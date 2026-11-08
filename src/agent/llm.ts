@@ -13,7 +13,7 @@ export interface LlmCall {
   timeoutMs?: number;
 }
 export interface Llm {
-  /** Short name shown in the UI, e.g. "claude -p (opus)". */
+  /** Short name shown in the UI, e.g. "claude -p (opus-4-8)". */
   label: string;
   ask(prompt: string, call?: LlmCall): Promise<string>;
 }
@@ -42,13 +42,24 @@ function runCli(args: string[], input: string, call: LlmCall = {}): Promise<stri
 
 // Only Claude models go through claude -p. Other entries of the console's
 // model menu are not wired: asking for them returns null and the run says so.
-const CLAUDE_MODELS = new Set(["opus", "sonnet", "haiku"]);
+// Each console id maps to what `claude --model` receives: an alias for the
+// latest of a line, or a full model id when a specific version is pinned.
+// Opus 4.8 is the default: Opus 5.5 runs broader safety classifiers (cyber
+// among them), which a security tool trips more often.
+export const DEFAULT_MODEL = "opus-4-8";
+const CLAUDE_MODELS: Record<string, string> = {
+  "opus-4-8": "claude-opus-4-8",
+  opus: "opus",
+  sonnet: "sonnet",
+  haiku: "haiku",
+};
 
-export function claudeCli(model = "opus"): Llm | null {
-  if (!CLAUDE_MODELS.has(model)) return null;
+export function claudeCli(model = DEFAULT_MODEL): Llm | null {
+  const cliModel = CLAUDE_MODELS[model];
+  if (!cliModel) return null;
   return {
     label: `claude -p (${model})`,
-    ask: (prompt, call) => runCli(["-p", "--model", model], prompt, call),
+    ask: (prompt, call) => runCli(["-p", "--model", cliModel], prompt, call),
   };
 }
 
