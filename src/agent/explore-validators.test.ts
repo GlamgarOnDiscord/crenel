@@ -151,3 +151,143 @@ test("free toolbox arguments: proxy, output, local code, off-scope URLs and path
   assert.ok(argv.includes("-etags"));
   assert.ok(argv.indexOf("-proxy") > argv.indexOf("-tags"));
 });
+
+// --- explore.injection: a server with a real boolean-SQLi param and a reflected-XSS param ---
+test("explore.injection proves boolean SQLi and reflected XSS, denies a static param", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const q = u.searchParams.get("q") ?? "";
+    const name = u.searchParams.get("name") ?? "";
+    const send = (b: string) => { res.writeHead(200, { "content-type": "text/html" }); res.end(b); };
+    if (u.pathname === "/search") {
+      // boolean-SQLi mock: a truthy tautology returns the full list (like no filter), a falsy one returns none.
+      if (/OR '1'='1/.test(q)) return send("<ul><li>alice</li><li>bob</li><li>carol</li></ul>");
+      if (/AND '1'='2/.test(q)) return send("<ul></ul>");
+      return send("<ul><li>alice</li><li>bob</li><li>carol</li></ul>"); // baseline (q=1) returns all
+    }
+    if (u.pathname === "/greet") return send(`<h1>Hello ${name}</h1>`); // reflects unescaped -> XSS
+    if (u.pathname === "/static") return send("<h1>Welcome</h1>"); // ignores params
+    res.writeHead(404); res.end();
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-inj-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const mk = (detail: Record<string, unknown>): Claim => ({ id: "c", class: "explore.injection", source: "llm", detail });
+
+    const sqli = await validateClaim(mk({ url: "/search", param: "q", value: "1" }), env);
+    assert.equal(sqli.state, "proven", sqli.reason);
+    assert.match(sqli.reason, /SQL injection/);
+
+    const xss = await validateClaim(mk({ url: "/greet", param: "name", value: "bob" }), env);
+    assert.equal(xss.state, "proven", xss.reason);
+    assert.match(xss.reason, /XSS/);
+
+    const stat = await validateClaim(mk({ url: "/static", param: "q", value: "1" }), env);
+    assert.equal(stat.state, "unproven", "a param the server ignores must never be proven");
+  } finally {
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- explore.injection over GraphQL: a field arg that reflects unescaped (XSS) ---
+test("explore.injection proves injection through a GraphQL argument", async () => {
+  const srv = createServer((req, res) => {
+    if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
+    let body = ""; req.on("data", (c) => (body += c)); req.on("end", () => {
+      let q = ""; try { q = JSON.parse(body).query ?? ""; } catch {}
+      // naive backend: echoes the greet() argument straight into HTML (reflected XSS).
+      const m = q.match(/greet\(name:\s*"([^"]*)"\)/);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: { greet: `<p>Hi ${m ? m[1] : "?"}</p>` } }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-gql-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const claim: Claim = { id: "g", class: "explore.injection", source: "llm", detail: { url: "/graphql", gql: '{ greet(name: "__INJECT__") }' } };
+    const v = await validateClaim(claim, env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.match(v.reason, /XSS/);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// --- explore.injection: OS command injection (server runs the shell arithmetic) ---
+test("explore.injection proves OS command injection via a shell-evaluated arithmetic", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const host = u.searchParams.get("host") ?? "";
+    // vulnerable: concatenates host into a shell command; emulate the shell evaluating $((7*7)).
+    // Do NOT reflect raw input (avoid an incidental XSS match); only the shell path yields output.
+    let out = "PING: host is up";
+    const m = host.match(/echo (cr[0-9a-f]+)\$\(\(7\*7\)\)/);
+    if (m) out = `PING\n${m[1]}49\n`; // the shell computed the arithmetic
+    res.writeHead(200, { "content-type": "text/plain" }); res.end(out);
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-cmd-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const claim: Claim = { id: "cmd", class: "explore.injection", source: "llm", detail: { url: "/ping", param: "host", value: "127.0.0.1" } };
+    const v = await validateClaim(claim, env);
+    assert.equal(v.state, "proven", v.reason);
+    assert.match(v.reason, /command injection/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// --- explore.ssrf: out-of-band proof via a server that fetches the injected URL ---
+test("explore.ssrf proves SSRF out-of-band and denies a param the server does not fetch", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const target = u.searchParams.get("url");
+    if (u.pathname === "/fetch" && target) {
+      // vulnerable: server-side fetch of the attacker-supplied URL
+      fetch(target).then(() => { res.writeHead(200); res.end("fetched"); }).catch(() => { res.writeHead(200); res.end("err"); });
+      return;
+    }
+    res.writeHead(200); res.end("ignored"); // /safe ignores the param
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-ssrf-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: { explore: { ssrfCallbackHost: "127.0.0.1" } } };
+    const mk = (path: string): Claim => ({ id: "s", class: "explore.ssrf", source: "llm", detail: { url: path, param: "url", callbackHost: "127.0.0.1" } });
+
+    const vuln = await validateClaim(mk("/fetch"), env);
+    assert.equal(vuln.state, "proven", vuln.reason);
+    assert.match(vuln.reason, /SSRF/);
+
+    const safe = await validateClaim(mk("/safe"), env);
+    assert.equal(safe.state, "unproven", "a param the server never fetches must not be proven");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// --- explore.stored-xss: stored then served unescaped ---
+test("explore.stored-xss proves stored XSS and denies an escaped sink", async () => {
+  let stored = "";
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    if (req.method === "POST" && u.pathname === "/comment") { let b=""; req.on("data",c=>b+=c); req.on("end",()=>{ const p=new URLSearchParams(b); stored=p.get("text")??""; res.writeHead(200); res.end("saved"); }); return; }
+    if (u.pathname === "/wall") { res.writeHead(200,{"content-type":"text/html"}); res.end(`<div>${stored}</div>`); return; }       // unescaped
+    if (u.pathname === "/wall-safe") { res.writeHead(200,{"content-type":"text/html"}); res.end(`<div>${stored.replace(/</g,"&lt;")}</div>`); return; } // escaped
+    res.writeHead(404); res.end();
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sx-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const mk = (ret: string): Claim => ({ id: "x", class: "explore.stored-xss", source: "llm", detail: { storeUrl: "/comment", storeParam: "text", storeWhere: "body", retrieveUrl: ret } });
+    const proven = await validateClaim(mk("/wall"), env);
+    assert.equal(proven.state, "proven", proven.reason);
+    assert.match(proven.reason, /Stored XSS/);
+    const safe = await validateClaim(mk("/wall-safe"), env);
+    assert.equal(safe.state, "unproven", "escaped sink must not be proven");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
