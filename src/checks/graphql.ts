@@ -8,7 +8,7 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
-import { graphqlSuggestionsOracle, SUGGESTION_PROBES } from "../agent/graphql.js";
+import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "../agent/graphql.js";
 
 const PATHS = ["/graphql", "/api/graphql", "/v1/graphql", "/query", "/gql"];
 const QUERY = "query{__schema{queryType{name}mutationType{name}types{name kind}}}";
@@ -49,6 +49,28 @@ async function suggestionsAt(url: string, ctx: CheckContext): Promise<Finding | 
   return null;
 }
 
+// Query batching with no rate limit (DoS amplification / rate-limit bypass). An
+// array of N queries that runs as N results proves it. The array body is not a
+// read, so this needs active mode; only probed on a path that speaks GraphQL.
+async function batchingAt(url: string, ctx: CheckContext): Promise<Finding | null> {
+  if (!ctx.scope.allowActiveTesting) return null;
+  const n = 5;
+  let res;
+  try { res = await safeFetch(url, ctx.scope, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(Array.from({ length: n }, () => ({ query: "{ __typename }" }))) }); }
+  catch { return null; }
+  if (graphqlBatchOracle({ status: res.status, body: res.body, sent: n }).verdict !== "proven") return null;
+  const p = (() => { try { return new URL(url).pathname; } catch { return url; } })();
+  return {
+    id: `graphql:batching:${p}`, check: "graphql",
+    title: `GraphQL query batching with no rate limit on ${p}`,
+    severity: "medium", state: "proven", location: url,
+    description: `A single request with a batch of ${n} queries ran all ${n} and returned ${n} results: batching with no per-operation rate limit amplifies brute-force and DoS.`,
+    remediation: "Disable query batching in production, or rate-limit per operation (not per request).",
+    proof: { method: `active: a JSON array of ${n} queries in one request`, replay: `curl -s -X POST -H 'content-type: application/json' --data '[{"query":"{ __typename }"}, …×${n}]' '${url}'`, evidence: `HTTP ${res.status}, an array of ${n} results` },
+    regressionHint: `After deploy, a batched array of queries on ${p} must not run every operation.`,
+  };
+}
+
 export const graphql: Check = {
   name: "graphql",
   title: "GraphQL introspection open on the deployed API",
@@ -72,6 +94,8 @@ export const graphql: Check = {
         // with a couple of query-only probes, but only on a path that speaks GraphQL.
         const sugg = await suggestionsAt(base + path, ctx);
         if (sugg) findings.push(sugg);
+        const bt = await batchingAt(base + path, ctx);
+        if (bt) findings.push(bt);
         continue;
       }
       const replay = via === "GET" ? `curl -s '${url}'` : `curl -s -X POST -H 'content-type: application/json' --data '${JSON.stringify({ query: QUERY })}' '${base}${path}'`;
@@ -90,6 +114,8 @@ export const graphql: Check = {
       });
       const sugg = await suggestionsAt(base + path, ctx);
       if (sugg) findings.push(sugg);
+      const bt = await batchingAt(base + path, ctx);
+      if (bt) findings.push(bt);
     }
     if (!findings.length) ctx.log("graphql: no open introspection on the usual paths (GET and POST)");
     return findings;
