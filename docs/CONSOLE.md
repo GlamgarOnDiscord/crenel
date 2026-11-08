@@ -16,7 +16,9 @@ What is real in the console:
 - **State** lives in `.crenel/` next to the config: one append-only, hash-chained JSONL journal per run (replayed after a restart), findings with their verdicts, the last authorization matrix, generated tests (`.crenel/regression.test.ts`, nothing is written in your project), the audit log, and `grants.json` (hosts you allowed with *Toujours pour cet hôte*, kept across restarts; removing a target drops its grant).
 - **Model**: off by default. With `--llm` and the `claude` CLI installed, `claude -p` writes summaries and chat answers and may propose claims, from tool output fenced as untrusted data. Without it, everything above still works. Other models in the menu are not wired.
 
-Still demo-only in the console: integrations (GitHub, CI, Slack), key liveness and revocation on the Secrets page, the "guarded in CI" status (Crenel cannot see your CI), the context-window gauge, and opening pull requests. Without `crenel serve` (static build, `pnpm dev`), the console shows the demo data.
+- **Integrations**: Slack and signed webhooks are configured and tested from the page, against the real config and `.crenel/secrets.json`; a run sends its new proven findings and journals each delivery. The GitHub card shows the Action, which runs in your repository. See [`INTEGRATIONS.md`](INTEGRATIONS.md).
+
+Still demo-only in the console: key liveness and revocation on the Secrets page, the "guarded in CI" status (Crenel cannot see your CI), the context-window gauge, and opening pull requests. Without `crenel serve` (static build, `pnpm dev`), the console shows the demo data.
 
 Live demo against a deliberately vulnerable app on loopback:
 

@@ -13,7 +13,7 @@ proves each one with a replayable request, and turns it into a regression test.
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![Checks](https://img.shields.io/badge/checks-42-1b1d2a?style=flat-square)](docs/CHECKS.md)
-[![Tests](https://img.shields.io/badge/tests-325%20passing-1b1d2a?style=flat-square)](#contributing)
+[![Tests](https://img.shields.io/badge/tests-354%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
 Free · local · no account · no LLM required
@@ -83,9 +83,14 @@ A local agent console on `127.0.0.1`: start a task, follow each tool step by ste
   with:
     config: crenel.config.yaml
     fail-on: high          # proven findings only
+    pr-comment: "true"     # optional, needs pull-requests: write
 ```
 
-Uploads SARIF to GitHub code scanning. JUnit and JSON outputs too: [`docs/USAGE.md`](docs/USAGE.md).
+Uploads SARIF to GitHub code scanning and can keep one PR comment of the proven findings, with the workflow's own `GITHUB_TOKEN`. JUnit and JSON outputs too: [`docs/USAGE.md`](docs/USAGE.md).
+
+## Integrations
+
+Slack (Incoming Webhook, Block Kit) for new proven critical or high findings, and webhooks signed with HMAC-SHA256 for every new proven finding and finished run. Destinations sit in their own allowlist, never scan targets; secrets stay in an env var or `.crenel/secrets.json` (0600) and out of every log. Set them from the console or the CLI: [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ## Safety
 
