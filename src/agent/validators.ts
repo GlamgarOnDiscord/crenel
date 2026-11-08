@@ -679,7 +679,7 @@ const exploreInjectionValidator: Validator = {
   class: "explore.injection",
   name: "injection (generic oracle: differential, reflection, computation)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown };
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown };
     const no = (reason: string, ev?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence: ev });
     const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
     if (typeof d.url !== "string") return no("need detail.url");
@@ -773,6 +773,19 @@ const exploreInjectionValidator: Validator = {
         if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
         if (r.verdict === "lead") leads.push(`nosql body: ${r.reason}`);
       } catch (e) { leads.push(`nosql body probe failed: ${(e as Error).message}`); }
+      // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
+      // full body with the quoted marker "__INJECT__" at the injectable field; the
+      // validator substitutes an operator object there. Keeps the other fields intact.
+      if (typeof d.bodyTemplate === "string" && d.bodyTemplate.includes('"__INJECT__"')) {
+        try {
+          const tpl = d.bodyTemplate;
+          const sub = (v: unknown) => tpl.replace('"__INJECT__"', JSON.stringify(v));
+          const jtSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: sub(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+          const r = nosqlOracle({ baseline: await jtSend(baseVal), truthy: await jtSend({ $ne: imp }), falsy: await jtSend({ $eq: imp }) });
+          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body template): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+          if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
+        } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
+      }
     }
 
     return no(leads.length ? `not proven; leads: ${leads.slice(0, 3).join("; ")}` : "no injection proven (no differential, reflection or computation)", ev(leads.slice(0, 2).join(" | ")));

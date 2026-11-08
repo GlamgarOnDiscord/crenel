@@ -97,7 +97,13 @@ export function nosqlOracle(input: {
   const truthyLikeBase = same(truthy, baseline);
   const falsyDiffers = !same(falsy, baseline) && !same(falsy, truthy);
   if (truthyLikeBase && falsyDiffers) {
-    return { verdict: "proven", kind: "nosqli-boolean", reason: "an always-true operator ($ne) matches the baseline while an always-false one ($in:[]) diverges (boolean-based)" };
+    return { verdict: "proven", kind: "nosqli-boolean", reason: "an always-true operator ($ne) matches the baseline while an always-false one ($eq) diverges (boolean-based)" };
+  }
+  // Auth/filter bypass: the always-true operator SUCCEEDS where the literal value
+  // and the always-false operator are both denied -> the operator was interpreted.
+  const ok = (r: { status: number; body: string }) => r.status >= 200 && r.status < 300;
+  if (ok(truthy) && !ok(baseline) && !ok(falsy) && !same(truthy, falsy)) {
+    return { verdict: "proven", kind: "nosqli-bypass", reason: "an always-true operator ($ne) is accepted where the literal value and an always-false operator ($eq) are both denied (auth/filter bypass)" };
   }
   if (!same(truthy, falsy)) {
     return { verdict: "lead", kind: "nosqli", reason: "operator-injected responses differ but not cleanly against the baseline: review by hand" };

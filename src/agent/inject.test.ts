@@ -90,3 +90,8 @@ test("nosql: no differential -> denied", () => {
   const r = nosqlOracle({ baseline: { status: 200, body: "x" }, truthy: { status: 200, body: "same" }, falsy: { status: 200, body: "same" } });
   assert.equal(r.verdict, "denied");
 });
+
+test("nosql: always-true succeeds where literal and always-false are denied -> proven (bypass)", () => {
+  const r = nosqlOracle({ baseline: { status: 401, body: "no" }, truthy: { status: 200, body: '{"token":"x"}' }, falsy: { status: 401, body: "no" } });
+  assert.equal(r.verdict, "proven");
+});
