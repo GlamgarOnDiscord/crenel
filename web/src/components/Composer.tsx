@@ -77,7 +77,7 @@ function ModelMenu({ placement }: { placement: "up" | "down" }) {
                 {MODELS.filter((m) => m.vendor === v).map((m) => (
                   <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); setOpen(false); }} data-checked={m.id === ws.model || undefined}>
                     <ModelSelectorLogo provider={m.provider} />
-                    <ModelSelectorName desc={m.desc}>{m.label}</ModelSelectorName>
+                    <ModelSelectorName desc={m.desc} recommended={"recommended" in m && m.recommended}>{m.label}</ModelSelectorName>
                     <Check size={14} className="msel-check" aria-hidden="true" />
                   </ModelSelectorItem>
                 ))}

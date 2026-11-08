@@ -7,8 +7,9 @@ import type { Target } from "./types.ts";
 // small context mounted by the Shell, so Home and Agent stay in sync.
 
 export const MODELS = [
-  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus capable, pour les audits profonds." },
-  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis, le bon défaut." },
+  { id: "opus-4-8", label: "Opus 4.8", provider: "claude", vendor: "Anthropic", desc: "Moins souvent bloqué sur les audits.", recommended: true },
+  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus récent, mais plus souvent bloqué." },
+  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis." },
   { id: "haiku", label: "Haiku 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus rapide, pour les vérifications simples." },
   { id: "gpt", label: "GPT-5.5", provider: "openai", vendor: "OpenAI", desc: "Modèle généraliste d'OpenAI." },
   { id: "gemini", label: "Gemini 3.5", provider: "gemini", vendor: "Google", desc: "Grande fenêtre de contexte, pour les gros dépôts." },
@@ -51,7 +52,7 @@ export const GOALS = [
 export type GoalId = (typeof GOALS)[number]["id"];
 
 export const CONTEXT_WINDOW: Record<ModelId, number> = {
-  opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
+  "opus-4-8": 200_000, opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
 };
 
 interface Workspace {
@@ -73,7 +74,7 @@ interface Workspace {
 const noop = () => {};
 const WorkspaceContext = createContext<Workspace>({
   target: targets[0]!, setTargetId: noop,
-  model: "opus", setModel: noop,
+  model: "opus-4-8", setModel: noop,
   effort: "med", setEffort: noop,
   mode: "ask", setMode: noop,
   goal: "none", setGoal: noop,
@@ -82,7 +83,7 @@ const WorkspaceContext = createContext<Workspace>({
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [targetId, setTargetId] = useState(targets[0]!.id);
-  const [model, setModel] = useState<ModelId>("opus");
+  const [model, setModel] = useState<ModelId>("opus-4-8");
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
   const [goal, setGoal] = useState<GoalId>("none");

@@ -43,7 +43,7 @@ import type { RunResult } from "../core/runner.js";
 import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
 import { GrantSet, StateStore } from "../agent/state.js";
-import { claudeCli, type Llm } from "../agent/llm.js";
+import { claudeCli, DEFAULT_MODEL, type Llm } from "../agent/llm.js";
 import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/explore.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
@@ -189,7 +189,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     const prompt = String(body.prompt ?? "").trim().slice(0, 4000);
     if (!prompt) throw new HttpError(400, "prompt required");
     const mode = (MODES.has(body.mode as Mode) ? body.mode : "ask") as Mode;
-    const model = typeof body.model === "string" ? body.model : "opus";
+    const model = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
     // The console's exploration toggle; the config's choice when absent. Safety does not depend on it.
     const explore = (EXPLORE_MODES as readonly unknown[]).includes(body.explore) ? (body.explore as ExploreMode) : undefined;
     let cfg: Config;
@@ -320,7 +320,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       if (!f) throw new HttpError(404, "no such finding");
       if (seg[2] === "triage" && method === "POST") {
         if (!llmOn) throw new HttpError(503, "no model: start with claude -p available, or keep the deterministic verdict");
-        const model = typeof body.model === "string" ? body.model : "opus";
+        const model = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
         const advice = (await triageFinding(f, model)).advice;
         store.setAdvice(f.uid, advice);
         return send(res, 200, { uid: f.uid, advice, state: f.state, note: "advice only: the state is decided by validators" });
