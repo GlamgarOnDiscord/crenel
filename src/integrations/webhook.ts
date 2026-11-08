@@ -53,10 +53,11 @@ export function findingPayload(f: Finding & { firstSeen?: string; uid?: string }
   };
 }
 
-export interface WebhookContext { project: string; run?: string }
+export interface WebhookContext { project: string; run?: string; locale?: string }
 
 export function webhookBody(event: WebhookEvent, ctx: WebhookContext, data: Record<string, unknown>, delivery: string): string {
-  return JSON.stringify({ event, delivery, sentAt: new Date().toISOString(), project: ctx.project, ...(ctx.run ? { run: ctx.run } : {}), ...data });
+  // `locale` names the language of the human-readable fields (summary, message).
+  return JSON.stringify({ event, delivery, sentAt: new Date().toISOString(), project: ctx.project, ...(ctx.run ? { run: ctx.run } : {}), locale: ctx.locale ?? "en", ...data });
 }
 
 export async function sendWebhook(

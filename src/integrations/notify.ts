@@ -21,6 +21,7 @@ import { integrationsOptions, secretKey, webhookSecretEnv, type IntegrationsOpti
 import { SecretStore } from "./secrets.js";
 import { sendSlack, slackFindingsMessage } from "./slack.js";
 import { findingPayload, sendWebhook } from "./webhook.js";
+import { messages, resolveLocale } from "./i18n.js";
 
 const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
 const MAX_WEBHOOK_FINDINGS = 50;
@@ -87,7 +88,9 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   const already = sent.read();
   const proven = input.findings.filter((f) => f.state === "proven");
   const base = { allowedHosts: opts.allowedHosts, scanHosts: input.config.scope.allowedHosts, fetch: input.fetch, run: input.run, secrets: secrets.values() };
-  const ctx = { project: input.config.project, run: input.run };
+  const locale = resolveLocale(opts.locale, input.env);
+  const m = messages(locale);
+  const ctx = { project: input.config.project, run: input.run, locale };
 
   if (opts.slack?.enabled) {
     const min = RANK[opts.slack.minSeverity];
@@ -114,7 +117,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     const delivered: string[] = [];
     if (hook.events.includes("finding.proven")) {
       for (const f of fresh.slice(0, MAX_WEBHOOK_FINDINGS)) {
-        const { record } = await sendWebhook(hook, secret, "finding.proven", ctx, { finding: findingPayload(f) }, { ...base });
+        const { record } = await sendWebhook(hook, secret, "finding.proven", ctx, { summary: m.hookFinding(m.severity[f.severity], f.title, ctx.project), finding: findingPayload(f) }, { ...base });
         records.push(record);
         if (record.ok) delivered.push(f.id);
         else if (record.error?.startsWith("refused")) break; // the next ones would be refused too
@@ -125,7 +128,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
       const counts = input.counts ?? {
         proven: proven.length, leads: input.findings.filter((f) => f.state === "unproven").length, fixed: input.findings.filter((f) => f.state === "fixed").length,
       };
-      const { record } = await sendWebhook(hook, secret, "run.completed", ctx, { ...counts, newProven: fresh.map((f) => f.id) }, { ...base });
+      const { record } = await sendWebhook(hook, secret, "run.completed", ctx, { summary: m.hookRun(counts.proven, fresh.length, counts.leads, ctx.project), ...counts, newProven: fresh.map((f) => f.id) }, { ...base });
       records.push(record);
     }
   }

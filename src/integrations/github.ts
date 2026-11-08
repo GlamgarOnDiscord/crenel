@@ -22,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import type { Finding, Severity } from "../core/types.js";
 import type { DeliveryRecord, FetchLike } from "./deliver.js";
+import { messages, type Locale } from "./i18n.js";
 
 export const PR_MARKER = "<!-- crenel:pr-summary -->";
 export const GITHUB_API_VERSION = "2026-03-10";
@@ -35,20 +36,27 @@ export function cell(s: string): string {
     .replace(/@/g, "@\u200b").replace(/#(\d)/g, "#\u200b$1").slice(0, 300);
 }
 
-export function prCommentBody(findings: Finding[], ctx: { project: string; codeScanningUrl?: string; runUrl?: string }): string {
+/** Header: the logo only from a public https URL (GitHub's image proxy cannot read a private file), the name always. */
+function header(logoUrl?: string): string {
+  const safe = logoUrl && /^https:\/\/[^\s"'<>]+$/.test(logoUrl) ? logoUrl : undefined;
+  return safe ? `<img src="${safe}" width="20" height="20" alt="Crenel" align="top"> **Crenel**` : "**Crenel**";
+}
+
+export function prCommentBody(findings: Finding[], ctx: { project: string; codeScanningUrl?: string; runUrl?: string; locale?: Locale; logoUrl?: string }): string {
+  const m = messages(ctx.locale ?? "en");
   const proven = findings.filter((f) => f.state === "proven").sort((a, b) => RANK[b.severity] - RANK[a.severity]);
   const leads = findings.filter((f) => f.state === "unproven").length;
-  const lines = [PR_MARKER, `### Crenel: ${proven.length ? `${proven.length} proven finding${proven.length > 1 ? "s" : ""}` : "no proven finding"} on ${cell(ctx.project)}`, ""];
+  const lines = [PR_MARKER, header(ctx.logoUrl), "", `### ${m.prTitle(proven.length, cell(ctx.project))}`, ""];
   if (proven.length) {
-    lines.push("| Severity | Check | Finding | Location |", "|---|---|---|---|");
-    for (const f of proven.slice(0, MAX_ROWS)) lines.push(`| ${f.severity} | \`${cell(f.check)}\` | ${cell(f.title)} | \`${cell(f.location)}\` |`);
-    if (proven.length > MAX_ROWS) lines.push("", `…and ${proven.length - MAX_ROWS} more.`);
+    lines.push(`| ${m.prColumns.join(" | ")} |`, "|---|---|---|---|");
+    for (const f of proven.slice(0, MAX_ROWS)) lines.push(`| ${m.severity[f.severity]} | \`${cell(f.check)}\` | ${cell(f.title)} | \`${cell(f.location)}\` |`);
+    if (proven.length > MAX_ROWS) lines.push("", m.prMore(proven.length - MAX_ROWS));
     lines.push("");
   }
-  lines.push(`Each proven finding has a replayable proof${ctx.codeScanningUrl ? ` in [code scanning](${ctx.codeScanningUrl})` : ""}. ${leads} lead${leads === 1 ? "" : "s"} not listed: a lead is not proven and never fails the build.`);
-  if (ctx.runUrl) lines.push("", `[Workflow run](${ctx.runUrl})`);
+  lines.push(m.prFooter(leads, ctx.codeScanningUrl));
+  if (ctx.runUrl) lines.push("", `[${m.prRunLink}](${ctx.runUrl})`);
   const body = lines.join("\n");
-  return body.length <= MAX_BODY ? body : body.slice(0, MAX_BODY - 20) + "\n\n(truncated)";
+  return body.length <= MAX_BODY ? body : body.slice(0, MAX_BODY - 20) + "\n\n(…)";
 }
 
 export interface PrCommentInput {
@@ -58,6 +66,14 @@ export interface PrCommentInput {
   fetch?: FetchLike;
   /** Pull request number; default from GITHUB_EVENT_PATH. */
   pull?: number;
+  locale?: Locale;
+  logoUrl?: string;
+  /**
+   * Login the token comments as ("crenel-acme[bot]" for a GitHub App,
+   * "github-actions[bot]" for GITHUB_TOKEN). Only that author's marked comment
+   * is edited; default from CRENEL_COMMENT_AUTHOR, else any bot's.
+   */
+  author?: string;
 }
 
 export interface PrCommentResult { action: "created" | "updated" | "skipped"; reason?: string; records: DeliveryRecord[]; url?: string }
@@ -84,7 +100,7 @@ export async function postPrComment(input: PrCommentInput): Promise<PrCommentRes
   if (api.protocol !== "https:") return { action: "skipped", reason: "GITHUB_API_URL must be https", records };
   const server = env.GITHUB_SERVER_URL ?? "https://github.com";
   const body = prCommentBody(input.findings, {
-    project: input.project,
+    project: input.project, locale: input.locale, logoUrl: input.logoUrl,
     codeScanningUrl: `${server}/${repo}/security/code-scanning?query=${encodeURIComponent(`is:open pr:${pull}`)}`,
     runUrl: env.GITHUB_RUN_ID ? `${server}/${repo}/actions/runs/${env.GITHUB_RUN_ID}` : undefined,
   });
@@ -119,7 +135,9 @@ export async function postPrComment(input: PrCommentInput): Promise<PrCommentRes
   for (let page = 1; page <= 10 && existing === undefined; page++) {
     const r = await call("GET", `/repos/${repo}/issues/${pull}/comments?per_page=100&page=${page}`, "pr-comment.list");
     if (r.status !== 200 || !Array.isArray(r.json)) return { action: "skipped", reason: readOnly(r.status), records };
-    const mine = (r.json as { id: number; body?: string; user?: { type?: string } }[]).find((c) => c.user?.type === "Bot" && (c.body ?? "").startsWith(PR_MARKER));
+    const author = input.author ?? (env.CRENEL_COMMENT_AUTHOR || undefined);
+    const mine = (r.json as { id: number; body?: string; user?: { type?: string; login?: string } }[])
+      .find((c) => c.user?.type === "Bot" && (!author || c.user.login === author) && (c.body ?? "").startsWith(PR_MARKER));
     if (mine) existing = mine.id;
     if ((r.json as unknown[]).length < 100) break;
   }

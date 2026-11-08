@@ -11,6 +11,7 @@ import { escapeMrkdwn, isSlackWebhookUrl, sendSlack, slackFindingsMessage } from
 import { sendWebhook, signCrenel, verifyCrenelSignature } from "./webhook.js";
 import { notify } from "./notify.js";
 import { integrationsCommand, integrationsStatus } from "./cli.js";
+import { localeFromTag, messages as msgs, resolveLocale, LOCALES } from "./i18n.js";
 
 const SLACK_URL = "https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX";
 const HOOK_SECRET = "s3cr3t-s3cr3t-s3cr3t-s3cr3t-s3cr3t-0123";
@@ -33,7 +34,7 @@ function f(over: Partial<Finding> = {}): Finding {
 }
 
 function config(integrations: unknown, scanHosts = ["staging.example.com"]): Config {
-  return { project: "acme", projectDir: ".", scope: { allowedHosts: scanHosts, allowActiveTesting: false, allowPrivate: false }, checks: [], options: { integrations } };
+  return { project: "acme", projectDir: ".", scope: { allowedHosts: scanHosts, allowActiveTesting: false, allowPrivate: false }, checks: [], options: { integrations: integrations && typeof integrations === "object" && !("locale" in integrations) ? { locale: "en", ...integrations } : integrations } };
 }
 
 const tmp = () => mkdtempSync(join(tmpdir(), "crenel-integ-"));
@@ -239,4 +240,41 @@ test("cli: set-secret from stdin, test journals host and status only, status sho
   assert.equal(st.slack.configured, true);
   assert.equal(st.slack.destination, "https://hooks.slack.com/…");
   assert.doesNotMatch(JSON.stringify(st), /XXXXXXXX/);
+});
+
+/* ---------------- language ---------------- */
+
+
+test("locale: explicit wins, auto reads CRENEL_LOCALE then the POSIX locale (C means English), then English", () => {
+  assert.equal(resolveLocale("fr", {}), "fr");
+  assert.equal(resolveLocale("de", {}), "en", "unknown language falls back to English");
+  assert.equal(resolveLocale("auto", { CRENEL_LOCALE: "fr" }), "fr");
+  assert.equal(resolveLocale("auto", { LANG: "fr_FR.UTF-8" }, () => "en-US"), "fr");
+  assert.equal(resolveLocale("auto", { LC_ALL: "C.UTF-8", LANG: "fr_FR.UTF-8" }, () => "fr-FR"), "en", "LC_ALL wins, even C");
+  assert.equal(resolveLocale(undefined, {}, () => "fr-CA"), "fr");
+  assert.equal(resolveLocale("auto", {}, () => undefined), "en");
+  assert.equal(localeFromTag("POSIX"), null);
+});
+
+test("every language has every message (no missing key falls back silently)", () => {
+  const keys = (o: object) => Object.keys(o).sort();
+  for (const l of LOCALES) {
+    assert.deepEqual(keys(msgs(l)), keys(msgs("en")), l);
+    assert.deepEqual(keys(msgs(l).severity), keys(msgs("en").severity), l);
+  }
+});
+
+test("Slack and webhooks speak the configured language; machine fields stay English", async () => {
+  const fr = slackFindingsMessage([f(), f({ id: "h", severity: "high" })], { project: "acme", locale: "fr" });
+  assert.equal(fr.text, "Crenel : 2 nouvelles failles prouvées (1 critique, 1 haute) sur acme");
+  assert.match(JSON.stringify(fr.blocks), /\*Sévérité\*\\nCritique/);
+  const dir = tmp();
+  new SecretStore(dir, {}).set("webhooks.ops.secret", HOOK_SECRET);
+  const m = mockFetch([{ status: 204 }]);
+  await notify({ config: config({ locale: "fr", allowedHosts: ["hooks.example.com"], webhooks: [{ name: "ops", url: "https://hooks.example.com/x" }] }), stateDir: dir, findings: [f()], fetch: m.fetch, env: {} });
+  const [finding, run] = m.calls.map((c) => JSON.parse(c.body));
+  assert.equal(finding.locale, "fr");
+  assert.equal(finding.summary, "Nouvelle faille prouvée (critique) sur acme : Stripe secret key (live)");
+  assert.equal(finding.finding.severity, "critical");
+  assert.equal(run.summary, "Tâche Crenel terminée sur acme : 1 prouvée (1 nouvelle), 0 piste.");
 });

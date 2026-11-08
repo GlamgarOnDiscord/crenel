@@ -56,7 +56,7 @@ test("PR comment: our earlier bot comment is edited, not re-posted", async () =>
   });
   const r = await postPrComment({ findings: [], project: "acme", env: env(), fetch: gh.fetch });
   assert.equal(r.action, "updated");
-  assert.match(JSON.parse(gh.calls.at(-1)!.body!).body, /no proven finding/);
+  assert.match(JSON.parse(gh.calls.at(-1)!.body!).body, /No proven finding/);
 });
 
 test("PR comment: nothing proven and no earlier comment means no comment", async () => {
@@ -86,4 +86,28 @@ test("comment cells neutralise markdown tables, HTML and @mentions", () => {
   assert.equal(cell("a|b\n<img> @team #12"), "a\\|b &lt;img&gt; @​team #​12");
   const body = prCommentBody([f({ title: "x | y" })], { project: "p" });
   assert.match(body, /x \\\| y/);
+});
+
+test("PR comment: French, with the name always and the logo only from a public https URL", () => {
+  const fr = prCommentBody([f(), f({ id: "b", state: "unproven" })], { project: "acme", locale: "fr" });
+  assert.match(fr, /^<!-- crenel:pr-summary -->\n\*\*Crenel\*\*\n/);
+  assert.match(fr, /### 1 faille prouvée sur acme/);
+  assert.match(fr, /\| Sévérité \| Contrôle \| Faille \| Emplacement \|/);
+  assert.match(fr, /\| Critique \|/);
+  assert.match(fr, /1 piste non listée : une piste n'est pas prouvée/);
+  assert.doesNotMatch(fr, /<img/);
+  const logo = prCommentBody([f()], { project: "acme", logoUrl: "https://example.org/crenel-icon-512.png" });
+  assert.match(logo, /<img src="https:\/\/example.org\/crenel-icon-512.png" width="20" height="20" alt="Crenel" align="top"> \*\*Crenel\*\*/);
+  assert.doesNotMatch(prCommentBody([f()], { project: "acme", logoUrl: 'https://x.org/a.png" onerror="x' }), /<img/);
+  assert.doesNotMatch(prCommentBody([f()], { project: "acme", logoUrl: "http://x.org/a.png" }), /<img/);
+  assert.match(prCommentBody([f()], { project: "acme" }), /### 1 proven finding on acme/);
+});
+
+test("PR comment: with a GitHub App, only the app's own comment is edited", async () => {
+  const gh = github({
+    "GET /repos/acme/app/issues/7/comments": { status: 200, json: [{ id: 5, body: PR_MARKER + "\nold", user: { type: "Bot", login: "github-actions[bot]" } }] },
+    "POST /repos/acme/app/issues/7/comments": { status: 201, json: {} },
+  });
+  const r = await postPrComment({ findings: [f()], project: "acme", env: env({ CRENEL_COMMENT_AUTHOR: "crenel-acme[bot]" }), fetch: gh.fetch });
+  assert.equal(r.action, "created", "the github-actions comment is not the app's: a new one is posted");
 });

@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import type { Config } from "../core/config.js";
+import { LOCALES } from "./i18n.js";
 
 const Host = z.string().trim().toLowerCase().min(1).regex(/^[a-z0-9.-]+$|^\[[0-9a-f:.]+\]$/, "a hostname, without scheme or path");
 const Name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "lowercase letters, digits and dashes (max 40)");
@@ -17,6 +18,15 @@ export const WEBHOOK_EVENTS = ["finding.proven", "run.completed"] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | "test";
 
 export const IntegrationsOptions = z.object({
+  /** Language of the PR comment, Slack messages and webhook summaries (see i18n.ts for "auto"). */
+  locale: z.enum(["auto", ...LOCALES]).default("auto"),
+  github: z.object({
+    /**
+     * Logo shown in the PR comment's header. Only an https URL anyone can
+     * fetch: GitHub's image proxy cannot read a private repository's raw file.
+     */
+    logoUrl: z.string().url().refine((u) => u.startsWith("https://"), "https only").optional(),
+  }).strict().optional(),
   /** Destination hosts Crenel may POST notifications to. Never scanned. */
   allowedHosts: z.array(Host).default([]),
   slack: z.object({

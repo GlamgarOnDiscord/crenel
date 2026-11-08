@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Config } from "../core/config.js";
+import { loadConfig, type Config } from "../core/config.js";
 import type { Finding } from "../core/types.js";
 import { StateStore } from "../agent/state.js";
 import type { DeliveryRecord, FetchLike } from "./deliver.js";
@@ -15,6 +15,7 @@ import { isSlackWebhookUrl, sendSlack, slackTestMessage } from "./slack.js";
 import { MIN_SECRET_LENGTH, sendWebhook } from "./webhook.js";
 import { notify } from "./notify.js";
 import { postPrComment } from "./github.js";
+import { messages, resolveLocale } from "./i18n.js";
 
 export const stateDirOf = (configPath: string) => join(dirname(resolve(configPath)), ".crenel");
 
@@ -63,19 +64,20 @@ export async function testIntegration(target: string, config: Config, stateDir: 
   const io = integrationsOptions(config);
   const secrets = new SecretStore(stateDir, opts.env);
   const base = { event: "test", allowedHosts: io.allowedHosts, scanHosts: config.scope.allowedHosts, fetch: opts.fetch, secrets: secrets.values() };
+  const locale = resolveLocale(io.locale, opts.env);
   const refused = (integration: string, error: string): DeliveryRecord => ({ at: new Date().toISOString(), kind: "integration", integration, event: "test", host: "", ok: false, error, ms: 0 });
   if (target === "slack") {
     const envVar = io.slack?.webhookUrlEnv ?? "CRENEL_SLACK_WEBHOOK_URL";
     const url = secrets.get(secretKey.slack, envVar).value;
     if (!url) return refused("slack", `no webhook URL (set ${envVar} or save it from the console)`);
-    return (await sendSlack(url, slackTestMessage(config.project), base)).record;
+    return (await sendSlack(url, slackTestMessage(config.project, locale), base)).record;
   }
   const name = target.replace(/^webhook:/, "");
   const hook = io.webhooks.find((w) => w.name === name);
   if (!hook) return refused(`webhook:${name}`, "no such webhook in options.integrations.webhooks");
   const secret = secrets.get(secretKey.webhook(hook.name), webhookSecretEnv(hook)).value;
   if (!secret) return refused(`webhook:${name}`, `no signing secret (set ${webhookSecretEnv(hook)})`);
-  return (await sendWebhook(hook, secret, "test", { project: config.project }, { message: "Crenel test delivery" }, base)).record;
+  return (await sendWebhook(hook, secret, "test", { project: config.project, locale }, { message: messages(locale).hookTest(config.project) }, base)).record;
 }
 
 export async function integrationsCommand(c: IntegrationsCli): Promise<number> {
@@ -133,7 +135,11 @@ export async function githubCommentCommand(o: { reportPath: string; configPath: 
   let report: { project?: string; findings?: Finding[] };
   try { report = JSON.parse(readFileSync(o.reportPath, "utf8")); } catch (err) { o.err(`Cannot read the report ${o.reportPath}: ${(err as Error).message}\n`); return 2; }
   if (!Array.isArray(report.findings)) { o.err(`${o.reportPath} is not a Crenel JSON report (crenel scan --out)\n`); return 2; }
-  const r = await postPrComment({ findings: report.findings, project: o.project ?? report.project ?? "project", env: o.env, fetch: o.fetch });
+  // Language and logo come from options.integrations when the config is readable.
+  let io: ReturnType<typeof integrationsOptions> | null = null;
+  try { io = integrationsOptions(loadConfig(o.configPath)); } catch { /* no config: defaults */ }
+  const locale = resolveLocale(io?.locale, o.env);
+  const r = await postPrComment({ findings: report.findings, project: o.project ?? report.project ?? "project", env: o.env, fetch: o.fetch, locale, logoUrl: io?.github?.logoUrl });
   const store = new StateStore(stateDirOf(o.configPath));
   for (const rec of r.records) store.appendAudit({ ...rec });
   // A workflow command on stdout: shows as a warning annotation on the run.
