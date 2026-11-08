@@ -31,6 +31,15 @@ export const MODES = [
 ] as const;
 export type ModeId = (typeof MODES)[number]["id"];
 
+// Free exploration on top of the fixed plan: the model picks its own requests
+// and reads within the perimeter; only a validator's replay proves anything.
+export const EXPLORES = [
+  { id: "off", label: "Exploration coupée", short: "Coupée", desc: "Seulement le plan fixe de Crenel." },
+  { id: "assist", label: "Exploration assistée", short: "Assistée", desc: "Le modèle explore en lecture (HTTP GET, code, JS servi), petit budget. Chaque affirmation est rejouée." },
+  { id: "full", label: "Exploration complète", short: "Complète", desc: "Ajoute la boîte à outils avec arguments libres et les écritures, toujours via la porte et allowActiveTesting." },
+] as const;
+export type ExploreId = (typeof EXPLORES)[number]["id"];
+
 // Goals, like /goal: the agent keeps going until the objective is met (checked
 // by code), a budget runs out, or you stop it. Free text: type /goal <texte>.
 export const GOALS = [
@@ -56,6 +65,9 @@ interface Workspace {
   setMode: (m: ModeId) => void;
   goal: GoalId;
   setGoal: (g: GoalId) => void;
+  /** null: the config's choice (data.explore). */
+  explore: ExploreId | null;
+  setExplore: (e: ExploreId) => void;
 }
 
 const noop = () => {};
@@ -65,6 +77,7 @@ const WorkspaceContext = createContext<Workspace>({
   effort: "med", setEffort: noop,
   mode: "ask", setMode: noop,
   goal: "none", setGoal: noop,
+  explore: null, setExplore: noop,
 });
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -73,11 +86,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
   const [goal, setGoal] = useState<GoalId>("none");
+  const [explore, setExplore] = useState<ExploreId | null>(null);
   const data = useData();
   const value = useMemo<Workspace>(() => ({
     target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
-    setTargetId, model, setModel, effort, setEffort, mode, setMode, goal, setGoal,
-  }), [targetId, model, effort, mode, goal, data.targets]);
+    setTargetId, model, setModel, effort, setEffort, mode, setMode, goal, setGoal, explore, setExplore,
+  }), [targetId, model, effort, mode, goal, explore, data.targets]);
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 

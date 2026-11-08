@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, Check, ChevronDown, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type GoalId, type ModeId } from "../lib/workspace.tsx";
+import { EXPLORES, GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type GoalId, type ModeId } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -14,6 +14,7 @@ export const SLASH = [
   { cmd: "/scan", desc: "Scan complet de la cible" },
   { cmd: "/authz", desc: "Matrice d'autorisation entre comptes" },
   { cmd: "/secrets", desc: "Chercher des secrets exposés" },
+  { cmd: "/explore", desc: "Exploration libre par le modèle, chaque affirmation rejouée" },
   { cmd: "/explain", desc: "Expliquer une faille prouvée" },
   { cmd: "/fix", desc: "Préparer le correctif et son test" },
   { cmd: "/test", desc: "Générer les tests de régression" },
@@ -23,6 +24,26 @@ export const SLASH = [
 ];
 
 const MODE_ICON: Record<ModeId, typeof Eye> = { ask: Hand, readonly: Eye, bypass: Radar };
+
+/* Free exploration (off / assist / full). Without a model it stays off: the
+   server would refuse it anyway, so the menu says why instead. */
+function ExploreMenu({ placement }: { placement: "up" | "down" }) {
+  const ws = useWorkspace();
+  const data = useData();
+  const value = data.llm ? (ws.explore ?? data.explore) : "off";
+  const cur = EXPLORES.find((e) => e.id === value)!;
+  return (
+    <Picker
+      label="Exploration" value={value} placement={placement}
+      onChange={(v) => ws.setExplore(v as typeof value)}
+      buttonClassName={cn("tbtn", value !== "off" && "explore-on")}
+      options={EXPLORES.map((e) => ({ value: e.id, label: e.label, desc: !data.llm && e.id !== "off" ? "Demande un modèle (crenel serve --llm)." : e.desc, icon: <Compass size={15} /> }))}
+    >
+      <Compass size={14} aria-hidden="true" /><span className="tlabel">{cur.short}</span>
+      <ChevronDown size={13} className="faint" aria-hidden="true" />
+    </Picker>
+  );
+}
 
 /* Model + effort in one compact trigger, as in the Codex composer: the AI
    Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
@@ -219,6 +240,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
             <ModeIcon size={14} aria-hidden="true" /><span className="tlabel">{ws.mode === "bypass" ? "Bypass" : MODES.find((m) => m.id === ws.mode)!.label}</span>
             <ChevronDown size={13} className="faint" aria-hidden="true" />
           </Picker>
+          <ExploreMenu placement={placement} />
           {ws.goal !== "none" && (
             <Tooltip content={`Objectif: ${goalOf(ws.goal).label} · cliquer pour le retirer`}>
               <button type="button" className="tbtn icon goal-on" aria-label={`Retirer l'objectif: ${goalOf(ws.goal).label}`} onClick={() => ws.setGoal("none")}>

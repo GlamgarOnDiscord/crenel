@@ -15,7 +15,7 @@
 //   GET  /api/state                 everything the console renders, in one call
 //   GET  /api/config  PUT /api/config        crenel.config.yaml (validated before write)
 //   GET  /api/targets POST /api/targets  DELETE /api/targets/:host   allowedHosts
-//   POST /api/runs  {prompt, mode, model, goal?}   start a run (scan, authz, chat, goal)
+//   POST /api/runs  {prompt, mode, model, goal?, explore?}   start a run (scan, authz, chat, goal, explore)
 //   GET  /api/runs  GET /api/runs/:id  GET /api/runs/:id/events (SSE, ?after=seq)
 //   POST /api/runs/:id/decision {id, decision}   POST /api/runs/:id/stop
 //   POST /api/goals {text, mode, budget?}  GET /api/goals  POST /api/goals/:id/stop
@@ -44,6 +44,7 @@ import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
 import { GrantSet, StateStore } from "../agent/state.js";
 import { claudeCli, type Llm } from "../agent/llm.js";
+import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/explore.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
 import { triageFinding } from "../agent/triage.js";
@@ -189,6 +190,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     if (!prompt) throw new HttpError(400, "prompt required");
     const mode = (MODES.has(body.mode as Mode) ? body.mode : "ask") as Mode;
     const model = typeof body.model === "string" ? body.model : "opus";
+    // The console's exploration toggle; the config's choice when absent. Safety does not depend on it.
+    const explore = (EXPLORE_MODES as readonly unknown[]).includes(body.explore) ? (body.explore as ExploreMode) : undefined;
     let cfg: Config;
     try { cfg = config(); } catch (err) { throw new HttpError(422, (err as Error).message); }
     const goalText = typeof body.goal === "string" ? body.goal : undefined;
@@ -199,7 +202,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       for (const rec of r.records) store.appendAudit({ ...rec });
       return { records: r.records as unknown as Record<string, unknown>[], skipped: r.skipped };
     };
-    const run = new AgentRun({ config: cfg, configPath, store, grants, llm: llmFor(model), checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal });
+    const run = new AgentRun({ config: cfg, configPath, store, grants, llm: llmFor(model), checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore });
     runs.set(run.id, run);
     void run.start();
     return run;
@@ -214,6 +217,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       project: cfg?.project ?? null, configPath, configError,
       scope: cfg?.scope ?? null,
       llm: llmOn ? "claude -p" : null,
+      explore: cfg ? resolveExploreMode(cfg, llmOn) : "off",
       grants: [...grants],
       checks: REGISTRY.map((c) => ({ name: c.name, title: c.title, readOnly: c.readOnly })),
       findings: f.items, checksRun: f.checksRun, scannedAt: f.updatedAt ?? null,

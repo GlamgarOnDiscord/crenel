@@ -86,7 +86,7 @@ export function Agent() {
   const startLive = (text: string) => {
     const goal = ws.goal !== "none" ? goalOf(ws.goal).text : undefined;
     if (goal) ws.setGoal("none");
-    void live.start(text, { mode: ws.mode, model: ws.model, goal });
+    void live.start(text, { mode: ws.mode, model: ws.model, goal, explore: ws.explore ?? undefined });
   };
 
   // Reset when navigating here again with a new prompt or task.

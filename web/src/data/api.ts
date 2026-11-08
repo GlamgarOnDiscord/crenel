@@ -12,6 +12,8 @@ export interface Data {
   live: boolean;
   /** "claude -p" when the server can call a model, null otherwise. */
   llm: string | null;
+  /** Free exploration by default for a run (the config's choice; off without a model). */
+  explore: "off" | "assist" | "full";
   project: string;
   targets: Target[];
   findings: Finding[];
@@ -30,7 +32,7 @@ export interface Data {
 }
 
 export const demo: Data = {
-  live: false, llm: null, project: "acme-app",
+  live: false, llm: null, explore: "off", project: "acme-app",
   targets: mock.targets, findings: mock.findings, tasks: mock.tasks, tests: mock.tests, secrets: mock.secrets,
   authzResources: mock.authzResources, authzActors: mock.authzActors, authzReplay: {},
   daily: mock.daily, activity: mock.activity, onboarding: mock.onboarding,
@@ -99,6 +101,7 @@ export interface ServerState {
   project: string | null;
   scope: { allowedHosts: string[]; stagingUrl?: string; allowActiveTesting: boolean } | null;
   llm: string | null;
+  explore?: "off" | "assist" | "full";
   findings: ServerFinding[];
   scannedAt: string | null;
   runs: ServerRun[];
@@ -190,7 +193,7 @@ export function toData(s: ServerState): Data {
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6).map(({ at: _at, ...x }) => x);
 
   return {
-    live: true, llm: s.llm, project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
+    live: true, llm: s.llm, explore: s.explore ?? (s.llm ? "assist" : "off"), project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
     authzReplay: s.authz?.replay ?? {}, daily, activity,
     onboarding: mock.onboarding.map((o) => ({ ...o, done: o.id === "target" ? (s.scope?.allowedHosts.length ?? 0) > 0 : false })),
     guardedCount: 0,

@@ -93,13 +93,13 @@ export function useLiveAgent(s: Setters) {
   }, [onEntry]);
 
   /** Start a run (or a goal) and follow it. Events are appended to the current conversation. */
-  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; goal?: string }) => {
+  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; goal?: string; explore?: string }) => {
     setError(null);
     s.setPhase("running");
     try {
       const r = opts.goal
         ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, model: opts.model } })
-        : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, model: opts.model } });
+        : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, model: opts.model, explore: opts.explore } });
       if (!opts.goal) setGoal(null);
       attach(r.id);
     } catch (err) {
