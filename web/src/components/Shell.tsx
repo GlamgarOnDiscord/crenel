@@ -88,7 +88,10 @@ function NavGroup({ g }: { g: ReturnType<typeof navOf>[number] }) {
 }
 
 function SideContent({ onSearch }: { onSearch: () => void }) {
-  const nav = navOf(useData());
+  const data = useData();
+  const nav = navOf(data);
+  // Live: no accounts, a local server for one project. Demo: a demo identity.
+  const me = data.live ? { name: data.project, role: "local, crenel serve" } : { name: "Tom", role: "démo" };
   return (
     <>
       <Link to="/" className="brand"><Mark size={28} /><Wordmark /></Link>
@@ -99,7 +102,7 @@ function SideContent({ onSearch }: { onSearch: () => void }) {
       <div className="spacer" />
       <div className="foot">
         <div className="me">
-          <span className="av">T</span><span className="me-tx"><span>Tom</span><span className="me-r">propriétaire</span></span>
+          <span className="av">{(me.name[0] ?? "C").toUpperCase()}</span><span className="me-tx"><span>{me.name}</span><span className="me-r">{me.role}</span></span>
           <span className="me-actions">
             <Tooltip content="Documentation"><a className="me-btn" href={DOCS_URL} target="_blank" rel="noopener noreferrer" aria-label="Documentation"><BookOpen size={15} aria-hidden="true" /></a></Tooltip>
             <Tooltip content="Paramètres"><NavLink to="/app/settings" className={({ isActive }) => cn("me-btn", isActive && "active")} aria-label="Paramètres"><Settings size={15} aria-hidden="true" /></NavLink></Tooltip>

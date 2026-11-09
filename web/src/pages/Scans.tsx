@@ -15,7 +15,7 @@ export function Scans() {
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const match = (s: TaskStatus, archived?: boolean): Record<Filter, boolean> => ({
-    all: !archived, live: s === "running" || s === "waiting", done: (s === "done" || s === "stopped") && !archived, archived: !!archived,
+    all: !archived, live: (s === "running" || s === "waiting") && !archived, done: (s === "done" || s === "stopped") && !archived, archived: !!archived,
   });
   const ql = q.trim().toLowerCase();
   const rows = tasks.filter((t) => match(t.status, t.archived)[filter] && (!ql || (t.title + " " + t.target).toLowerCase().includes(ql)));

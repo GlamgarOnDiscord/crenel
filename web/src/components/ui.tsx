@@ -9,6 +9,9 @@ import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { cn } from "../lib/cn.ts";
 import { SEV_LABEL, SEV_NAME, type FindingState, type Severity, type Task } from "../lib/types.ts";
 import { modelOf, type ModelId } from "../lib/workspace.tsx";
+import { useData } from "../data/api.ts";
+import { NEEDS_SERVER, archiveRun, copyText, linkTo } from "../data/actions.ts";
+import { taskRoute } from "../lib/runs.ts";
 import { Badge } from "./arc/badge/badge.tsx";
 import { AnimatedCounter } from "./arc/animated-counter/animated-counter.tsx";
 import SegmentedControl from "./arc/segmented-control/segmented-control.tsx";
@@ -387,6 +390,20 @@ export function TaskIcon({ status }: { status: Task["status"] }) {
 export function TaskRow({ t }: { t: Task }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { live } = useData();
+  async function copyLink() {
+    if (await copyText(linkTo(taskRoute(t.id)))) toast({ type: "success", title: "Lien de la tâche copié" });
+    else toast({ type: "error", title: "Copie refusée par le navigateur", description: linkTo(taskRoute(t.id)) });
+  }
+  async function toggleArchive() {
+    if (!live) { toast({ type: "info", title: t.archived ? "Désarchiver" : "Archiver", description: NEEDS_SERVER }); return; }
+    try {
+      await archiveRun(t.id, !t.archived);
+      toast({ type: "success", title: t.archived ? "Tâche désarchivée" : "Tâche archivée" });
+    } catch (err) {
+      toast({ type: "error", title: t.archived ? "Désarchivage impossible" : "Archivage impossible", description: (err as Error).message });
+    }
+  }
   return (
     <li className="task">
       <TaskIcon status={t.status} />
@@ -408,8 +425,8 @@ export function TaskRow({ t }: { t: Task }) {
       <span className="task-menu">
         <DropdownMenu iconOnly label={`Actions pour ${t.title}`} icon={<MoreHorizontal size={16} />} items={[
           { label: "Rouvrir dans l'agent", icon: <RotateCcw size={14} />, onSelect: () => navigate("/app/agent", { state: { taskId: t.id } }) },
-          { label: "Copier le lien", icon: <Link2 size={14} />, onSelect: () => toast({ type: "success", title: "Lien de la tâche copié" }) },
-          { label: t.archived ? "Désarchiver" : "Archiver", icon: <Archive size={14} />, separatorBefore: true, onSelect: () => toast({ type: "info", title: t.archived ? "Tâche désarchivée" : "Tâche archivée" }) },
+          { label: "Copier le lien", icon: <Link2 size={14} />, onSelect: () => void copyLink() },
+          { label: t.archived ? "Désarchiver" : "Archiver", icon: <Archive size={14} />, separatorBefore: true, onSelect: () => void toggleArchive() },
         ]} />
       </span>
     </li>

@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
+import { OctagonX } from "lucide-react";
 import { Topbar } from "../components/Shell.tsx";
-import { Button, Card, Toggle } from "../components/ui.tsx";
-import { useWorkspace } from "../lib/workspace.tsx";
+import { Button, Card, CodeBlock, Pill, Toggle } from "../components/ui.tsx";
 import { UsageMeter } from "../components/arc/usage-meter/usage-meter.tsx";
-import { Counter } from "../components/bencho/Counter.tsx";
-import "../components/bencho/Counter.css";
-import { SlideConfirm } from "../components/bencho/SlideConfirm.tsx";
-import "../components/bencho/SlideConfirm.css";
 import { useToast } from "../components/toast.tsx";
-import { apiFetch, isLive } from "../data/api.ts";
+import { HostList, useServerAction } from "../components/console-actions.tsx";
+import { apiFetch, isLive, useData } from "../data/api.ts";
+import { killAll } from "../data/actions.ts";
+import { ciWorkflowYaml, failOnOf, SCHEDULE_YAML, type CiPolicy } from "../lib/console.ts";
+import "../styles/console-a.css";
 
 function Row({ title, desc, control }: { title: string; desc: string; control: React.ReactNode }) {
   return (
@@ -17,11 +17,6 @@ function Row({ title, desc, control }: { title: string; desc: string; control: R
       {control}
     </div>
   );
-}
-
-function PolicyToggle({ title, desc, initial }: { title: string; desc: string; initial: boolean }) {
-  const [on, setOn] = useState(initial);
-  return <Row title={title} desc={desc} control={<Toggle on={on} onChange={setOn} label={title} />} />;
 }
 
 interface ToolboxState { backend: "docker" | "wsl"; ready: boolean; reason?: string; options?: { wsl?: { distro?: string } } | null }
@@ -58,54 +53,93 @@ function ToolboxCard() {
   );
 }
 
+/** CI policy lives in the GitHub workflow (`fail-on`), so the toggles generate it. */
+function CiPolicyCard() {
+  const [p, setP] = useState<CiPolicy>({ critical: true, high: true });
+  const failOn = failOnOf(p);
+  const yaml = ciWorkflowYaml(p);
+  return (
+    <Card title="Politique de CI" meta="ce qui casse le build">
+      <Row title="Bloquer sur critique prouvé" desc="Un critique prouvé fait échouer le job."
+        control={<Toggle on={p.critical} onChange={(v) => setP({ critical: v, high: v && p.high })} label="Bloquer sur critique prouvé" />} />
+      <Row title="Bloquer sur haute prouvée" desc="Une faille haute ou critique prouvée fait échouer le job."
+        control={<Toggle on={p.high} onChange={(v) => setP({ high: v, critical: v || p.critical })} label="Bloquer sur haute prouvée" />} />
+      <div className="srow is-off">
+        <div className="srow-tx"><div className="srow-t">Bloquer sur les pistes</div><div className="muted srow-d">Jamais: une piste n'est pas prouvée, elle ne fait échouer aucun build.</div></div>
+        <Pill>jamais</Pill>
+      </div>
+      <div className="yaml-wrap">
+        <p className="yaml-note">{failOn ? <>Ces réglages donnent <code>fail-on: {failOn}</code>.</> : <>Rien ne bloque: le job ne casse jamais, le SARIF reste publié.</>} Copiez ce fichier dans <code>.github/workflows/crenel.yml</code>. Même règle en local avec <code>crenel scan --fail-on {failOn ?? "critical"}</code>. L'Action installe Crenel avec <code>--ignore-scripts</code>.</p>
+        <CodeBlock file=".github/workflows/crenel.yml" code={yaml} />
+      </div>
+    </Card>
+  );
+}
+
+/** The kill switch: stops every running run on this server. */
+function KillCard() {
+  const { tasks } = useData();
+  const run = useServerAction();
+  const [busy, setBusy] = useState(false);
+  const running = tasks.filter((t) => t.status === "running" || t.status === "waiting").length;
+  return (
+    <Card title="Arrêt d'urgence" icon={<OctagonX size={14} />}>
+      <Row title="Arrêter toutes les tâches" desc={`Stoppe chaque tâche en cours sur ce serveur, sondes comprises. ${running} en cours.`}
+        control={<Button size="sm" variant="ghost" className="danger-ghost" disabled={busy} onClick={async () => {
+          setBusy(true);
+          await run(killAll, (r) => ({ title: r.stopped ? `${r.stopped} tâche${r.stopped > 1 ? "s" : ""} arrêtée${r.stopped > 1 ? "s" : ""}` : "Aucune tâche en cours", description: r.stopped ? "Plus aucune requête ne part." : undefined }), "Arrêt non effectué");
+          setBusy(false);
+        }}><OctagonX size={13} /> Tout arrêter</Button>} />
+    </Card>
+  );
+}
+
 export function Settings() {
-  const { target } = useWorkspace();
-  const toast = useToast();
-  const [confirm, setConfirm] = useState(false);
+  const { live, project } = useData();
   return (
     <>
-      <Topbar width="narrow" crumb="Espace" title="Paramètres" insight={<>La CI ne casse que sur une faille <b>prouvée</b>, haute ou critique.</>} />
+      <Topbar width="narrow" crumb="Espace" title="Paramètres" insight={<>La CI ne casse que sur une faille <b>prouvée</b>, au niveau choisi par <code>fail-on</code>.</>} />
       <div className="content narrow">
-        <Card title="Utilisation ce mois-ci" meta="forfait Équipe">
-          <div className="pad">
-            <UsageMeter label="Sondes envoyées aux hôtes déclarés" unit=" sondes" decimals={0} limit={2000}
-              segments={[{ id: "acme", label: "acme-app", value: 1120 }, { id: "inbox", label: "inboxly", value: 310 }, { id: "page", label: "pagefold", value: 240 }]} />
+        {!live && (
+          <Card title="Utilisation ce mois-ci" meta="démo, chiffres d'exemple">
+            <div className="pad">
+              <UsageMeter label="Sondes envoyées aux hôtes déclarés" unit=" sondes" decimals={0} limit={2000}
+                segments={[{ id: "acme", label: "acme-app", value: 1120 }, { id: "inbox", label: "inboxly", value: 310 }, { id: "page", label: "pagefold", value: 240 }]} />
+            </div>
+          </Card>
+        )}
+
+        <KillCard />
+
+        <Card title="Scans planifiés" meta="GitHub Actions">
+          <div className="yaml-wrap">
+            <p className="yaml-note">crenel serve ne planifie rien. Pour un scan régulier, ajoutez un <code>schedule</code> au workflow de l'Action (déjà inclus dans le fichier ci-dessous). Un scan complet dure environ une minute.</p>
+            <CodeBlock file=".github/workflows/crenel.yml" code={SCHEDULE_YAML} />
           </div>
         </Card>
 
-        <Card title="Scans planifiés">
-          <div className="srow">
-            <div className="srow-tx"><div className="srow-t">Scans par jour et par cible</div><div className="muted srow-d">Un scan complet dure environ une minute.</div></div>
-            <div className="bencho counter-wrap"><Counter start={2} min={0} max={24} label="Scans par jour" corner={12} onChange={() => {}} /></div>
-          </div>
-        </Card>
-
-        <Card title="Politique de CI" meta="ce qui casse le build">
-          <PolicyToggle title="Bloquer sur critique prouvé" desc="Un nouveau critique prouvé fait échouer la CI." initial />
-          <PolicyToggle title="Bloquer sur haute prouvée" desc="Une nouvelle faille haute prouvée fait échouer la CI." initial />
-          <PolicyToggle title="Bloquer sur les pistes" desc="Déconseillé: une piste n'est pas prouvée." initial={false} />
-          <PolicyToggle title="Refuser les scripts d'install en CI" desc="Installe avec --ignore-scripts (recommandé)." initial />
-        </Card>
+        <CiPolicyCard />
 
         <ToolboxCard />
 
-        <Card title="Membres" actions={<Button variant="ghost" size="sm">Inviter</Button>}>
-          {[["Tom", "propriétaire"], ["Pierre", "admin"]].map(([n, r]) => (
-            <div key={n} className="srow">
-              <span className="av">{n![0]}</span>
-              <span className="srow-tx">{n}</span><span className="mono faint">{r}</span>
-            </div>
-          ))}
-        </Card>
-
-        <Card title="Zone de danger" className="danger-card">
-          <Row title={`Supprimer la cible ${target.name}`} desc="Efface ses tâches, findings et tests. Irréversible."
-            control={confirm ? (
-              <div className="confirm-slide bencho danger-slide">
-                <SlideConfirm width={260} label="Glisser pour supprimer" doneLabel="Supprimée" onConfirm={() => { toast({ type: "warning", title: `Suppression de ${target.name} programmée`, description: "Annulable pendant 24 h depuis le support." }); setTimeout(() => setConfirm(false), 900); }} />
-                <Button size="sm" variant="quiet" onClick={() => setConfirm(false)}>Annuler</Button>
+        {live ? (
+          <Card title="Accès">
+            <Row title="Outil local, un seul utilisateur" desc={`La console de ${project} est servie par crenel serve sur cette machine; son jeton donne l'accès. Pas de comptes ni d'invitations.`} control={null} />
+          </Card>
+        ) : (
+          <Card title="Membres" meta="démo">
+            {[["Tom", "propriétaire"], ["Pierre", "admin"]].map(([n, r]) => (
+              <div key={n} className="srow">
+                <span className="av">{n![0]}</span>
+                <span className="srow-tx">{n}</span><span className="mono faint">{r}</span>
               </div>
-            ) : <Button size="sm" variant="ghost" className="danger-ghost" onClick={() => setConfirm(true)}>Supprimer</Button>} />
+            ))}
+          </Card>
+        )}
+
+        <Card title="Zone de danger" className="danger-card" meta="scope.allowedHosts">
+          <Row title="Retirer un hôte déclaré" desc="Retire l'hôte de la config (et son autorisation permanente). Crenel ne lui enverra plus de requête; les findings et l'historique restent." control={null} />
+          <HostList />
         </Card>
       </div>
     </>

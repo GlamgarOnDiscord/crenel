@@ -22,7 +22,9 @@
 //   POST /api/kill                   the global switch: stops every run
 //   GET  /api/findings  GET /api/findings/:uid  POST /api/findings/:uid/triage (advice only)
 //   GET  /api/baseline/diff  POST /api/baseline
-//   GET  /api/authz  GET /api/tests (+ ?format=file)  GET /api/audit
+//   GET  /api/authz  GET /api/tests (+ ?format=file)  GET /api/audit  GET /api/sarif
+//   POST /api/runs/:id/archive {archived}   POST /api/runs/:id/feedback {useful}
+//   POST /api/findings/:uid/ignore {ignored, reason?}   console-side only, see StateStore.consoleMeta
 //   GET  /api/toolbox  PUT /api/toolbox {backend: docker|wsl, distro?}   optional toolbox
 //   GET  /api/integrations           destinations and their state (never a secret)
 //   PUT  /api/integrations/slack {webhookUrl?, enabled?, minSeverity?}   DELETE /api/integrations/slack
@@ -48,6 +50,7 @@ import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/ex
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
 import { triageFinding } from "../agent/triage.js";
+import { sarifOptionsFor, toSarif } from "../report/sarif.js";
 import { generateRegressionFile } from "../generate/tests.js";
 import { embeddedAsset, embeddedKeys, isEmbedded } from "../core/embedded.js";
 
@@ -99,6 +102,23 @@ const MAX_BODY = 256 * 1024;
 // "anthropic-api:claude-…"); a plain name (no ":") is the claude CLI. These are
 // the provider prefixes the engine understands (reported by /api/state).
 const CUSTOM_PROVIDERS = ["openai", "ollama", "anthropic-api"];
+
+/** At most 5 text files, 100 000 characters in all, names kept short; anything else is a 400. */
+function parseAttachments(v: unknown): { name: string; text: string }[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.length > 5) throw new HttpError(400, "attachments: 5 text files at most");
+  let total = 0;
+  const out = v.map((a) => {
+    const name = typeof a?.name === "string" ? a.name.slice(0, 200) : "";
+    const text = typeof a?.text === "string" ? a.text : null;
+    if (!name || text === null) throw new HttpError(400, "attachments: each file needs a name and its text");
+    if (text.includes("\u0000")) throw new HttpError(400, `attachments: ${name} is not a text file`);
+    total += text.length;
+    return { name, text };
+  });
+  if (total > 100_000) throw new HttpError(400, "attachments: 100 000 characters at most");
+  return out.length ? out : undefined;
+}
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -218,6 +238,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
 
   function startRun(body: Record<string, unknown>): AgentRun {
     const prompt = String(body.prompt ?? "").trim().slice(0, 4000);
+    // Files joined in the console travel apart from the prompt (see RunOptions.attachments).
+    const attachments = parseAttachments(body.attachments);
     if (!prompt) throw new HttpError(400, "prompt required");
     const mode = (MODES.has(body.mode as Mode) ? body.mode : "ask") as Mode;
     const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL;
@@ -244,7 +266,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       for (const rec of r.records) store.appendAudit({ ...rec });
       return { records: r.records as unknown as Record<string, unknown>[], skipped: r.skipped };
     };
-    const run = new AgentRun({ config: cfg, configPath, store, grants, llm, checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore });
+    const run = new AgentRun({ config: cfg, configPath, store, grants, llm, checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore, attachments });
     runs.set(run.id, run);
     void run.start();
     return run;
@@ -255,6 +277,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     let configError: string | undefined;
     try { cfg = config(); } catch (err) { configError = (err as Error).message; }
     const f = store.findings();
+    const meta = store.consoleMeta();
     return {
       project: cfg?.project ?? null, configPath, configError,
       scope: cfg?.scope ?? null,
@@ -266,8 +289,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       explore: cfg ? resolveExploreMode(cfg, llmOn) : "off",
       grants: [...grants],
       checks: REGISTRY.map((c) => ({ name: c.name, title: c.title, readOnly: c.readOnly })),
-      findings: f.items, checksRun: f.checksRun, scannedAt: f.updatedAt ?? null,
-      runs: summaries().slice(0, 50),
+      findings: f.items.map((x) => (meta.ignored[x.uid] ? { ...x, ignored: meta.ignored[x.uid] } : x)), checksRun: f.checksRun, scannedAt: f.updatedAt ?? null,
+      runs: summaries().slice(0, 50).map((r) => ({ ...r, archived: meta.archived.includes(r.id) })),
       authz: store.authz(),
       authzResources: ((cfg?.options["authz-matrix"] ?? {}) as { resources?: { name: string; path: string; methods?: string[] }[] }).resources ?? [],
       // Each generated test with its own code, for the finding page.
@@ -350,6 +373,14 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
         if (!["once", "always", "deny"].includes(d)) throw new HttpError(400, "decision must be once, always or deny");
         return send(res, run?.decide(String(body.id ?? ""), d) ? 200 : 409, { ok: true });
       }
+      // Console bookkeeping: archive a task, say whether a run helped. Neither
+      // touches the run's journal; feedback goes to the audit log.
+      if (seg[2] === "archive" && method === "POST") { store.setArchived(id, body.archived !== false); return send(res, 200, { archived: body.archived !== false }); }
+      if (seg[2] === "feedback" && method === "POST") {
+        if (typeof body.useful !== "boolean") throw new HttpError(400, "useful must be true or false");
+        store.appendAudit({ at: new Date().toISOString(), kind: "run-feedback", run: id, useful: body.useful });
+        return send(res, 200, { ok: true });
+      }
       if (seg[2] === "events" && method === "GET") return sse(req, res, id, Number(url.searchParams.get("after") ?? req.headers["last-event-id"] ?? 0));
       if (!seg[2]) return send(res, 200, { ...replayRun(readJournal(path)), status: run?.status, entries: readJournal(path).length });
     }
@@ -364,6 +395,15 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       if (!seg[1]) return send(res, 200, items);
       const f = items.find((x) => x.uid === seg[1]);
       if (!f) throw new HttpError(404, "no such finding");
+      // Ignore in the console (accepted risk, false positive): shown apart, with
+      // the reason, never removed from findings.json or from any report.
+      if (seg[2] === "ignore" && method === "POST") {
+        const ignored = body.ignored !== false;
+        const reason = String(body.reason ?? "").trim().slice(0, 500);
+        store.setIgnored(f.uid, ignored ? { at: new Date().toISOString(), reason } : null);
+        store.appendAudit({ at: new Date().toISOString(), kind: ignored ? "finding-ignored" : "finding-unignored", uid: f.uid, id: f.id, reason: ignored ? reason : undefined });
+        return send(res, 200, { uid: f.uid, ignored });
+      }
       if (seg[2] === "triage" && method === "POST") {
         if (!llmOn) throw new HttpError(503, "no model: start with claude -p available, or keep the deterministic verdict");
         const model = typeof body.model === "string" ? body.model : DEFAULT_MODEL;
@@ -388,6 +428,13 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       return send(res, 200, store.tests());
     }
     if (p === "/api/audit") return send(res, 200, store.audit());
+    // The same SARIF as `crenel scan --sarif`, from the console's findings.
+    if (p === "/api/sarif" && method === "GET") {
+      const f = store.findings();
+      const cfg = config();
+      const titles = Object.fromEntries(REGISTRY.map((c) => [c.name, c.title]));
+      return send(res, 200, JSON.parse(toSarif(runResultOf(cfg.project, f.items, f.checksRun), sarifOptionsFor(cfg.projectDir, configPath, titles))));
+    }
     // Optional toolbox: status for the console. The backend (docker or wsl)
     // is a config change: PUT /api/toolbox writes options.toolbox.backend (and
     // wsl.distro) into the YAML, validated like PUT /api/config.

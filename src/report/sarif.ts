@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import type { RunResult } from "../core/runner.js";
 import type { Finding, Severity } from "../core/types.js";
 import { relative } from "../core/walk.js";
@@ -87,6 +87,21 @@ export function locate(location: string, opts: SarifOptions = {}): Located {
   }
   // No project directory known (library use): keep a plain relative path.
   return path.startsWith("..") ? anchor() : { uri: path.replace(/\\/g, "/"), startLine: line, anchored: false };
+}
+
+/**
+ * The options `crenel scan --sarif` uses, shared with the console's export:
+ * locations repository-relative to the cwd (as in a GitHub checkout), the
+ * project dir resolved against the config file, rule titles from the registry.
+ */
+export function sarifOptionsFor(projectDir: string, configPath: string, titles: Record<string, string>): SarifOptions {
+  const configDir = dirname(resolve(configPath));
+  return {
+    repoRoot: process.cwd(),
+    projectDir: isAbsolute(projectDir) ? projectDir : resolve(configDir, projectDir),
+    configPath: resolve(configPath),
+    titles,
+  };
 }
 
 export function toSarif(result: RunResult, opts: SarifOptions = {}): string {

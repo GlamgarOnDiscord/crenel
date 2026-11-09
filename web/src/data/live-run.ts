@@ -93,7 +93,7 @@ export function useLiveAgent(s: Setters) {
   }, [onEntry]);
 
   /** Start a run (or a goal) and follow it. Events are appended to the current conversation. */
-  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number; effort?: string; goal?: string; explore?: string }) => {
+  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number; effort?: string; goal?: string; explore?: string; attachments?: { name: string; text: string }[] }): Promise<string | undefined> => {
     setError(null);
     s.setPhase("running");
     try {
@@ -101,14 +101,16 @@ export function useLiveAgent(s: Setters) {
       // never sent, only the NAME of its env var (modelApiKeyEnv). See llm.ts.
       const m = { model: opts.model, modelBaseUrl: opts.modelBaseUrl, modelApiKeyEnv: opts.modelApiKeyEnv, modelTemperature: opts.modelTemperature, effort: opts.effort };
       const r = opts.goal
-        ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, ...m } })
-        : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, ...m, explore: opts.explore } });
+        ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, ...m, explore: opts.explore } })
+        : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, ...m, explore: opts.explore, ...(opts.attachments?.length ? { attachments: opts.attachments } : {}) } });
       if (!opts.goal) setGoal(null);
       attach(r.id);
+      return r.id;
     } catch (err) {
       setError((err as Error).message);
       s.setEvents((e) => [...e, { kind: "note", text: `Impossible de lancer la tâche: ${(err as Error).message}`, tone: "warn" }]);
       s.setPhase("idle");
+      return undefined;
     }
   }, [attach, s]);
 

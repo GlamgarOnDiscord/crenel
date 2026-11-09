@@ -2,10 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   House, ShieldAlert, ListTodo, FolderClosed, KeyRound, LockKeyhole,
-  ShieldCheck, Plug, Settings, Plus, TerminalSquare, Search, SquarePen,
+  ShieldCheck, Plug, Settings, Plus, TerminalSquare, Search, SquarePen, Play, Download, OctagonX,
 } from "lucide-react";
+import { useData } from "../data/api.ts";
+import { downloadSarif, killAll } from "../data/actions.ts";
+import { useServerAction } from "./console-actions.tsx";
 
-interface Cmd { label: string; hint: string; to: string; icon: typeof Search; }
+interface Cmd { label: string; hint: string; to: string; icon: typeof Search; state?: unknown; action?: "sarif" | "kill" }
+
+// Real actions: the agent with a slash command, or a server call (needs crenel serve).
+const ACTIONS: Cmd[] = [
+  { label: "Lancer un scan", hint: "agent /scan", to: "/app/agent", state: { prompt: "/scan" }, icon: Play },
+  { label: "Chercher des secrets", hint: "agent /secrets", to: "/app/agent", state: { prompt: "/secrets" }, icon: KeyRound },
+  { label: "Exporter SARIF", hint: "téléchargement", to: "", action: "sarif", icon: Download },
+  { label: "Arrêt d'urgence", hint: "arrêter toutes les tâches", to: "", action: "kill", icon: OctagonX },
+];
 
 const COMMANDS: Cmd[] = [
   { label: "Nouvelle tâche", hint: "composer", to: "/app/overview", icon: SquarePen },
@@ -30,8 +41,10 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
+  const { project } = useData();
+  const run = useServerAction();
   const results = useMemo(
-    () => COMMANDS.filter((c) => (c.label + " " + c.hint).toLowerCase().includes(q.toLowerCase())),
+    () => [...ACTIONS, ...COMMANDS].filter((c) => (c.label + " " + c.hint).toLowerCase().includes(q.toLowerCase())),
     [q],
   );
 
@@ -49,7 +62,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   if (!open) return null;
 
-  function go(c: Cmd) { navigate(c.to); onClose(); }
+  function go(c: Cmd) {
+    onClose();
+    if (c.action === "sarif") void run(() => downloadSarif(project), () => ({ title: "SARIF téléchargé" }), "SARIF non exporté");
+    else if (c.action === "kill") void run(killAll, (r) => ({ title: r.stopped ? `${r.stopped} tâche${r.stopped > 1 ? "s" : ""} arrêtée${r.stopped > 1 ? "s" : ""}` : "Aucune tâche en cours" }), "Arrêt non effectué");
+    else navigate(c.to, c.state ? { state: c.state } : undefined);
+  }
 
   // Escape and a minimal focus trap at the dialog level, so they work no matter
   // which element inside holds focus.

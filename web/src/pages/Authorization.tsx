@@ -7,7 +7,8 @@ import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 
 const leak = (code?: number) => code !== undefined && code >= 200 && code < 300;
-const REPLAY = "curl -i -H 'authorization: Bearer $TOKEN_A' https://staging.acme.app/api/projects/proj_b_1";
+// Demo only: live mode shows the server's own replay, or says there is none.
+const DEMO_REPLAY = "curl -i -H 'authorization: Bearer $TOKEN_A' https://staging.acme.app/api/projects/proj_b_1";
 
 export function Authorization() {
   const { authzActors, authzResources, authzReplay, live } = useData();
@@ -15,7 +16,7 @@ export function Authorization() {
   const actor = authzActors.find((a) => a.id === sel.a) ?? authzActors[0]!;
   const res = authzResources.find((r) => r.id === sel.r) ?? authzResources[0] ?? { id: "", label: "aucune ressource déclarée", route: "" };
   const code = actor.cells[res.id];
-  const replay = authzReplay[`${actor.id}:${res.id}`] ?? REPLAY;
+  const replay = authzReplay[`${actor.id}:${res.id}`] ?? (live ? null : DEMO_REPLAY);
   const fails = authzActors.reduce((n, a) => n + Object.values(a.cells).filter(leak).length, 0);
   const total = authzActors.reduce((n, a) => n + Object.values(a.cells).filter((c) => c !== undefined).length, 0);
   const leaked = authzActors.flatMap((a) => authzResources.filter((r) => leak(a.cells[r.id])).map((r) => `${a.label} lit ${r.label}`));
@@ -65,7 +66,9 @@ export function Authorization() {
           <div className="pad stack">
             {leak(code) ? (
               <>
-                <div className="cmd"><code><span className="k" aria-hidden="true">$</span> {replay}</code><CopyButton text={replay} /></div>
+                {replay
+                  ? <div className="cmd"><code><span className="k" aria-hidden="true">$</span> {replay}</code><CopyButton text={replay} /></div>
+                  : <div className="muted">Pas de requête rejouable pour cette case.</div>}
                 <div className="mono evidence bad"><span className="elbow" aria-hidden="true" />HTTP {code}, l'objet de B est renvoyé (attendu 401, 403 ou 404)</div>
               </>
             ) : (

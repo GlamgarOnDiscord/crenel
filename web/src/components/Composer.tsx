@@ -10,6 +10,8 @@ import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelecto
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
 import { Picker } from "./ui.tsx";
+import { useToast } from "./toast.tsx";
+import { ATTACH_MAX_CHARS, looksBinary, refuseByType, tooLong, type Attachment } from "../lib/attachments.ts";
 
 export const SLASH = [
   { cmd: "/scan", desc: "Scan complet de la cible" },
@@ -74,12 +76,15 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
   const [query, setQuery] = useState("");
   const errors = validateDraft(draft);
   const notes = draftNotes(draft);
+  // Only OpenAI-compatible endpoints receive a temperature: the Messages API
+  // (version 2026-10-21) refuses it and the engine's native Ollama call has none.
+  const tempApplies = draft.provider === "openai-compatible";
   const prov = providerOf(draft.provider);
   const conn = connectorOf(draft.connector) ?? connectorOf("custom")!;
   const set = (patch: Partial<ModelDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const pick = (c: Connector) => { setDraft((d) => connectorToDraft(c, d.name)); setAdvanced(c.id === "custom"); setTouched(false); setStep("details"); };
   const valid = Object.keys(errors).length === 0;
-  const submit = () => { setTouched(true); if (valid) onSave(draft); else if (errors.baseUrl || errors.apiKeyEnv || errors.temperature) setAdvanced(true); };
+  const submit = () => { setTouched(true); if (valid) onSave(tempApplies ? draft : { ...draft, temperature: "" }); else if (errors.baseUrl || errors.apiKeyEnv || errors.temperature) setAdvanced(true); };
   const show = (k: keyof ModelDraft) => (touched || (k !== "name" && draft[k] !== "")) && errors[k];
   const advOpen = advanced || !!show("baseUrl") || !!show("apiKeyEnv") || !!show("temperature");
   const spec = `${prov.prefix}:${draft.name.trim() || "…"}`;
@@ -139,6 +144,7 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
         </div>
         <button type="button" className="cmf-change" onClick={() => setStep("pick")}>Changer</button>
       </div>
+      {conn.note && <div className="cmf-note" role="note"><TriangleAlert size={13} aria-hidden="true" /><span>{conn.note}</span></div>}
 
       <label className="cmf-field">
         <span className="cmf-lbl">Nom du modèle</span>
@@ -170,7 +176,7 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
                 onChange={(e) => set({ baseUrl: e.target.value })} aria-invalid={!!show("baseUrl")} />
               {show("baseUrl") ? <span className="cmf-err">{errors.baseUrl}</span> : <span className="cmf-hint">https, ou http://localhost pour un modèle local.</span>}
             </label>
-            <div className="cmf-row">
+            <div className={cn("cmf-row", !tempApplies && "solo")}>
               <label className="cmf-field">
                 <span className="cmf-lbl">Variable de la clé</span>
                 <input className="cmf-in mono" value={draft.apiKeyEnv} placeholder={conn.local ? "aucune" : "OPENAI_API_KEY"} list="cmf-key-envs"
@@ -178,11 +184,13 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
                   autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
                 <datalist id="cmf-key-envs">{MODEL_KEY_ENVS.map((n) => <option key={n} value={n} />)}<option value="CRENEL_LLM_API_KEY" /></datalist>
               </label>
-              <label className="cmf-field">
-                <span className="cmf-lbl">Température</span>
-                <input className="cmf-in mono" value={draft.temperature} placeholder="défaut" inputMode="decimal"
-                  onChange={(e) => set({ temperature: e.target.value })} aria-invalid={!!show("temperature")} />
-              </label>
+              {tempApplies && (
+                <label className="cmf-field">
+                  <span className="cmf-lbl">Température</span>
+                  <input className="cmf-in mono" value={draft.temperature} placeholder="défaut" inputMode="decimal"
+                    onChange={(e) => set({ temperature: e.target.value })} aria-invalid={!!show("temperature")} />
+                </label>
+              )}
             </div>
             {show("apiKeyEnv") && <span className="cmf-err">{errors.apiKeyEnv}</span>}
             {show("temperature") && <span className="cmf-err">{errors.temperature}</span>}
@@ -334,7 +342,7 @@ function MicButton({ onText }: { onText: (t: string) => void }) {
 }
 
 export function Composer({ value, onChange, onSubmit, placeholder, variant = "hero", busy, onStop, autoFocus, extra }: {
-  value: string; onChange: (v: string) => void; onSubmit: (text: string) => void; placeholder: string;
+  value: string; onChange: (v: string) => void; onSubmit: (text: string, files?: Attachment[]) => void; placeholder: string;
   variant?: "hero" | "dock"; busy?: boolean; onStop?: () => void; autoFocus?: boolean; extra?: React.ReactNode;
 }) {
   const ws = useWorkspace();
@@ -342,7 +350,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
   const id = useId();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  // Joined text files: their contents travel with the message (see lib/attachments.ts).
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const toast = useToast();
   const [slashIdx, setSlashIdx] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   // "/goal" opens a second list with the goals instead of sending the command.
@@ -374,8 +384,29 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
   function submit(text = value) {
     const t = text.trim();
     if (!t) return;
-    onSubmit(t);
+    const over = tooLong(t, files);
+    if (over) { toast({ type: "error", title: "Message non envoyé", description: over }); return; }
+    onSubmit(t, files.length ? files : undefined);
     setFiles([]);
+  }
+
+  async function addFiles(list: File[]) {
+    const added: Attachment[] = [];
+    for (const f of list) {
+      const refused = refuseByType(f)
+        ?? (f.size > ATTACH_MAX_CHARS * 4 ? `${f.name}: trop gros (${Math.round(f.size / 1024)} Ko), ${ATTACH_MAX_CHARS} caractères de fichiers joints au plus.` : null);
+      if (refused) { toast({ type: "error", title: "Fichier non joint", description: refused }); continue; }
+      let text: string;
+      try { text = await f.text(); } catch (err) { toast({ type: "error", title: "Fichier non joint", description: `${f.name}: lecture impossible (${(err as Error).message}).` }); continue; }
+      if (looksBinary(text)) { toast({ type: "error", title: "Fichier non joint", description: `${f.name}: contenu binaire, seuls les fichiers texte sont envoyés.` }); continue; }
+      added.push({ name: f.name, text });
+    }
+    if (!added.length) return;
+    const next = [...files.filter((x) => !added.some((a) => a.name === x.name)), ...added];
+    setFiles(next);
+    // Said now, not only at sending: the server's limits on attachments.
+    const over = tooLong("", next);
+    if (over) toast({ type: "warning", title: "Fichiers joints trop longs", description: over });
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -413,9 +444,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
         {files.length > 0 && (
           <div className="attach">
             {files.map((f) => (
-              <span key={f} className="attach-chip">
-                <Paperclip size={12} aria-hidden="true" />{f}
-                <button type="button" aria-label={`Retirer ${f}`} onClick={() => setFiles((l) => l.filter((x) => x !== f))}><X size={12} /></button>
+              <span key={f.name} className="attach-chip" title={`${f.text.length} caractères, envoyés avec le message`}>
+                <Paperclip size={12} aria-hidden="true" />{f.name}
+                <button type="button" aria-label={`Retirer ${f.name}`} onClick={() => setFiles((l) => l.filter((x) => x.name !== f.name))}><X size={12} /></button>
               </span>
             ))}
           </div>
@@ -431,9 +462,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, variant = "he
         />
         <div className="ctools">
           <input ref={fileRef} type="file" multiple hidden onChange={(e) => {
-            const names = Array.from(e.target.files ?? []).map((f) => f.name);
-            setFiles((l) => [...l, ...names.filter((n) => !l.includes(n))]);
+            const picked = Array.from(e.target.files ?? []);
             e.target.value = "";
+            void addFiles(picked);
           }} />
           <Picker
             label="Ajouter" value={ws.goal as string} placement={placement} buttonClassName="tbtn icon"

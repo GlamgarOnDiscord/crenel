@@ -48,6 +48,11 @@ export interface StoredTest {
   at: string;
 }
 
+export interface ConsoleMeta {
+  archived: string[];
+  ignored: Record<string, { at: string; reason: string }>;
+}
+
 export const uidOf = (id: string) => "f-" + createHash("sha256").update(id).digest("hex").slice(0, 10);
 
 function readJson<T>(path: string, fallback: T): T {
@@ -125,6 +130,24 @@ export class StateStore {
   saveTests(list: StoredTest[], file: string): void {
     writeJson(join(this.dir, "tests.json"), list);
     writeFileSync(this.regressionPath, file);
+  }
+
+  /**
+   * Console bookkeeping that is not a finding's truth: runs the user archived
+   * and findings the user chose to ignore in the console (with a reason).
+   * The validators still decide a finding's state; an ignored finding stays
+   * in findings.json and in every report, it is only shown apart.
+   */
+  consoleMeta(): ConsoleMeta { return readJson<ConsoleMeta>(join(this.dir, "console.json"), { archived: [], ignored: {} }); }
+  setArchived(run: string, archived: boolean): void {
+    const m = this.consoleMeta();
+    m.archived = archived ? [...new Set([...m.archived, run])] : m.archived.filter((x) => x !== run);
+    writeJson(join(this.dir, "console.json"), m);
+  }
+  setIgnored(uid: string, ignored: { at: string; reason: string } | null): void {
+    const m = this.consoleMeta();
+    if (ignored) m.ignored[uid] = ignored; else delete m.ignored[uid];
+    writeJson(join(this.dir, "console.json"), m);
   }
 
   appendAudit(entry: Record<string, unknown>): void {

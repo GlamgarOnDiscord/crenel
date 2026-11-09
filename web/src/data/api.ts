@@ -19,6 +19,8 @@ export interface Data {
   /** Free exploration by default for a run (the config's choice; off without a model). */
   explore: "off" | "assist" | "full";
   project: string;
+  /** Hosts the config allows probing (scope.allowedHosts); each one can be removed. */
+  hosts: string[];
   targets: Target[];
   findings: Finding[];
   tasks: Task[];
@@ -36,7 +38,7 @@ export interface Data {
 }
 
 export const demo: Data = {
-  live: false, llm: null, customProviders: [], modelKeys: null, explore: "off", project: "acme-app",
+  live: false, llm: null, customProviders: [], modelKeys: null, hosts: ["staging.acme.app"], explore: "off", project: "acme-app",
   targets: mock.targets, findings: mock.findings, tasks: mock.tasks, tests: mock.tests, secrets: mock.secrets,
   authzResources: mock.authzResources, authzActors: mock.authzActors, authzReplay: {},
   daily: mock.daily, activity: mock.activity, onboarding: mock.onboarding,
@@ -99,8 +101,10 @@ interface ServerFinding {
   id: string; uid: string; check: string; title: string; severity: string; state: "proven" | "unproven" | "fixed";
   location: string; description: string; remediation: string; firstSeen: string; lastSeen: string;
   proof?: { method: string; replay: string; evidence?: string }; regressionHint?: string; validator?: string | null; verdict?: string;
+  ignored?: { at: string; reason: string };
+  advice?: string;
 }
-interface ServerRun { id: string; title: string; startedAt: string; endedAt?: string; status: string; outcome?: string; proven: number; leads: number; fixed: number; goal?: { text: string; status: string } }
+interface ServerRun { id: string; title: string; startedAt: string; endedAt?: string; status: string; outcome?: string; proven: number; leads: number; fixed: number; goal?: { text: string; status: string }; archived?: boolean }
 export interface ServerState {
   project: string | null;
   scope: { allowedHosts: string[]; stagingUrl?: string; allowActiveTesting: boolean } | null;
@@ -145,6 +149,8 @@ export function toData(s: ServerState): Data {
     remediation: f.remediation, proof: f.proof, regression: testByUid.get(f.uid)?.code,
     // "Gardé" means a test runs in CI; Crenel cannot see your CI, so it never claims it.
     guarded: false,
+    ...(f.ignored ? { ignored: f.ignored } : {}),
+    ...(f.advice ? { advice: f.advice } : {}),
   }));
   const project = s.project ?? "projet";
   const host = s.scope?.stagingUrl ? new URL(s.scope.stagingUrl).host : s.scope?.allowedHosts[0] ?? "local";
@@ -158,6 +164,7 @@ export function toData(s: ServerState): Data {
     trigger: r.goal ? "objectif" : "manuel", dur: dur(r.startedAt, r.endedAt),
     status: r.status === "waiting" ? "waiting" : r.status === "running" ? "running" : r.status === "done" ? "done" : "stopped",
     proven: r.proven || undefined, leads: r.leads || undefined, fixed: r.fixed || undefined,
+    archived: !!r.archived,
   }));
   const tests = s.tests.map((t) => ({ name: t.name, check: t.check, status: "draft" as const, when: ago(t.at), finding: t.uid }));
   const secrets = findings
@@ -199,7 +206,7 @@ export function toData(s: ServerState): Data {
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6).map(({ at: _at, ...x }) => x);
 
   return {
-    live: true, llm: s.llm, customProviders: s.customProviders ?? [], modelKeys: s.modelKeys ?? null, explore: s.explore ?? (s.llm ? "assist" : "off"), project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
+    live: true, llm: s.llm, hosts: s.scope?.allowedHosts ?? [], customProviders: s.customProviders ?? [], modelKeys: s.modelKeys ?? null, explore: s.explore ?? (s.llm ? "assist" : "off"), project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
     authzReplay: s.authz?.replay ?? {}, daily, activity,
     onboarding: mock.onboarding.map((o) => ({ ...o, done: o.id === "target" ? (s.scope?.allowedHosts.length ?? 0) > 0 : false })),
     guardedCount: 0,

@@ -14,7 +14,7 @@ import { loadConfig, scopeSettings } from "./core/config.js";
 import { run } from "./core/runner.js";
 import { REGISTRY } from "./core/registry.js";
 import { renderText, renderJson, renderDiff, exitCode } from "./report/render.js";
-import { toSarif } from "./report/sarif.js";
+import { toSarif, sarifOptionsFor } from "./report/sarif.js";
 import { appendAudit } from "./core/audit.js";
 import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
@@ -108,13 +108,7 @@ async function runGuarded(config: Parameters<typeof run>[0], configPath: string,
 // Locations become repository-relative (the cwd, as in a GitHub checkout);
 // rules get the registry's titles. See src/report/sarif.ts.
 function sarifOptions(config: { projectDir: string }, configPath: string) {
-  const configDir = dirname(resolve(configPath));
-  return {
-    repoRoot: process.cwd(),
-    projectDir: isAbsolute(config.projectDir) ? config.projectDir : resolve(configDir, config.projectDir),
-    configPath: resolve(configPath),
-    titles: Object.fromEntries(REGISTRY.map((c) => [c.name, c.title])),
-  };
+  return sarifOptionsFor(config.projectDir, configPath, Object.fromEntries(REGISTRY.map((c) => [c.name, c.title])));
 }
 
 async function main(): Promise<number> {

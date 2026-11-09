@@ -1,3 +1,4 @@
+import type { Attachment } from "../lib/attachments.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Check, CircleDashed, Copy, Goal, Loader2, Minus, RotateCcw, ShieldQuestion, SquarePen, X } from "lucide-react";
@@ -14,7 +15,8 @@ import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "../compone
 import { CodeBlock } from "../components/ai/code-block.tsx";
 import { Source, Sources, SourcesContent, SourcesTrigger } from "../components/ai/sources.tsx";
 import { Confirmation, ConfirmationAccepted, ConfirmationAction, ConfirmationActions, ConfirmationRejected, ConfirmationRequest, ConfirmationTitle } from "../components/ai/confirmation.tsx";
-import { Context, ContextContent, ContextTrigger } from "../components/ai/context.tsx";
+import { ContextEstimate } from "../components/ContextEstimate.tsx";
+import "../styles/console-b.css";
 import { Suggestion, Suggestions } from "../components/ai/suggestion.tsx";
 import { Shimmer } from "../components/ai/shimmer.tsx";
 import { Skeleton } from "../components/arc/skeleton/skeleton.tsx";
@@ -26,7 +28,9 @@ import { TextMorph } from "../components/kit/text-morph.tsx";
 import { Loader } from "../components/kit/loader.tsx";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "../components/kit/steps.tsx";
 import { agentAfterAllow, agentAfterDeny, agentScript, tasks } from "../data/mock.ts";
-import { useData } from "../data/api.ts";
+import { apiFetch, useData } from "../data/api.ts";
+import { NEEDS_SERVER, copyText, rateRun } from "../data/actions.ts";
+import { DEMO_SUGGESTIONS, suggestionsFor, taskIdOf } from "../lib/runs.ts";
 import { useLiveAgent } from "../data/live-run.ts";
 import { cn } from "../lib/cn.ts";
 import type { AgentEvent } from "../lib/types.ts";
@@ -52,9 +56,10 @@ function reply(q: string, target: string, url: string): string {
   return `Compris. Je reste sur ${target}, dans le périmètre déclaré. Dites-moi quoi attaquer, ou tapez / pour voir les commandes.`;
 }
 
-function initial(state: unknown, targetName: string): { events: AgentEvent[]; queue: AgentEvent[]; phase: Phase; title: string; decisions: Record<number, Decision> } {
-  const st = (state ?? {}) as { prompt?: string; taskId?: string };
-  const task = st.taskId ? tasks.find((t) => t.id === st.taskId) : undefined;
+function initial(state: unknown, search: string, targetName: string): { events: AgentEvent[]; queue: AgentEvent[]; phase: Phase; title: string; decisions: Record<number, Decision> } {
+  const st = (state ?? {}) as { prompt?: string };
+  const taskId = taskIdOf(state, search);
+  const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
   if (task && task.id !== "t-live") {
     const before = agentScript.filter((e) => e.kind !== "permission");
     const perm = agentScript.find((e) => e.kind === "permission")!;
@@ -71,7 +76,7 @@ export function Agent() {
   const location = useLocation();
   const ws = useWorkspace();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const init = useMemo(() => initial(location.state, ws.target.name), [location.key]);
+  const init = useMemo(() => initial(location.state, location.search, ws.target.name), [location.key]);
   const [events, setEvents] = useState<AgentEvent[]>(init.events);
   const [queue, setQueue] = useState<AgentEvent[]>(init.queue);
   const [phase, setPhase] = useState<Phase>(init.phase);
@@ -83,28 +88,51 @@ export function Agent() {
   // With `crenel serve`, the conversation is a real run streamed from the API.
   const live = useLiveAgent({ setEvents, setPhase, setDecisions, setAllowed });
   const data = useData();
-  const startLive = (text: string) => {
+  // The run shown (live): its id when attached; when started here, its prompt
+  // and start time until GET api/runs gives the id (live.start does not return it).
+  const [run, setRun] = useState<{ id?: string; prompt?: string; at?: number }>({});
+  const attach = (id: string) => { setRun({ id }); live.attach(id); };
+  const startLive = (text: string, attachments?: Attachment[]) => {
     const goal = ws.goal !== "none" ? goalOf(ws.goal).text : undefined;
     if (goal) ws.setGoal("none");
+    setRun({ prompt: (goal ?? text).trim().slice(0, 4000), at: Date.now() });
     // The effort only travels when the model takes it (claude -p, recent Messages API models).
     const effort = modelCaps(ws.model, ws.customModels, data).effort ? ws.effort : undefined;
-    void live.start(text, { mode: ws.mode, ...modelSend(ws.model, ws.customModels), effort, goal, explore: ws.explore ?? undefined });
+    void live.start(text, { mode: ws.mode, ...modelSend(ws.model, ws.customModels), effort, goal, explore: ws.explore ?? undefined, attachments })
+      .then((id) => { if (id) setRun((r) => ({ ...r, id })); });
   };
 
   // Reset when navigating here again with a new prompt or task.
   useEffect(() => {
     if (live.enabled) {
       live.reset(); setEvents([]); setQueue([]); setDecisions({}); setStream(null);
-      const st = (location.state ?? {}) as { prompt?: string; taskId?: string };
+      const st = (location.state ?? {}) as { prompt?: string; attachments?: Attachment[] };
+      const taskId = taskIdOf(location.state, location.search);
       const last = data.tasks[0];
-      if (st.taskId) { setPhase("running"); live.attach(st.taskId); }
-      else if (st.prompt) startLive(st.prompt);
-      else if (last) { setPhase("running"); live.attach(last.id); }
+      if (taskId) { setPhase("running"); attach(taskId); }
+      else if (st.prompt) startLive(st.prompt, st.attachments);
+      else if (last) { setPhase("running"); attach(last.id); }
       else startLive(defaultPrompt(ws.target.name));
       return;
     }
     setEvents(init.events); setQueue(init.queue); setPhase(init.phase); setDecisions(init.decisions); setStream(null);
   }, [init, live.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A run started here: find its id among the server's runs (same prompt, started since).
+  const resolveRunId = useCallback(async (): Promise<string | undefined> => {
+    if (run.id) return run.id;
+    if (!run.prompt || !run.at) return undefined;
+    const list = await apiFetch<{ id: string; prompt: string; startedAt: string }[]>("api/runs");
+    const mine = list.filter((r) => r.prompt === run.prompt && Date.parse(r.startedAt) >= run.at! - 60_000)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    if (mine) setRun((r) => (r.prompt === run.prompt ? { ...r, id: mine.id } : r));
+    return mine?.id;
+  }, [run]);
+  useEffect(() => {
+    if (live.enabled && !run.id && run.prompt) resolveRunId().catch(() => {});
+  }, [live.enabled, data.tasks, run, resolveRunId]);
+  const liveTask = live.enabled && run.id ? data.tasks.find((t) => t.id === run.id) : undefined;
+  const title = liveTask?.title ?? init.title;
 
   // Script playback, one event per tick. A permission event pauses the run.
   useEffect(() => {
@@ -180,11 +208,11 @@ export function Agent() {
     return () => window.removeEventListener("keydown", onKey);
   }, [interrupt, decide, phase]);
 
-  function send(text: string) {
+  function send(text: string, attachments?: Attachment[]) {
     setInput("");
     const cmd = text.trim().toLowerCase();
     if (cmd === "/clear") { live.reset(); setEvents([]); setQueue([]); setStream(null); setPhase("idle"); return; }
-    if (live.enabled) { if (phase === "running" || phase === "waiting") live.stop(); startLive(text); return; }
+    if (live.enabled) { if (phase === "running" || phase === "waiting") live.stop(); startLive(text, attachments); return; }
     if (phase === "waiting") setDecisions((m) => ({ ...m, [events.length - 1]: "deny" }));
     setStream(null);
     if (cmd.startsWith("/scan")) {
@@ -216,6 +244,19 @@ export function Agent() {
   const phaseLabel = phase === "running" || stream ? "travaille" : phase === "waiting" ? "attend votre accord" : phase === "interrupted" ? "interrompu" : "prêt";
   const toast = useToast();
   const [feedback, setFeedback] = useState(true);
+  // "Ce bilan vous a aidé ?": recorded in the server's audit log (POST api/runs/:id/feedback).
+  async function rate(useful: boolean) {
+    if (!live.enabled) { toast({ type: "info", title: "Avis non enregistré", description: NEEDS_SERVER }); setFeedback(false); return; }
+    try {
+      const id = await resolveRunId();
+      if (!id) throw new Error("tâche introuvable sur le serveur");
+      await rateRun(id, useful);
+      setFeedback(false);
+      toast({ type: "success", title: useful ? "Merci, c'est noté" : "Merci, on va l'améliorer" });
+    } catch (err) {
+      toast({ type: "error", title: "Avis non enregistré", description: (err as Error).message });
+    }
+  }
 
   const lastIdx = events.length - 1;
   type StepState = "done" | "run" | "todo" | "skip";
@@ -234,7 +275,7 @@ export function Agent() {
 
   return (
     <div className="agent">
-      <Topbar scoped compact crumb="Agent" title={init.title.length > 80 ? init.title.slice(0, 78) + "…" : init.title}
+      <Topbar scoped compact crumb="Agent" title={title.length > 80 ? title.slice(0, 78) + "…" : title}
         actions={<Button variant="ghost" size="sm" to="/app/overview"><SquarePen size={14} /> Nouvelle tâche</Button>} />
 
       <Conversation>
@@ -306,18 +347,18 @@ export function Agent() {
                   {i === finalSay && (
                     <>
                       <MessageActions>
-                        <MessageAction tooltip="Copier le bilan" onClick={async () => { try { await navigator.clipboard.writeText(ev.text); } catch { /* ignore */ } toast({ type: "success", title: "Bilan copié" }); }}><Copy className="size-3.5" /></MessageAction>
+                        <MessageAction tooltip="Copier le bilan" onClick={async () => { toast(await copyText(ev.text) ? { type: "success", title: "Bilan copié" } : { type: "error", title: "Copie refusée par le navigateur" }); }}><Copy className="size-3.5" /></MessageAction>
                         <MessageAction tooltip="Relancer le scan" onClick={() => send("/scan")}><RotateCcw className="size-3.5" /></MessageAction>
                       </MessageActions>
                       <Suggestions aria-label="Suites possibles">
-                        {["/fix Préparer les correctifs", "/test Fusionner le test d'isolation", "/explain La clé Stripe"].map((sg) => (
+                        {(live.enabled ? suggestionsFor(events) : DEMO_SUGGESTIONS).map((sg) => (
                           <Suggestion key={sg} suggestion={sg} onClick={(v) => send(v)} />
                         ))}
                       </Suggestions>
                       {feedback && (
                         <FeedbackBar className="w-fit" title="Ce bilan vous a aidé ?" icon={<Mark size={16} />}
-                          onHelpful={() => { setFeedback(false); toast({ type: "success", title: "Merci, c'est noté" }); }}
-                          onNotHelpful={() => { setFeedback(false); toast({ type: "info", title: "Merci, on va l'améliorer" }); }}
+                          onHelpful={() => void rate(true)}
+                          onNotHelpful={() => void rate(false)}
                           onClose={() => setFeedback(false)} />
                       )}
                     </>
@@ -418,12 +459,7 @@ export function Agent() {
         <Composer
           variant="dock" value={input} onChange={setInput} onSubmit={send} busy={busy} onStop={interrupt}
           placeholder={phase === "waiting" ? "Répondez à la demande, ou écrivez pour la refuser" : "Demandez une suite, ou tapez /"}
-          extra={
-            <Context usedTokens={tokens} maxTokens={contextWindowOf(ws.model)} usage={{ input: Math.round(tokens * 0.72), output: Math.round(tokens * 0.2), reasoning: Math.round(tokens * 0.08) }}>
-              <ContextTrigger />
-              <ContextContent />
-            </Context>
-          }
+          extra={<ContextEstimate usedTokens={tokens} maxTokens={contextWindowOf(ws.model)} />}
         />
         <div className="statusline">
           <span className="sl-l">
