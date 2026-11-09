@@ -198,10 +198,13 @@ test("explore.injection proves injection through a GraphQL argument", async () =
     if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     let body = ""; req.on("data", (c) => (body += c)); req.on("end", () => {
       let q = ""; try { q = JSON.parse(body).query ?? ""; } catch {}
-      // naive backend: echoes the greet() argument straight into HTML (reflected XSS).
+      // naive backend: the greet() argument reaches a SQL query; a quote breaks it
+      // and surfaces a database error (error-based SQLi) absent from the baseline.
       const m = q.match(/greet\(name:\s*"([^"]*)"\)/);
+      const arg = m ? m[1]! : "";
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data: { greet: `<p>Hi ${m ? m[1] : "?"}</p>` } }));
+      if (arg.includes("'") || arg.includes('"')) res.end(JSON.stringify({ errors: [{ message: "PostgreSQL: unterminated quoted string at or near" }] }));
+      else res.end(JSON.stringify({ data: { greet: `Hi ${arg}` } }));
     });
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
@@ -212,7 +215,7 @@ test("explore.injection proves injection through a GraphQL argument", async () =
     const claim: Claim = { id: "g", class: "explore.injection", source: "llm", detail: { url: "/graphql", gql: '{ greet(name: "__INJECT__") }' } };
     const v = await validateClaim(claim, env);
     assert.equal(v.state, "proven", v.reason);
-    assert.match(v.reason, /XSS/);
+    assert.match(v.reason, /SQL injection/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -616,5 +619,22 @@ test("jwt-forge: RS256->HS256 algorithm confusion is proven end to end", async (
     const v = await validateClaim(claim("explore.jwt-forge", { url: "/me", token: rs, override: { role: "admin" } }), env);
     assert.equal(v.state, "proven", v.reason);
     assert.match(v.reason, /confusion/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("injection: markup reflected in a JSON response is NOT proven XSS (wrong context)", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    const q = u.searchParams.get("q") ?? "";
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ echo: q })); // reflects markup verbatim, but as JSON
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-xctx-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const v = await validateClaim(claim("explore.injection", { url: "/api", param: "q", where: "query" }), env);
+    assert.equal(v.state, "unproven", v.reason); // JSON reflection is a lead, not proven XSS
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });

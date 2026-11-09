@@ -95,3 +95,12 @@ test("nosql: always-true succeeds where literal and always-false are denied -> p
   const r = nosqlOracle({ baseline: { status: 401, body: "no" }, truthy: { status: 200, body: '{"token":"x"}' }, falsy: { status: 401, body: "no" } });
   assert.equal(r.verdict, "proven");
 });
+
+test("sqli: an error string already in the baseline is not proof", () => {
+  const r = sqliOracle({ baseline: { status: 200, body: "powered by postgresql" }, truthy: { status: 200, body: "powered by postgresql ok" }, falsy: { status: 200, body: "powered by postgresql ok" } });
+  assert.equal(r.verdict, "denied");
+});
+test("sqli: a NEW error caused by the quote is proven", () => {
+  const r = sqliOracle({ baseline: { status: 200, body: "home" }, truthy: { status: 500, body: "you have an error in your sql syntax" }, falsy: { status: 200, body: "home" } });
+  assert.equal(r.verdict, "proven");
+});

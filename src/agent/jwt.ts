@@ -69,7 +69,7 @@ export function jwkToPems(jwk: Record<string, unknown>): string[] {
 export const WEAK_SECRETS = ["secret", "password", "changeme", "jwt_secret", "your-256-bit-secret", "key", "admin", "supersecret", "jwtsecret", "secretkey", "default", "test"];
 
 export interface Observed { status: number; body: string }
-const DENY = new Set([401, 403]);
+const DENY = new Set([401, 403, 404]); // protected resources often mask anon access with 404
 const ok2xx = (s: number) => s >= 200 && s < 300;
 
 /** alg:none kept for the explore.jwt-none class (anon-control form). */

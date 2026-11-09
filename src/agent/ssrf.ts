@@ -31,20 +31,27 @@ export interface Callback {
 export async function startCallback(host: string, fixedPort = 0): Promise<Callback> {
   const seen: string[] = [];
   const srv: Server = createServer((req, res) => {
-    const u = new URL(req.url ?? "/", "http://x");
-    // nonce may ride any path segment (structured SSRF builds /a/b/<nonce>), the
-    // query, or a subdomain label — record them all.
-    for (const seg of u.pathname.split("/")) if (seg) seen.push(seg);
-    const fromHost = (req.headers.host ?? "").split(":")[0] ?? "";
-    for (const v of [u.searchParams.get("t") ?? "", fromHost, ...fromHost.split(".")]) if (v) seen.push(v);
-    res.writeHead(200, { "content-type": "text/plain" });
-    res.end("ok");
+    try {
+      const u = new URL(req.url ?? "/", "http://x");
+      // nonce may ride any path segment (structured SSRF builds /a/b/<nonce>), the
+      // query, or a subdomain label — record them all. Cap to bound memory.
+      for (const seg of u.pathname.split("/")) if (seg && seen.length < 5000) seen.push(seg);
+      const fromHost = (req.headers.host ?? "").split(":")[0] ?? "";
+      for (const v of [u.searchParams.get("t") ?? "", fromHost, ...fromHost.split(".")]) if (v && seen.length < 5000) seen.push(v);
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    } catch { try { res.writeHead(400); res.end(); } catch { /* socket gone */ } }
   });
-  await new Promise<void>((r) => srv.listen(fixedPort, "0.0.0.0", r));
-  const port = (srv.address() as AddressInfo).port;
+  // A bad request line or an occupied fixed port must fail the validation cleanly,
+  // never crash the process with an unhandled 'error'.
+  const port = await new Promise<number>((resolve, reject) => {
+    srv.once("error", reject);
+    srv.listen(fixedPort, "0.0.0.0", () => { srv.removeListener("error", reject); resolve((srv.address() as AddressInfo).port); });
+  });
+  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host; // bracket IPv6 literals
   return {
     port,
-    url: (nonce: string) => `http://${host}:${port}/${nonce}`,
+    url: (nonce: string) => `http://${authority}:${port}/${nonce}`,
     hits: () => seen.slice(),
     close: () => new Promise<void>((r) => srv.close(() => r())),
   };

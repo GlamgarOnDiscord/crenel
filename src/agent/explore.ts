@@ -585,7 +585,14 @@ export class Explorer {
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
-  const raw = cls === "stored-xss" ? d.storeUrl : (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  // Stored XSS mutates storeUrl then reads retrieveUrl: BOTH must clear the scope
+  // and the gate before the write, so an off-scope retrieval cannot be discovered
+  // only after the mutation.
+  if (cls === "stored-xss") {
+    const urls = [d.storeUrl, d.retrieveUrl].filter((x): x is string => typeof x === "string").map((x) => resolveExploreUrl(x, base)).filter((u): u is string => !!u);
+    return urls.length ? urls : null;
+  }
+  const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
   return u ? [u] : null;

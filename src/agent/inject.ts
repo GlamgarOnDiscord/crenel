@@ -58,8 +58,11 @@ export function sqliOracle(input: {
   falsy: { status: number; body: string };
 }): InjVerdict {
   const { baseline, truthy, falsy } = input;
-  const errored = [truthy, falsy].find((r) => SQL_ERRORS.some((e) => r.body.toLowerCase().includes(e)));
-  if (errored) return { verdict: "proven", kind: "sqli-error", reason: "a database error surfaced when the quote was injected" };
+  const base = baseline.body.toLowerCase();
+  // An error only counts when the injection CAUSED it: the marker must be new,
+  // not already present in the baseline page (e.g. "postgresql" in ordinary text).
+  const errored = [truthy, falsy].find((r) => SQL_ERRORS.some((e) => r.body.toLowerCase().includes(e) && !base.includes(e)));
+  if (errored) return { verdict: "proven", kind: "sqli-error", reason: "a NEW database error surfaced when the quote was injected (absent from the baseline)" };
   const same = (a: { status: number; body: string }, b: { status: number; body: string }) =>
     a.status === b.status && (a.body === b.body || sha(a.body) === sha(b.body));
   // Boolean-based: TRUE behaves like the baseline, FALSE diverges from both.

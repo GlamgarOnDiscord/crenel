@@ -8,10 +8,13 @@ import { join } from "node:path";
 import { Scope } from "../core/scope.js";
 import { validateClaim, type Claim, type ValidatorEnv } from "./validators.js";
 
-const PW = "/root/wt-sec-deps/node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/index.mjs";
-const CHR = "/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome";
+// Portable: read the Playwright entry and the Chromium binary from the env vars
+// domxss.ts honours (CRENEL_PLAYWRIGHT / CRENEL_BROWSER); unset on CI -> skipped.
+const PW = process.env.CRENEL_PLAYWRIGHT;
+const CHR = process.env.CRENEL_BROWSER;
 
-test("explore.dom-xss proves DOM XSS when the page reflects a param into a DOM sink", async () => {
+test("explore.dom-xss proves DOM XSS when the page reflects a param into a DOM sink", async (t) => {
+  if (!PW || !CHR) { t.skip("set CRENEL_PLAYWRIGHT and CRENEL_BROWSER to run the DOM-XSS browser test"); return; }
   const srv = createServer((req, res) => {
     const u = new URL(req.url!, "http://x");
     const q = u.searchParams.get("q") ?? "";
@@ -30,7 +33,7 @@ test("explore.dom-xss proves DOM XSS when the page reflects a param into a DOM s
     const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: { explore: { domXssPlaywright: PW, domXssBrowser: CHR } } };
     const mk = (path: string): Claim => ({ id: "d", class: "explore.dom-xss", source: "llm", detail: { url: path, param: "q" } });
     const vuln = await validateClaim(mk("/"), env);
-    if (vuln.validator && /no browser|browser error/.test(vuln.reason)) { console.log("SKIP: browser unavailable"); return; }
+    if (vuln.validator && /no browser|browser error/.test(vuln.reason)) { t.skip(`browser unavailable: ${vuln.reason}`); return; }
     assert.equal(vuln.state, "proven", vuln.reason);
     const safe = await validateClaim(mk("/safe"), env);
     assert.equal(safe.state, "unproven", "a textContent sink must not be proven");
