@@ -21,7 +21,8 @@ import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
 import { claudeCli, DEFAULT_MODEL, detectClaude, selectLlm } from "./agent/llm.js";
-import { crawlLiveBundle } from "./checks/live-bundle.js";
+import { crawlLiveBundle, extractEndpoints } from "./checks/live-bundle.js";
+import { runAutoProbe, type Endpoint } from "./agent/autoprobe.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
 import { SEVERITIES } from "./report/render.js";
@@ -500,6 +501,35 @@ async function main(): Promise<number> {
     process.stdout.write(`${r.findings.length} lead(s), ${r.calls} model call(s), ${r.dropped} item(s) dropped (quote not found in the file)${r.unseenChars ? `, ${Math.round(r.unseenChars / 1024)} KB not reviewed (raise --max)` : ""}.\n`);
     process.stdout.write("These are the model's readings, never proof. Only a deterministic validator marks a finding proven.\n");
     if (typeof flags.out === "string") writeFileSync(flags.out, JSON.stringify(r, null, 2));
+    return 0;
+  }
+
+  if (cmd === "autoprobe") {
+    // Deterministic exploration: recon the endpoints, then submit a systematic set
+    // of claims to the generic validators (no model, reproducible). Proof stays gated.
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try { config = loadConfig(configPath); } catch (err) { process.stderr.write(`${(err as Error).message}\n`); return 2; }
+    if (!config.scope.stagingUrl) { process.stderr.write("autoprobe needs a stagingUrl in the config.\n"); return 2; }
+    const scope = new Scope(scopeSettings(config.scope));
+    const log = (m: string) => { if (!flags.json) process.stderr.write(`${m}\n`); };
+    const base = config.scope.stagingUrl.replace(/\/+$/, "");
+    const { files } = await crawlLiveBundle({ scope, log }, config.scope.stagingUrl);
+    const paths = new Set<string>();
+    for (const f of files) if (f.kind !== "map") for (const e of extractEndpoints(f.body)) paths.add(e);
+    const authz = (config.options["authz-matrix"] ?? {}) as { resources?: { path?: string }[] };
+    for (const r of authz.resources ?? []) if (typeof r.path === "string") paths.add(r.path);
+    const endpoints: Endpoint[] = [...paths].map((p) => {
+      const u = new URL(p.replace(/:id|\{[^}]+\}/g, "1"), base + "/").toString();
+      const ps = [...new URL(u).searchParams.keys()];
+      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p) };
+    });
+    log(`autoprobe: ${endpoints.length} endpoint(s) discovered; probing...`);
+    const env = { scope, projectDir: config.projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };
+    const r = await runAutoProbe(env, { endpoints, origin: base }, { maxClaims: typeof flags.max === "string" ? Number(flags.max) : 200 });
+    const findings = r.proven.map((v) => ({ check: "autoprobe", title: v.reason.slice(0, 160), state: "proven", severity: v.ceiling ?? "high", location: "/", proof: { evidence: v.reason }, validator: v.validator }));
+    if (flags.json) process.stdout.write(JSON.stringify({ findings, tried: r.tried, proven: findings.length }, null, 2) + "\n");
+    else { for (const f of findings) process.stdout.write(`• PROVEN ${f.title}\n`); process.stdout.write(`\n${findings.length} proven / ${r.tried} claims tried (deterministic, no model).\n`); }
     return 0;
   }
 
