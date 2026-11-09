@@ -8,7 +8,7 @@
 // already surfaced about a system the user owns. Calls are bounded by the caller.
 
 import type { Finding } from "../core/types.js";
-import { claudeCli } from "./llm.js";
+import { claudeCli, DEFAULT_MODEL } from "./llm.js";
 
 export interface TriageResult {
   id: string;
@@ -19,7 +19,7 @@ export interface TriageResult {
  * Ask the local Claude CLI to triage one lead. Returns the model's short advice,
  * or throws if the CLI is missing or times out. Never mutates the finding.
  */
-export async function triageFinding(f: Finding, model = "opus", timeoutMs = 120_000): Promise<TriageResult> {
+export async function triageFinding(f: Finding, model = DEFAULT_MODEL, timeoutMs = 120_000): Promise<TriageResult> {
   // The finding fields can contain text pulled from the scanned target (a bundle,
   // a response header), which is untrusted and may try to steer the model. Fence
   // it as data and tell the model to treat it as such, never as instructions.
@@ -38,7 +38,7 @@ export async function triageFinding(f: Finding, model = "opus", timeoutMs = 120_
 }
 
 /** Triage up to `max` leads (unproven findings), in finding order. Bounded on purpose. */
-export async function triageLeads(findings: Finding[], model = "opus", max = 3): Promise<TriageResult[]> {
+export async function triageLeads(findings: Finding[], model = DEFAULT_MODEL, max = 3): Promise<TriageResult[]> {
   const leads = findings.filter((f) => f.state === "unproven").slice(0, max);
   const out: TriageResult[] = [];
   for (const f of leads) {

@@ -8,14 +8,17 @@ import type { Target } from "./types.ts";
 // small context mounted by the Shell, so Home and Agent stay in sync.
 
 export const MODELS = [
-  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus capable, pour les audits profonds." },
-  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis, le bon défaut." },
+  { id: "opus-4-8", label: "Opus 4.8", provider: "claude", vendor: "Anthropic", desc: "Moins souvent bloqué sur les audits.", recommended: true },
+  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus récent, mais plus souvent bloqué." },
+  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis." },
   { id: "haiku", label: "Haiku 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus rapide, pour les vérifications simples." },
   { id: "gpt", label: "GPT-5.5", provider: "openai", vendor: "OpenAI", desc: "Modèle généraliste d'OpenAI." },
   { id: "gemini", label: "Gemini 3.5", provider: "gemini", vendor: "Google", desc: "Grande fenêtre de contexte, pour les gros dépôts." },
   { id: "mistral", label: "Mistral Large", provider: "mistral", vendor: "Mistral AI", desc: "Hébergé en Europe." },
 ] as const;
 export type ModelId = (typeof MODELS)[number]["id"];
+/** The recommended built-in model, selected when nothing else is stored. */
+export const DEFAULT_MODEL_ID: ModelId = "opus-4-8";
 
 /* ---------------- custom / local models ----------------
    The composer can point a run at a model the engine reaches over HTTP (see
@@ -190,7 +193,7 @@ export const GOALS = [
 export type GoalId = (typeof GOALS)[number]["id"];
 
 export const CONTEXT_WINDOW: Record<string, number> = {
-  opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
+  "opus-4-8": 200_000, opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
 };
 /** Context window for any model id (built-in or custom); a safe default otherwise. */
 export const contextWindowOf = (model: string) => CONTEXT_WINDOW[model] ?? 128_000;
@@ -217,7 +220,7 @@ interface Workspace {
 const noop = () => {};
 const WorkspaceContext = createContext<Workspace>({
   target: targets[0]!, setTargetId: noop,
-  model: "opus", setModel: noop,
+  model: DEFAULT_MODEL_ID, setModel: noop,
   customModels: [], addCustomModel: noop, removeCustomModel: noop,
   effort: "med", setEffort: noop,
   mode: "ask", setMode: noop,
@@ -228,7 +231,7 @@ const WorkspaceContext = createContext<Workspace>({
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [targetId, setTargetId] = useState(targets[0]!.id);
   const [customModels, setCustomModels] = useState<CustomModel[]>(() => loadCustomModels());
-  const [model, setModelState] = useState<string>(() => loadModelId("opus"));
+  const [model, setModelState] = useState<string>(() => loadModelId(DEFAULT_MODEL_ID));
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
   const [goal, setGoal] = useState<GoalId>("none");
@@ -237,7 +240,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Workspace>(() => {
     const setModel = (m: string) => { setModelState(m); saveModelId(m); };
     const addCustomModel = (m: CustomModel) => setCustomModels((l) => { const next = [...l.filter((x) => x.id !== m.id), m]; saveCustomModels(next); return next; });
-    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel("opus"); return next; });
+    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); return next; });
     return {
       target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
       setTargetId, model, setModel, customModels, addCustomModel, removeCustomModel,
