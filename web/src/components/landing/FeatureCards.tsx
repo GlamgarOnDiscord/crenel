@@ -80,7 +80,7 @@ export function FeatureCards() {
               <span className="tile web"><Globe size={24} /></span>
             </div>
           </div>
-        }>CLI, console, GitHub Action et rapport SARIF : les mêmes 42 checks.</Card>
+        }>CLI, console, GitHub Action et rapport SARIF : les mêmes 43 checks.</Card>
       </div>
 
       <div className="fc-right">

@@ -1,6 +1,6 @@
-// Shared helper for LLM-based adapters (Claude Code via `claude -p --model sonnet`
-// on the owner's subscription, in an ISOLATED CLAUDE_CONFIG_DIR so nothing is
-// written to the owner's ~/.claude). Every adapter is scored by the same truth
+// Shared helper for LLM-based adapters (Claude Code via `claude -p`, model
+// CRENEL_BENCH_MODEL, Opus 4.8 by default, on the owner's subscription, in an
+// ISOLATED CLAUDE_CONFIG_DIR so nothing is written to the owner's ~/.claude). Every adapter is scored by the same truth
 // files as Crenel. The model is asked to emit findings in Crenel's own schema;
 // a finding only counts as a win when it is "proven" with evidence, otherwise
 // the scorer treats it as a lead. Model calls are logged to tmp/model-calls.log.
@@ -8,9 +8,15 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-export const ISO =
-  process.env.CRENEL_BENCH_CC_CONFIG ||
-  "/tmp/claude-0/-root/f9fb4556-b02c-4b2d-860d-2f57f5ba7921/scratchpad/isolated-cc";
+// The isolated Claude Code config directory (logged in once with
+// `CLAUDE_CONFIG_DIR=<dir> claude`). Required: a default path would point at a
+// directory that is not logged in on any other machine, and every case would
+// then "find nothing" instead of failing.
+export const ISO = process.env.CRENEL_BENCH_CC_CONFIG;
+export function assertIsolatedConfig() {
+  if (!ISO) throw new Error("set CRENEL_BENCH_CC_CONFIG to a logged-in Claude Code config directory (CLAUDE_CONFIG_DIR=<dir> claude, then /login)");
+  if (!existsSync(ISO)) throw new Error(`CRENEL_BENCH_CC_CONFIG=${ISO} does not exist`);
+}
 
 export function listSource(dir, max = 40) {
   const out = [];
@@ -81,12 +87,16 @@ export function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool }) {
 
 export function parseFindings(stdout) {
   if (!stdout) return [];
-  // find the last JSON array in the output
-  let depth = 0, start = -1, best = null;
+  // Find the last top-level JSON array in the output. Brackets inside JSON
+  // strings (an evidence line quoting "[x" or a regex) are skipped, otherwise
+  // one unbalanced bracket in a proof dropped every finding of the case.
+  let depth = 0, start = -1, best = null, inStr = false, esc = false;
   for (let i = 0; i < stdout.length; i++) {
     const ch = stdout[i];
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') { if (depth > 0) inStr = true; continue; }
     if (ch === "[") { if (depth === 0) start = i; depth++; }
-    else if (ch === "]") { depth--; if (depth === 0 && start >= 0) best = stdout.slice(start, i + 1); }
+    else if (ch === "]" && depth > 0) { depth--; if (depth === 0 && start >= 0) best = stdout.slice(start, i + 1); }
   }
   if (!best) return [];
   try {

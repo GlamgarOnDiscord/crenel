@@ -67,9 +67,16 @@ for (const name of cases) {
       }
     } else cpSync(join(HERE, "empty"), projectDir, { recursive: true });
     const { findings, errors } = await tool.run({ projectDir, baseUrl, caseConfig: c.config ?? {}, tmp });
-    report.cases.push({ name, title: c.title, rows: score(findings, c), errors, findings: findings.length });
+    // A recorded exploration replays an answer the case's author wrote: it checks
+    // that the harness turns those moves into a proof, not that anything was
+    // discovered. Kept in the score, and named in the summary.
+    report.cases.push({ name, title: c.title, rows: score(findings, c), errors, findings: findings.length, replayed: !!c.config?.explore?.script });
   } catch (err) {
-    report.cases.push({ name, title: c.title, rows: [], errors: [{ check: "bench", message: err.message }] });
+    // A case that crashes still counts: every flaw it holds is a miss. Dropping
+    // its rows would shrink the denominator and raise the recall. Its decoys
+    // are left out (nothing ran, so nothing was flagged or cleared).
+    const rows = (c.mustFind ?? []).map((r) => ({ kind: "find", id: r.id, ok: false, got: "erreur", why: r.why }));
+    report.cases.push({ name, title: c.title, rows, errors: [{ check: "bench", message: err.message }] });
   } finally {
     server?.close();
     rmSync(tmp, { recursive: true, force: true });
@@ -86,7 +93,9 @@ function* walk(d) {
 // Summary: recall on real flaws, false positives on decoys.
 const all = report.cases.flatMap((c) => c.rows);
 const finds = all.filter((r) => r.kind === "find"), decoys = all.filter((r) => r.kind === "decoy");
-report.summary = { found: finds.filter((r) => r.ok).length, flaws: finds.length, falsePositives: decoys.filter((r) => !r.ok).length, decoys: decoys.length };
+const replayed = report.cases.filter((c) => c.replayed).map((c) => c.name);
+const crashed = report.cases.filter((c) => (c.errors ?? []).some((e) => e.check === "bench")).map((c) => c.name);
+report.summary = { found: finds.filter((r) => r.ok).length, flaws: finds.length, falsePositives: decoys.filter((r) => !r.ok).length, decoys: decoys.length, replayed, crashed };
 if (opt("json")) writeFileSync(opt("json"), JSON.stringify(report, null, 2));
 
 for (const c of report.cases) {
@@ -96,3 +105,7 @@ for (const c of report.cases) {
 }
 const s = report.summary;
 console.log(`\n${tool.name}: ${s.found}/${s.flaws} failles trouvées, ${s.falsePositives}/${s.decoys} leurres signalés à tort`);
+if (s.replayed.length) console.log(`  dont rejoué depuis une exploration enregistrée (pas une découverte) : ${s.replayed.join(", ")}`);
+if (s.crashed.length) console.log(`  cas en erreur, comptés comme ratés : ${s.crashed.join(", ")}`);
+// A crash is a failure of the bench run itself, so CI sees it.
+if (s.crashed.length) process.exitCode = 1;

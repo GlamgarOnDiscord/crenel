@@ -19,20 +19,20 @@ import "../styles/iso.css";
    checks, a "why" split card around the proof bench, a bento of what Crenel
    does (each card an interactive isometric figure, components/iso), the bench numbers as tiles, the method, and a closing card
    under the same curtain. Every number here is checked against the engine:
-   42 checks in src/core/registry.ts, `node bench/run.mjs` → 27/27 flaws found,
-   0/34 decoys flagged, on 23 cases. */
+   43 checks in src/core/registry.ts, `node bench/run.mjs` → 30/30 flaws found,
+   0/43 decoys flagged, on 27 cases (one of them replays a recorded exploration). */
 
 // The engine's real check list (src/core/registry.ts), grouped for reading.
 const CHECK_GROUPS: { name: string; ids: string[] }[] = [
   { name: "Secrets", ids: ["exposed-secrets", "live-bundle", "public-env", "sourcemaps", "committed-env", "committed-credentials", "git-history"] },
   { name: "Autorisation", ids: ["authz-matrix", "authz-write", "auth-variants", "auth-config", "jwt-config", "baas-exposure", "supabase-rpc", "supabase-functions", "storage-buckets", "webhook-signature", "business-logic", "mass-assignment", "race"] },
-  { name: "Site en ligne", ids: ["headers", "exposed-files", "graphql", "open-redirect", "next-middleware", "cache-deception", "dev-server", "ai-infra", "mcp-surface", "vercel-preview", "ssrf", "next-image", "cache-poisoning", "api-docs"] },
+  { name: "Site en ligne", ids: ["headers", "exposed-files", "graphql", "open-redirect", "next-middleware", "cache-deception", "dev-server", "ai-infra", "mcp-surface", "vercel-preview", "ssrf", "next-image", "cache-poisoning", "api-docs", "metrics-exposed"] },
   { name: "Infra et DNS", ids: ["subdomain-takeover", "email-dns", "transport", "cloudflare-audit", "dockerfile"] },
   { name: "Chaîne d'appro.", ids: ["dependency-risk", "ci-hardening", "tls-verification"] },
 ];
 const ALL_CHECKS = CHECK_GROUPS.flatMap((g) => g.ids);
 const CHECK_COUNT = ALL_CHECKS.length;
-const BENCH = { found: "27/27", decoys: "0/34", cases: 23 };
+const BENCH = { found: "30/30", decoys: "0/43", cases: 27 };
 const INSTALL = "npx crenel scan";
 
 function scrollTo(id: string) {
