@@ -13,7 +13,7 @@
 import type { Claim, ClaimVerdict, ValidatorEnv } from "./validators.js";
 import { validateClaim, actorToken } from "./validators.js";
 import { safeFetch } from "../core/net.js";
-import { tokenIdentity } from "./markers.js";
+import { ownerFieldValues, tokenIdentity } from "./markers.js";
 
 // Login routes by their usual names (the same in any API), not by a target's path.
 const LOGIN_PATH = /(^|\/)(login|signin|sign-in|log-in|authenticate)(\/|$)/i;
@@ -59,9 +59,25 @@ export interface AutoProbeResult { proven: ClaimVerdict[]; tried: number }
 
 /** Validate every auto-generated claim and keep the proven ones. The validators
  * enforce scope, controls and no-false-positive; this only drives them. */
-export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoint[]; origin?: string }, opts: { maxClaims?: number } = {}): Promise<AutoProbeResult> {
+export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoint[]; origin?: string }, opts: { maxClaims?: number; idScan?: number } = {}): Promise<AutoProbeResult> {
   const accounts = (["a", "b", "c"] as const).filter((a) => actorToken(env.options, a));
   const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin, ownerIds: tokenIdentity(actorToken(env.options, "b")) }).slice(0, opts.maxClaims ?? 120);
+  // The owner's own objects behind each object route: small ids read as B, kept when the object's owner field holds
+  // B's id from its token (ownerFieldValues), then claimed as A. Finds B's objects without knowing their ids.
+  const bTok = actorToken(env.options, "b");
+  const bIds = tokenIdentity(bTok);
+  if (bIds.length && accounts.includes("a")) {
+    for (const ep of input.endpoints.filter((e) => e.template?.includes(":id")).slice(0, 15)) {
+      for (let i = 1; i <= (opts.idScan ?? 12); i++) {
+        let url: string;
+        try { url = new URL(ep.template!.replace(":id", String(i)), ep.url).toString(); } catch { break; }
+        try {
+          const r = await safeFetch(url, env.scope, { headers: { authorization: `Bearer ${bTok}` }, maxBytes: 256 * 1024 });
+          if (r.status >= 200 && r.status < 300 && ownerFieldValues(r.body).some((v) => bIds.includes(v))) { claims.push({ id: `auto:own:${claims.length}`, class: "explore.cross-actor", source: "check", detail: { url, attacker: "a", owner: "b", id: String(i) } }); break; }
+        } catch { break; }
+      }
+    }
+  }
   // A GraphQL endpoint with introspection open: its own String arguments become injection claims.
   for (const ep of input.endpoints.filter((e) => e.graphql)) {
     try {

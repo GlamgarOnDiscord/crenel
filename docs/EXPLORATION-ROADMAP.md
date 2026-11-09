@@ -23,13 +23,23 @@ authorization bypass, stack traces). Proven findings only, union of `scan`,
 | Pipeline | Juice Shop | DVGA | Total |
 | --- | --- | --- | --- |
 | Before (main at ed7eee5) | 3/13 | 3/11 | 6/24, plus 2 false cross-account proofs |
-| After | 6/13 | 7/11 | **13/24**, 0 false proofs found |
+| After | 6/13 | 7/11 | 13/24, 0 false proofs found |
+| After + owner-field id scan and cross-write validator | 7/13 | 7/11 | **14/24** |
+
+The owner-field id scan (autoprobe reads small ids as the owner and keeps the
+ones whose owner field holds the owner's own id) adds Juice Shop's basket IDOR:
+it finds B's basket without being told its id. A generic `explore.cross-actor-write`
+validator (B creates an object, an anonymous write is the control, A's
+DELETE/PUT/PATCH must change what B re-reads) also shipped; it stays silent on
+both apps here (Juice Shop's addresses enforce ownership, DVGA's writes are
+GraphQL mutations the REST-shaped claim does not target), which is the
+no-false-positive behaviour, not a bug.
 
 Caveats: both apps are famous, so a model may know their flaws (the deterministic
 `scan` + `autoprobe` alone reach the same 13/24 here: the model added nothing new);
 the set is small; the changes were developed while looking at these two targets, so
 a held-out target (VAmPI, crAPI) is the next honest check. Misses: the basket IDOR
-(no proof that the read object is B's), admin registration (proven by the new
+(no proof — now found by the owner-field id scan), admin registration (proven by the new
 create-mode mass assignment when claimed, not claimed in the run), DOM XSS (proven
 with a browser configured, not in the run), NoSQL reviews, feedback deletion and
 basket manipulation (no cross-account write validator yet), open redirect via an

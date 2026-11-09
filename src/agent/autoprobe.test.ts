@@ -83,3 +83,24 @@ test("autoClaims: an object route is also tried with the owner's own ids", () =>
   assert.ok(urls.includes("http://x/api/users/27"));
   assert.ok(!urls.some((u) => String(u).includes("bob")), "an e-mail is not an id segment");
 });
+
+test("runAutoProbe: finds B's own object behind an object route by its owner field, and proves A reads it", async () => {
+  const jwt = (id: number) => `h.${Buffer.from(JSON.stringify({ data: { id } })).toString("base64url")}.s`;
+  const A = jwt(31), B = jwt(32);
+  const srv = createServer((req, res) => {
+    const ok = req.headers.authorization === `Bearer ${A}` || req.headers.authorization === `Bearer ${B}`;
+    const m = /^\/api\/carts\/(\d+)$/.exec(req.url ?? "");
+    res.writeHead(ok && m && Number(m[1]) <= 5 ? 200 : ok ? 404 : 401, { "content-type": "application/json" });
+    // Cart 4 is B's; every account can read every cart (the flaw).
+    res.end(ok && m && Number(m[1]) <= 5 ? JSON.stringify({ data: { id: Number(m[1]), UserId: m[1] === "4" ? 32 : 1, items: [m[1]] } }) : "{}");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-ap-own-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: { "authz-matrix": { accounts: { a: { token: A }, b: { token: B } } } } };
+    const r = await runAutoProbe(env, { endpoints: [{ url: `${base}/api/carts/1`, template: "/api/carts/:id" }] });
+    assert.ok(r.proven.some((v) => /\/api\/carts\/4/.test(v.reason)), r.proven.map((v) => v.reason).join(" | ") || "nothing proven");
+    assert.ok(!r.proven.some((v) => /\/api\/carts\/1\b/.test(v.reason)), "cart 1 is not B's: never proven as B's");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});

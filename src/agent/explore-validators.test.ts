@@ -743,3 +743,36 @@ test("cross-actor: an object every account may read (a catalog behind login) is 
     assert.equal(basket.state, "proven", basket.reason);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("cross-actor-write: A deleting the object B just created is proven; an owner check keeps it a denial", async () => {
+  for (const vulnerable of [true, false]) {
+    const items = new Map<string, { owner: string; qty: number }>();
+    let next = 1;
+    const srv = createServer((req, res) => {
+      const who = req.headers.authorization === "Bearer tok-a" ? "a" : req.headers.authorization === "Bearer tok-b" ? "b" : null;
+      const json = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+      const m = /^\/api\/notes\/(\d+)$/.exec(req.url!);
+      let chunks = ""; req.on("data", (c) => (chunks += c)); req.on("end", () => {
+        if (!who) return json(401, {});
+        if (req.url === "/api/notes" && req.method === "POST") { const id = String(next++); items.set(id, { owner: who, qty: 1 }); return json(201, { data: { id: Number(id) } }); }
+        const it = m ? items.get(m[1]!) : undefined;
+        if (!it) return json(404, {});
+        if (req.method === "GET") return it.owner === who ? json(200, { data: { id: Number(m![1]), qty: it.qty } }) : json(404, {});
+        if (req.method === "DELETE") { if (!vulnerable && it.owner !== who) return json(404, {}); items.delete(m![1]!); return json(200, {}); }
+        return json(405, {});
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-xw-"));
+    try {
+      const env: ValidatorEnv = {
+        scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [],
+        options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { token: "tok-b" } } } },
+      };
+      const v = await validateClaim(claim("explore.cross-actor-write", { createUrl: "/api/notes", createBody: { text: "__UNIQUE__" }, objectUrl: "/api/notes/:id", method: "DELETE" }), env);
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.match(v.reason, /deletes B's object/); }
+      else { assert.equal(v.state, "unproven", v.reason); assert.match(v.reason, /still reads/); assert.equal(items.size, 0, "the owner deleted its test object afterwards"); }
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});

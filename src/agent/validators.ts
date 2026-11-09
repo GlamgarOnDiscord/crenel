@@ -27,6 +27,7 @@ import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
 import { ownerFieldValues, tokenIdentity } from "./markers.js";
+import { crossWriteOracle } from "./xwrite.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -1220,6 +1221,63 @@ async function createAssignment(claim: Claim, env: ValidatorEnv, name: string): 
   return no(r.reason + left);
 }
 
+/* ---------------- explore.cross-actor-write ---------------- */
+// A deletes or changes B's object. The object is created by B in the proof (so it
+// is B's by construction), read by B, written anonymously (control), written by A,
+// and read by B after each write; crossWriteOracle decides (xwrite.ts). Everything
+// stays on the staging origin; active mode. A changed object that remains is
+// deleted by B afterwards (best effort, said in the result). See xwrite.test.ts.
+const exploreCrossWriteValidator: Validator = {
+  class: "explore.cross-actor-write",
+  name: "cross-account write (owner creates, attacker deletes or changes, owner re-reads)",
+  async validate(claim, env) {
+    const d = claim.detail as { createUrl?: unknown; createBody?: unknown; objectUrl?: unknown; method?: unknown; body?: unknown; field?: unknown; value?: unknown; owner?: unknown; attacker?: unknown };
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    if (!env.scope.allowActiveTesting) return no("a cross-account write changes data: needs allowActiveTesting");
+    if (typeof d.createUrl !== "string" || typeof d.objectUrl !== "string" || !d.objectUrl.includes(":id")) return no('need detail.createUrl (where the owner creates the object) and detail.objectUrl with ":id"');
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : "DELETE";
+    if (method !== "DELETE" && method !== "PUT" && method !== "PATCH") return no(`method ${method}: DELETE, PUT or PATCH`);
+    const owner = parseActor(d.owner) ?? "b", attacker = parseActor(d.attacker) ?? "a";
+    if (owner === "anon" || attacker === "anon" || owner === attacker) return no("owner and attacker must be two configured accounts");
+    const ownerTok = actorToken(env.options, owner), attTok = actorToken(env.options, attacker);
+    if (!ownerTok || !attTok) return no(`tokens for accounts ${owner.toUpperCase()} and ${attacker.toUpperCase()} are needed`);
+    const same = sameIdentity(attTok, ownerTok);
+    if (same) return no(`accounts ${attacker.toUpperCase()} and ${owner.toUpperCase()} ${same}: not two tenants`);
+    const createUrl = resolveExploreUrl(d.createUrl, env.stagingUrl);
+    if (!createUrl || !env.stagingUrl || new URL(createUrl).origin !== new URL(env.stagingUrl).origin) return no("writes go only to the declared stagingUrl's origin");
+    const obj = d.createBody && typeof d.createBody === "object" && !Array.isArray(d.createBody) ? d.createBody : {};
+    const body = JSON.stringify(obj).replace(/__UNIQUE__/g, () => nonce("u"));
+    const field = typeof d.field === "string" ? d.field : undefined;
+    const writeBody = method === "DELETE" ? undefined : JSON.stringify({ ...(d.body && typeof d.body === "object" && !Array.isArray(d.body) ? d.body : {}), ...(field ? { [field]: d.value } : {}) });
+    const json = { "content-type": "application/json" };
+    let objUrl = "";
+    try {
+      const created = await sendAs({ url: createUrl, method: "POST", headers: json, body }, owner, env, createUrl);
+      const id = ok2xx(created.status) ? createdId(created.body) : undefined;
+      if (!id) return no(`the owner's create answered HTTP ${created.status} with no new id: nothing to attack`);
+      objUrl = resolveExploreUrl(d.objectUrl.replace(":id", encodeURIComponent(id)), env.stagingUrl) ?? "";
+      if (!objUrl || new URL(objUrl).origin !== new URL(createUrl).origin) return no("detail.objectUrl must be on the same origin");
+      const read = async () => { const r = await sendAs({ url: objUrl, method: "GET" }, owner, env, objUrl); return { status: r.status, body: r.body }; };
+      const write = async (who: Actor) => { const r = await sendAs({ url: objUrl, method, headers: writeBody ? json : undefined, body: writeBody }, who, env, objUrl); return { status: r.status, body: r.body }; };
+      const before = await read();
+      await write("anon");
+      const afterAnon = await read();
+      const att = await write(attacker);
+      const after = await read();
+      const v = crossWriteOracle({ method: method as "DELETE" | "PUT" | "PATCH", field, value: d.value, before, afterAnon, attacker: att, after });
+      // Leave nothing behind that the proof created: the owner deletes its object when it still exists.
+      let left = "";
+      if (ok2xx(after.status)) {
+        try { const del = await sendAs({ url: objUrl, method: "DELETE" }, owner, env, objUrl); left = ok2xx(del.status) ? "; the owner then deleted the test object" : `; the test object ${pathOnly(objUrl)} is left in place (owner's DELETE answered ${del.status})`; } catch { left = `; the test object ${pathOnly(objUrl)} is left in place`; }
+      }
+      const evidence: Evidence = { request: `${method} ${pathOnly(objUrl)} as ${attacker.toUpperCase()}${writeBody ? `\n${writeBody.slice(0, 300)}` : ""}`, response: `HTTP ${att.status}\n${excerpt(att.body)}`, sha256: sha(att.body), control: `created by ${owner.toUpperCase()} (HTTP ${created.status}); ${owner.toUpperCase()} read HTTP ${before.status}; anonymous ${method} then ${owner.toUpperCase()} read HTTP ${afterAnon.status}; after ${attacker.toUpperCase()}'s ${method}, ${owner.toUpperCase()} reads HTTP ${after.status}` };
+      if (v.verdict === "written") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Account ${attacker.toUpperCase()} ${method === "DELETE" ? "deletes" : "changes"} ${owner.toUpperCase()}'s object at ${pathOnly(objUrl)}: ${v.reason}${left}`, evidence, ceiling: "high" };
+      if (v.verdict === "anon-written") return { claimId: claim.id, state: "proven", validator: this.name, reason: `No credentials at all ${method === "DELETE" ? "delete" : "change"} ${owner.toUpperCase()}'s object at ${pathOnly(objUrl)}: ${v.reason}${left}`, evidence, ceiling: "critical" };
+      return no(v.reason + left, evidence);
+    } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+  },
+};
+
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two
 // distinct attacker origins and the oracle decides; a read-only GET, no active
@@ -1431,7 +1489,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
