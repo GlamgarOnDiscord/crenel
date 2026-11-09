@@ -71,6 +71,14 @@ export function sqliOracle(input: {
   if (truthyLikeBase && falsyDiffers) {
     return { verdict: "proven", kind: "sqli-boolean", reason: "TRUE condition matches the baseline while FALSE diverges (boolean-based)" };
   }
+  // Auth/filter bypass: a TRUE tautology SUCCEEDS (2xx) where the literal value
+  // and the FALSE tautology are both denied -> the condition was interpreted by
+  // the query (e.g. a login ' OR 1=1-- that returns a session). Same generic
+  // differential as the NoSQL bypass, no target signature.
+  const ok = (r: { status: number; body: string }) => r.status >= 200 && r.status < 300;
+  if (ok(truthy) && !ok(baseline) && !ok(falsy) && !same(truthy, falsy)) {
+    return { verdict: "proven", kind: "sqli-bypass", reason: "a TRUE tautology (' OR '1'='1) is accepted where the literal value and a FALSE tautology are both denied (auth/filter bypass)" };
+  }
   if (!same(truthy, falsy)) {
     return { verdict: "lead", kind: "sqli", reason: "TRUE and FALSE responses differ but not cleanly against the baseline: review by hand" };
   }
