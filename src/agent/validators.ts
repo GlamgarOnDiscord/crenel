@@ -975,14 +975,19 @@ const exploreStoredXssValidator: Validator = {
     const sReq = storeGql ? { ...injectGraphql(d.storeUrl, storeGql, payload), as: actor } : injectParam(sBase, d.storeParam as string, payload, where);
     try { await sendAs(sReq, actor, env, resolveExploreUrl(sReq.url, env.stagingUrl) ?? sUrl); } catch (e) { return no(`store request failed: ${(e as Error).message}`); }
     let body: string;
+    let ctype = "";
     try {
       const rReq: ExploreRequest = typeof d.retrieveGql === "string"
         ? { url: d.retrieveUrl, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: d.retrieveGql }), as: actor }
         : { url: d.retrieveUrl, method: "GET", as: actor };
       const res = await sendAs(rReq, actor, env, rUrl);
       body = res.body;
+      ctype = res.headers.get("content-type") ?? "";
     } catch (e) { return no(`retrieve request failed: ${(e as Error).message}`); }
-    const r = xssOracle({ token: t, body, status: 200 });
+    let r = xssOracle({ token: t, body, status: 200 });
+    // As for reflected XSS: only an HTML context runs markup. Stored markup served inside JSON is what a page may
+    // later render unescaped, which this validator cannot see: a lead.
+    if (r.verdict === "proven" && ctype && !/html|xhtml|\bxml\b|xml;/i.test(ctype)) r = { ...r, verdict: "lead", reason: `the stored markup comes back unescaped but served as ${ctype.split(";")[0]} (not an HTML page): whether a page renders it unescaped needs a browser` };
     // The probe stays stored: it is inert (onload=1 runs no code), and the result says where to delete it.
     const left = `; the inert probe "${payload}" stays in the record stored via ${pathOnly(sUrl)}: delete it, or point storeUrl at a disposable record`;
     if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}${left}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
