@@ -70,6 +70,14 @@ type Auth = { token?: string; cookie?: string; headers?: Record<string, string> 
 const authHeaders = (a?: Auth): Record<string, string> =>
   a ? { ...(a.token ? { authorization: `Bearer ${a.token}` } : {}), ...(a.cookie ? { cookie: a.cookie } : {}), ...(a.headers ?? {}) } : {};
 const hasAuth = (a?: Auth): boolean => !!(a && (a.token || a.cookie || (a.headers && Object.keys(a.headers).length > 0)));
+/** Two accounts carry the SAME custom auth headers (same non-empty key/value set):
+ * then A and B are one identity, so a "cross-tenant" read is just B reading its own
+ * object and proves nothing. Mirrors the token/cookie same-identity guard. */
+const sameCustomHeaders = (a?: Record<string, string>, b?: Record<string, string>): boolean => {
+  if (!a || !b) return false;
+  const ak = Object.keys(a), bk = Object.keys(b);
+  return ak.length > 0 && ak.length === bk.length && ak.every((k) => a[k] === b[k]);
+};
 /** A redacted curl snippet for the replay hint, matching the auth shape used. */
 const replayAuth = (a: Auth | undefined, key: string): string =>
   a?.token ? ` -H 'authorization: Bearer <${key.toUpperCase()}_TOKEN>'` : a?.cookie ? ` -H 'cookie: <${key.toUpperCase()}_SESSION>'` : hasAuth(a) ? ` -H '<${key.toUpperCase()}_AUTH>'` : "";
@@ -147,7 +155,8 @@ export const authzMatrix: Check = {
     // Distinct contexts (Teycir's guard): if A and B are the same account, every
     // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
     const same = sameIdentity(accounts.a?.token, accounts.b?.token)
-      || (accounts.a?.cookie && accounts.a.cookie === accounts.b?.cookie ? "use the same session cookie" : null);
+      || (accounts.a?.cookie && accounts.a.cookie === accounts.b?.cookie ? "use the same session cookie" : null)
+      || (sameCustomHeaders(accounts.a?.headers, accounts.b?.headers) ? "use the same custom auth headers" : null);
     if (same) {
       ctx.log(`authz-matrix: accounts A and B are the same identity (${same}), live probe skipped`);
       findings.push({

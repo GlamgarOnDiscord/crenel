@@ -25,6 +25,10 @@ test("vulnerableDeps flags only exactly-pinned below-patch versions", () => {
   assert.equal(vulnerableDeps('{"dependencies":{"lodash":"4.17.21"}}').length, 0);
   // a git/url spec is not a version
   assert.equal(vulnerableDeps('{"dependencies":{"lodash":"git+https://x"}}').length, 0);
+  // a dev-only dependency is not installed/loaded in production: not proven
+  assert.equal(vulnerableDeps('{"devDependencies":{"lodash":"4.17.4"}}').length, 0);
+  // optionalDependencies ARE runtime
+  assert.equal(vulnerableDeps('{"optionalDependencies":{"minimist":"1.2.5"}}').length, 1);
   assert.equal(vulnerableDeps("not json").length, 0);
 });
 test("vulnerableDeps reads exact versions from a package-lock (v1 and v2 shapes)", () => {

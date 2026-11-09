@@ -57,8 +57,10 @@ const lt = (a: [number, number, number], b: [number, number, number]) =>
  * `packages` / `dependencies` trees, whose `version` fields are exact). */
 function installedVersions(j: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
-  // package.json dependency maps: keep only exact pins (a range is not provable).
-  for (const k of ["dependencies", "devDependencies", "optionalDependencies"]) {
+  // Runtime dependency maps only: a vulnerable package that lives solely in
+  // devDependencies is not installed or loaded by a production build, so it does
+  // not prove the running server is affected. optionalDependencies are runtime.
+  for (const k of ["dependencies", "optionalDependencies"]) {
     const d = j[k];
     if (d && typeof d === "object" && !Array.isArray(d)) {
       for (const [n, v] of Object.entries(d as Record<string, unknown>)) {

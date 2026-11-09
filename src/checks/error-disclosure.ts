@@ -28,8 +28,11 @@ const SIGNALS = [
   /node_modules[/\\]/i,
   /\.(js|ts|mjs|cjs|py|rb|php|go):\d+/i,
   /\bat [\w.$]+\([\w.$/]+\.java:\d+\)/, // Java frame
+  /org\.springframework|System\.Web\.HttpException/i, // a framework name alone is not a stack: needs a co-occurring frame signal
 ];
-const HARD = /Traceback \(most recent call last\)|File "[^"]+", line \d+|org\.springframework|System\.Web\.HttpException/i;
+// Only shapes that are unambiguously an execution stack trace (not a framework
+// name that a generic error message might merely mention).
+const HARD = /Traceback \(most recent call last\)|File "[^"]+", line \d+/;
 
 /** True when the body looks like a server stack trace. Pure, tested. */
 export function hasStackTrace(body: string): boolean {

@@ -137,6 +137,26 @@ test("distinct contexts: identical tokens, or JWTs with the same sub, are refuse
   assert.equal(sameIdentity(jwt("u1", "a"), jwt("u2", "a")), null);
 });
 
+test("distinct contexts: accounts that share the same custom auth headers are refused, not proven", async () => {
+  const http = await import("node:http");
+  // The server would hand B's object to anyone carrying the shared API key, which
+  // looks like a cross-tenant leak — but A and B ARE the same identity here, so the
+  // guard must refuse to prove anything.
+  const server = http.createServer((_req, res) => { res.writeHead(200); res.end('{"id":"x","owner":"org_b"}'); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true });
+    const key = { "x-api-key": "shared-key-123" };
+    const options = { "authz-matrix": { resources: [{ name: "p", path: "/p/:id", methods: ["GET"] }], accounts: { a: { label: "A", headers: key }, b: { label: "B", headers: key, owns: { p: ["x"] } } } } };
+    const found = await authzMatrix.run({ scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {} });
+    assert.ok(found.some((f) => f.id === "authz-matrix:same-identity" && f.state === "unproven"), "same custom headers => same-identity, refused");
+    assert.equal(found.filter((f) => f.state === "proven").length, 0, "nothing is proven when A and B are one identity");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("a route that leaks only once in three replays is not proven", async () => {
   const http = await import("node:http");
   let n = 0;
