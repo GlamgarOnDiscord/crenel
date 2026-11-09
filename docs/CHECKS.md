@@ -32,6 +32,7 @@ empty list runs every read-only check.
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
 | null-byte-exposure | A sensitive file blocked by its extension (401/403 for *.bak, *.sql …) but served through a poison-null-byte suffix (`.bak%00.md`) | yes (blocked direct vs null-byte served, with a non-existent control) | GETs on the declared host |
 | error-disclosure | A malformed request returns a server stack trace (file paths, framework, versions) that a benign request does not | yes (benign vs malformed differential) | **malformed POST probes**: allowActiveTesting + `options.error-disclosure.enabled` |
+| cors-reflection | The server echoes an arbitrary request Origin into Access-Control-Allow-Origin with Allow-Credentials: true (confirmed on two distinct origins) | yes (two reflected origins + credentials) | GETs with an Origin header on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
