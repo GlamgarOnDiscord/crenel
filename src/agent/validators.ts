@@ -704,8 +704,15 @@ const pathOnly = (url: string) => { try { const u = new URL(url); return u.pathn
 // decide. A static page that ignores the param can never be proven (the SQLi
 // oracle needs a clean TRUE/FALSE differential). See inject.test.ts.
 
-/** Put `value` into `param` of a request, in the query string or the form body. Pure, tested. */
-export function injectParam(base: ExploreRequest, param: string, value: string, where: "query" | "body"): ExploreRequest {
+/** Put `value` into `param` of a request, in the query string, the form body, or a
+ * JSON body (so JSON REST endpoints receive the candidate too). Pure, tested. */
+export function injectParam(base: ExploreRequest, param: string, value: string, where: "query" | "body" | "json"): ExploreRequest {
+  if (where === "json") {
+    let obj: Record<string, unknown> = {};
+    if (base.body) { try { const p = JSON.parse(base.body); if (p && typeof p === "object" && !Array.isArray(p)) obj = p as Record<string, unknown>; } catch { /* non-JSON base body: start fresh */ } }
+    obj[param] = value;
+    return { ...base, method: base.method ?? "POST", body: JSON.stringify(obj), headers: { "content-type": "application/json", ...(base.headers ?? {}) } };
+  }
   if (where === "body") {
     const body = new URLSearchParams(base.body ?? "");
     body.set(param, value);
@@ -739,11 +746,11 @@ const exploreInjectionValidator: Validator = {
     if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
     const url0 = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url0) return no("not an http(s) URL");
-    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const where: "query" | "body" | "json" = d.where === "body" ? "body" : d.where === "json" ? "json" : "query";
     const baseVal = typeof d.value === "string" && d.value ? d.value : "1";
     const pname = typeof d.param === "string" ? d.param : "gql-arg";
     const actor = parseActor(d.as);
-    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "query" ? "GET" : "POST"), as: actor };
     const fetchWith = async (value: string) => {
       const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
       const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
