@@ -76,13 +76,13 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
   const [query, setQuery] = useState("");
   const errors = validateDraft(draft);
   const notes = draftNotes(draft);
-  // Only OpenAI-compatible endpoints receive a temperature: the Messages API
-  // (version 2026-10-21) refuses it and the engine's native Ollama call has none.
-  const tempApplies = draft.provider === "openai-compatible";
+  // OpenAI-compatible endpoints and Ollama (options.temperature) receive a
+  // temperature; the Messages API (version 2026-10-21) has none.
+  const tempApplies = draft.provider !== "anthropic-api";
   const prov = providerOf(draft.provider);
   const conn = connectorOf(draft.connector) ?? connectorOf("custom")!;
   const set = (patch: Partial<ModelDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const pick = (c: Connector) => { setDraft((d) => connectorToDraft(c, d.name)); setAdvanced(c.id === "custom"); setTouched(false); setStep("details"); };
+  const pick = (c: Connector) => { setDraft((d) => ({ ...connectorToDraft(c, d.name), temperature: d.temperature })); setAdvanced(c.id === "custom"); setTouched(false); setStep("details"); };
   const valid = Object.keys(errors).length === 0;
   const submit = () => { setTouched(true); if (valid) onSave(tempApplies ? draft : { ...draft, temperature: "" }); else if (errors.baseUrl || errors.apiKeyEnv || errors.temperature) setAdvanced(true); };
   const show = (k: keyof ModelDraft) => (touched || (k !== "name" && draft[k] !== "")) && errors[k];
@@ -96,7 +96,7 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
     const match = (c: Connector) => !q || c.label.toLowerCase().includes(q) || c.id.includes(q) || (c.baseUrl ?? "").includes(q);
     const ready = (c: Connector) => !!c.apiKeyEnv && !!data.modelKeys?.includes(c.apiKeyEnv);
     const tile = (c: Connector) => (
-      <button key={c.id} type="button" className={cn("cmf-conn", c.id === "custom" && "wide")} onClick={() => pick(c)}
+      <button key={c.id} type="button" className={cn("cmf-conn", c.id === "custom" && "wide")} onClick={() => pick(c)} tabIndex={c === first ? 0 : -1}
         title={c.baseUrl ?? "Un point d'accès compatible OpenAI à renseigner"}>
         <ConnectorMark c={c} size={24} />
         <span className="cmf-conn-l">{c.label}</span>
@@ -107,8 +107,18 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
     const cloud = CONNECTORS.filter((c) => !c.local && c.id !== "custom" && match(c));
     const local = [...CONNECTORS.filter((c) => c.local), connectorOf("custom")!].filter(match);
     const readyCount = CONNECTORS.filter(ready).length;
+    const first = [...cloud, ...local][0];
+    // One Tab stop for the whole grid; the arrows move between tiles (roving focus).
+    const arrows = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      const tiles = [...e.currentTarget.querySelectorAll<HTMLButtonElement>(".cmf-conn")];
+      const at = tiles.indexOf(document.activeElement as HTMLButtonElement);
+      if (!step || at < 0) { if (step && e.target instanceof HTMLInputElement && e.key === "ArrowDown") { e.preventDefault(); tiles[0]?.focus(); } return; }
+      e.preventDefault();
+      tiles[(at + step + tiles.length) % tiles.length]?.focus();
+    };
     return (
-      <div className="cmf" role="group" aria-label="Choisir un connecteur">
+      <div className="cmf" role="group" aria-label="Choisir un connecteur" onKeyDown={arrows}>
         <div className="cmf-head">
           <button type="button" className="tbtn icon" aria-label="Retour à la liste" onClick={onCancel}><ArrowLeft size={15} /></button>
           <div className="cmf-head-t">
@@ -119,7 +129,7 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
         <label className="cmf-search">
           <Search size={14} aria-hidden="true" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un fournisseur" autoFocus spellCheck={false}
-            onKeyDown={(e) => { if (e.key === "Enter") { const first = [...cloud, ...local][0]; if (first) { e.preventDefault(); pick(first); } } }} />
+            onKeyDown={(e) => { if (e.key === "Enter" && first) { e.preventDefault(); pick(first); } }} />
         </label>
         {cloud.length > 0 && <><span className="cmf-sec-l">Cloud</span><div className="cmf-conns">{cloud.map(tile)}</div></>}
         {local.length > 0 && <><span className="cmf-sec-l">Sur votre machine <em>sans clé</em></span><div className="cmf-conns">{local.map(tile)}</div></>}
@@ -153,11 +163,11 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
         {show("name") ? <span className="cmf-err">{errors.name}</span> : <span className="cmf-hint">Tel que {conn.local ? "le serveur local" : "le fournisseur"} le nomme{conn.example && !/fournisseur|nom du|…/.test(conn.example) ? `, par ex. ${conn.example}` : ""}.</span>}
       </label>
 
-      <div className={cn("cmf-key", notes.apiKeyEnv ? "bad" : key ? (keySet === true ? "ok" : keySet === false ? "miss" : "info") : "info")}>
+      <div className={cn("cmf-key", keySet === true && key ? "ok" : notes.apiKeyEnv ? "bad" : key ? (keySet === false ? "miss" : "info") : "info")}>
         <KeyRound size={14} aria-hidden="true" />
         {!key ? <span>{conn.local ? "Modèle local : aucune clé n'est envoyée." : "Aucune clé : seulement si le point d'accès n'en demande pas."}</span>
-          : notes.apiKeyEnv ? <span><b className="mono">{key}</b> n'est pas une variable de clé de modèle : le serveur refusera de l'envoyer. Utilisez un nom <b className="mono">CRENEL_LLM_*</b> ou celui du fournisseur.</span>
           : keySet === true ? <span><b className="mono">{key}</b> est définie sur la machine qui lance Crenel.</span>
+          : notes.apiKeyEnv ? <span><b className="mono">{key}</b> n'est pas une variable de clé de modèle : le serveur refusera de l'envoyer, sauf si elle est déclarée dans <b className="mono">options.llm.apiKeyEnv</b>. Sinon, utilisez un nom <b className="mono">CRENEL_LLM_*</b> ou celui du fournisseur.</span>
           : keySet === false ? <span><b className="mono">{key}</b> n'est pas définie : <code className="mono">export {key}=…</code> avant <code className="mono">crenel serve</code>.</span>
           : <span>La clé sera lue dans <b className="mono">{key}</b>, sur la machine qui lance Crenel.</span>}
       </div>
@@ -208,7 +218,11 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
 }
 
 // The connector a saved model shows: its preset, or one matching its provider.
-const connectorFor = (m: CustomModel) => connectorOf(m.connector) ?? connectorOf(m.provider === "ollama" ? "ollama" : m.provider === "anthropic-api" ? "anthropic" : "custom");
+// A model saved before connectors existed has none: guess it from its base URL, then its provider.
+const connectorFor = (m: CustomModel) => connectorOf(m.connector)
+  ?? (m.baseUrl ? CONNECTORS.find((c) => c.baseUrl && sameHost(c.baseUrl, m.baseUrl!)) : undefined)
+  ?? connectorOf(m.provider === "ollama" ? "ollama" : m.provider === "anthropic-api" ? "anthropic" : "custom");
+const sameHost = (a: string, b: string) => { try { return new URL(a).host === new URL(b).host; } catch { return false; } };
 
 // An endpoint as shown in the card: no scheme noise, no trailing slash.
 const displayUrl = (u: string) => u.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
@@ -274,19 +288,22 @@ function ModelMenu({ placement }: { placement: "up" | "down" }) {
                 {ws.customModels.length > 0 && (
                   <ModelSelectorGroup heading="Vos modèles">
                     {ws.customModels.map((m) => (
-                      <ModelSelectorItem key={m.id} value={m.id} keywords={[m.name, customSource(m).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                      // The delete button sits beside the option, not inside it: an option's content is read as its name only.
+                      <div className="msel-row" key={m.id}>
+                      <ModelSelectorItem value={m.id} keywords={[m.name, customSource(m).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
                         <span className="msel-logo"><ConnectorMark c={connectorFor(m)} size={24} /></span>
                         <span className="msel-name">
                           <span className="msel-n">{m.name}</span>
                           <span className="msel-d">{customSource(m).label}{keyMissing(m) ? <> · <span className="msel-warn" title={`${m.apiKeyEnv} n'est pas définie sur la machine qui lance Crenel`}>clé absente</span></> : modelCaps(m.id, [m], data).effort ? " · effort réglable" : ""}</span>
                         </span>
+                        <Check size={14} className="msel-check" aria-hidden="true" />
+                      </ModelSelectorItem>
                         <button type="button" className="msel-del" aria-label={`Supprimer ${m.name}`}
                           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); ws.removeCustomModel(m.id); }}>
                           <Trash2 size={13} aria-hidden="true" />
                         </button>
-                        <Check size={14} className="msel-check" aria-hidden="true" />
-                      </ModelSelectorItem>
+                      </div>
                     ))}
                   </ModelSelectorGroup>
                 )}

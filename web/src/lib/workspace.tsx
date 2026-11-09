@@ -87,7 +87,7 @@ export const customSource = (m: CustomModel): { logo: Provider; label: string } 
   return c && c.id !== "custom" ? { logo: c.logo, label: c.label } : { logo: providerOf(m.provider).logo, label: providerOf(m.provider).label };
 };
 
-const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/; // the server's rule: 128 characters at most
 // Same list as the engine (src/agent/llm.ts MODEL_KEY_ENVS): the server only
 // reads these names, CRENEL_LLM_*, or the one options.llm.apiKeyEnv declares.
 export const MODEL_KEY_ENVS = [
@@ -109,7 +109,7 @@ export function validateDraft(d: ModelDraft): Partial<Record<keyof ModelDraft, s
   if (!d.name.trim()) e.name = "Nom du modèle requis.";
   else if (/\s/.test(d.name.trim())) e.name = "Pas d'espace dans le nom du modèle.";
   const key = d.apiKeyEnv.trim();
-  if (key && !ENV_NAME.test(key)) e.apiKeyEnv = "MAJUSCULES, chiffres et _, ex. OPENAI_API_KEY.";
+  if (key && !ENV_NAME.test(key)) e.apiKeyEnv = "MAJUSCULES, chiffres et _, 128 caractères au plus, ex. OPENAI_API_KEY.";
   const base = d.baseUrl.trim();
   if (base) {
     let u: URL | null = null;
@@ -310,8 +310,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const data = useData();
   const value = useMemo<Workspace>(() => {
     const setModel = (m: string) => { setModelState(m); saveModelId(m); };
-    const addCustomModel = (m: CustomModel) => setCustomModels((l) => { const next = [...l.filter((x) => x.id !== m.id), m]; saveCustomModels(next); return next; });
-    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); return next; });
+    // The next list is computed from this render's list; state and storage are updated outside any updater.
+    const addCustomModel = (m: CustomModel) => { const next = [...customModels.filter((x) => x.id !== m.id), m]; setCustomModels(next); saveCustomModels(next); };
+    const removeCustomModel = (id: string) => { const next = customModels.filter((x) => x.id !== id); setCustomModels(next); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); };
     return {
       target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
       setTargetId, model, setModel, customModels, addCustomModel, removeCustomModel,

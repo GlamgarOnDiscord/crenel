@@ -40,6 +40,10 @@
   --danger-line: rgba(239, 68, 68, 0.3);
   --on-danger: #1C0606;
 
+  /* Success: a key that is set, a check that passed */
+  --success: #22C55E;
+  --success-ink: #4ADE80;
+
   /* Greys used as data (severity bars, neutral chart blocks) */
   --data-1: #EDEDEF;
   --data-2: #A2A3AA;
