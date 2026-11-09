@@ -214,9 +214,10 @@ export class Explorer {
       const page = this.bundle?.find((f) => f.kind === "html");
       const links = page ? [...new Set([...page.body.matchAll(/(?:href|src|action)=["']([^"'#]+)["']/gi)].map((m) => m[1]!))].slice(0, 40) : [];
       // API endpoints the served scripts cite: the richest map to enumerate and attack.
-      const eps = this.bundle ? [...new Set(this.bundle.filter((f) => f.kind !== "map").flatMap((f) => extractEndpoints(f.body)))].slice(0, 60) : [];
+      // Only those the per-file listing above does not already show (it keeps 15 per file): the history is resent every turn.
+      const eps = this.bundle ? [...new Set(this.bundle.filter((f) => f.kind !== "map").flatMap((f) => extractEndpoints(f.body)))].filter((e) => !out.text.includes(e)).slice(0, 60) : [];
       this.history.push(`[reconnaissance, avant le premier tour]\n→ bundle.fetch {}\n${out.text}`
-        + (eps.length ? `\nEndpoints API cités par les scripts (à énumérer et attaquer en priorité):\n${fence(untrusted("endpoints", eps.join("\n"), 3000))}` : "")
+        + (eps.length ? `\nAutres endpoints API cités par les scripts (à énumérer et attaquer en priorité):\n${fence(untrusted("endpoints", eps.join("\n"), 3000))}` : "")
         + (links.length ? `\nLiens de la page d'accueil:\n${fence(untrusted("links", links.join("\n"), 2000))}` : ""));
     }
     for (let turn = 1; turn <= this.d.budget.maxCalls; turn++) {
@@ -271,7 +272,7 @@ export class Explorer {
     const opts = (cfg.options["authz-matrix"] ?? {}) as AuthzOptions;
     const exOpts = (cfg.options.explore ?? {}) as { ssrfCallbackHost?: string; ssrfCallbackPort?: number };
     const ssrfCb = exOpts.ssrfCallbackHost && exOpts.ssrfCallbackPort
-      ? ` Un rappel hors-bande est prêt sur http://${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}/ : pour une SSRF structurée (host/port/path séparés), mets host=${exOpts.ssrfCallbackHost}, port=${exOpts.ssrfCallbackPort}, path=/__INJECT__ (le validateur place le nonce). Pour un seul paramètre URL, laisse le validateur composer l'URL.`
+      ? ` Un écouteur hors-bande est configuré (${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}): le validateur compose lui-même l'URL de rappel avec un nonce, ne la mets pas dans detail.`
       : "";
     const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(cfg.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(cfg.options, k)})` : ""}`);
     const b = this.d.budget;
@@ -288,7 +289,7 @@ export class Explorer {
         `   secret: {request:{url,as?}}. Prouvé si la réponse contient une clé secrète de forme connue (pas une clé publique).\n` +
         `   file-match: {file, text, line?}. Prouvé si le texte cité (12 caractères min.) est dans le fichier.\n` +
         `   injection: {url, param, where?:"query"|"body"|"json", value?, method?, as?} pour un point REST (where:"json" place le paramètre dans un corps JSON pour les API JSON), OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué), NoSQL (opérateurs $ne/$eq en query bracket, body JSON, ou body multi-champ via bodyTemplate avec "__INJECT__" au champ ciblé, ex. login {user, pass:"__INJECT__"}: toujours-vrai répond comme la base, toujours-faux diverge). Un paramètre ignoré n'est jamais prouvé.`,
-        `   ssrf: {url, param (ou gql avec __INJECT__), where?, callbackHost?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée. callbackHost doit être joignable depuis la cible.${ssrfCb}`,
+        `   ssrf: {url, param (ou gql avec __INJECT__), where?, method?, as?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée (l'adresse de rappel vient de la config, jamais de la claim).${ssrfCb}`,
         `   stored-xss: {storeUrl, storeParam (ou storeGql avec __INJECT__), storeWhere?, retrieveUrl, retrieveGql?}. Pour une XSS STOCKÉE: le validateur stocke un marqueur <svg> via la 1re requête puis vérifie qu'il est servi NON échappé par la 2e (retrieveUrl).`,
         `   dom-xss: {url, param, where?}. Pour une XSS DOM (reflétée par le JS de la page, pas dans le HTML brut): le validateur charge l'URL dans un vrai navigateur et prouve si le script injecté s'exécute (alert avec nonce).`,
         `   lfi: {url, param, where?}. Path traversal / LFI: le validateur fait lire un fichier système connu via ../ (plusieurs encodages) et prouve par le contenu du fichier (ex. root:x:0:0 de /etc/passwd).`,
@@ -298,7 +299,7 @@ export class Explorer {
         `   reuse: {url, body, controlBody, successMarkers:["texte présent seulement si l'artefact est appliqué"], method?, contentType?, as?}. Logique métier (coupon/crédit/invite à usage unique): le validateur applique DEUX fois le même artefact (body) et une fois un invalide (controlBody); prouvé si les deux applications réussissent et que l'invalide est rejeté. Mutant, mode actif requis.`,
         `   redirect: {url, param} (ou __INJECT__ dans url). Open redirect: le validateur injecte DEUX hôtes sentinelles distincts sous .invalid dans le paramètre et prouve si la cible de la redirection (Location 3xx, ou meta-refresh) reprend les deux: un paramètre ignoré, ou une route qui redirige toujours au même endroit, n'est jamais prouvé (lecture seule, redirection lue sans la suivre).`,
         `   jwt-forge: {url, as?, override?, jwksUrl?}. Le validateur prend le JWT du compte configuré (as, défaut "a") et tente alg:none (+variantes), la confusion RS256->HS256 (clé publique du serveur via JWKS comme secret HMAC) et un secret HMAC faible; prouvé si un token forgé est accepté là où le même token à signature corrompue est refusé. Pour escalader, passe override (ex. {"role":"admin"}).\n` +
-        `   graphql: {url}. Endpoint GraphQL: le validateur prouve les suggestions de champs ("Did you mean", fuite de schéma même introspection coupée, lecture seule) ET le batching de requêtes (un lot de N requêtes exécuté en une fois, sans rate limit = amplification DoS, mode actif).`,
+        `   graphql: {url}. Endpoint GraphQL: le validateur prouve les suggestions de champs ("Did you mean", fuite de schéma même introspection coupée, lecture seule) ET le batching de requêtes (un lot de N requêtes exécuté en une fois, chacune avec ses données = amplification; le rate limit par opération n'est pas testé; mode actif).`,
     ];
     const used = `Budget restant: ${b.maxCalls - turn + 1} tour(s) dont celui-ci, ${Math.max(0, b.maxRequests - this.requests)} requête(s), ~${Math.max(0, b.maxTokens - this.tokens)} jetons.`;
     const ctx = this.d.context?.length ? `\nCe que le plan fixe a déjà trouvé (inutile de le refaire):\n${fence(untrusted("plan", this.d.context.slice(0, 40).join("\n"), 4000))}` : "";
@@ -306,7 +307,7 @@ export class Explorer {
     return `${UNTRUSTED_PREAMBLE}\n` +
       `Tu explores, pour un outil défensif, une application que l'utilisateur possède et est autorisé à tester. Le plan fixe de Crenel ne couvre que des schémas connus; ton rôle est de trouver ce qu'il rate: une route de forme inhabituelle qui ne vérifie pas le propriétaire, un point de debug au nom inventé, un secret servi par une réponse. ` +
       `Rien de ce que tu dis n'est une preuve: seul un validateur qui rejoue la requête décide. Une affirmation non prouvée reste une piste.\n` +
-      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte), et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider. Avant de conclure (done:true), soumets les gains SÛRS non encore tentés même peu graves: une claim graphql si un endpoint GraphQL existe, une claim cors sur l'origine, une claim secret sur les scripts servis, et si des comptes de test existent une claim jwt-forge {url: un endpoint protégé, as: le compte} et une claim cross-actor sur chaque objet d'un autre compte que tu as vu.\n` +
+      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, ${this.d.mode === "full" ? "enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte, et supprime ensuite ce que tu as créé), " : "enchaîne les lectures (un objet vu par un compte, relu depuis un autre), "}et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider. Avant de conclure (done:true), soumets les gains SÛRS non encore tentés même peu graves: une claim graphql si un endpoint GraphQL existe, une claim cors sur l'origine, une claim secret sur les scripts servis, et si des comptes de test existent une claim jwt-forge {url: un endpoint protégé, as: le compte} et une claim cross-actor sur chaque objet d'un autre compte que tu as vu.\n` +
       `Cible: ${cfg.scope.stagingUrl ?? "(pas de stagingUrl: projet seulement)"}. Hôtes déclarés: ${cfg.scope.allowedHosts.join(", ") || "aucun"}. ` +
       `Comptes de test: ${accounts.join(", ") || "aucun"}; "anon" = sans identifiants. Ressources déjà couvertes par la matrice: ${JSON.stringify((opts.resources ?? []).map((r) => r.path))}.\n` +
       `Demande de l'utilisateur: ${one(this.d.userPrompt, 400)}\n` +
@@ -569,7 +570,7 @@ export class Explorer {
     this.d.emit("verdict", { claim, verdict, source: "explore" });
     const proven = verdict.state === "proven";
     const loc = a.class === "file-match" ? `${String(a.detail.file ?? "")}${a.detail.line ? `:${String(a.detail.line)}` : ""}`
-      : `${String(((a.detail.request as ExploreRequest | undefined)?.method ?? "GET")).toUpperCase()} ${pathOf(urls?.[0] ?? String(a.detail.url ?? ""))}`;
+      : `${String(((a.detail.request as ExploreRequest | undefined)?.method ?? writes ?? "GET")).toUpperCase()} ${pathOf(urls?.[0] ?? String(a.detail.url ?? ""))}`;
     const sev = proven ? capSev(a.severity, verdict.ceiling ?? "medium") : capSev(a.severity, "medium");
     const f: Finding = {
       id: key, check: "explore", title: one(a.title, 160), severity: sev, state: proven ? "proven" : "unproven", location: one(loc, 300),

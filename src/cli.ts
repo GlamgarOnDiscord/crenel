@@ -20,7 +20,7 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
-import { claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
+import { checkModelEndpoint, claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
 import { crawlLiveBundle, extractEndpoints } from "./checks/live-bundle.js";
 import { runAutoProbe, type Endpoint } from "./agent/autoprobe.js";
 import { Scope } from "./core/scope.js";
@@ -401,6 +401,14 @@ async function main(): Promise<number> {
       // tuned by --model-base-url / --model-api-key-env or options.llm. Keys come
       // only from the env var named by --model-api-key-env/apiKeyEnv, never argv.
       if (typeof flags.effort === "string" && !parseEffort(flags.effort)) { process.stderr.write(`--effort must be low, medium, high, xhigh or max\n`); return 2; }
+      // The model endpoint is outside the scoped client (it is not a scan target): it gets the same checks as the
+      // console's, so prompts that carry target responses go over https (or to the loopback), never to a scan target,
+      // and the key's variable is a NAME. On the owner's own command line any variable name they choose is allowed.
+      const keyFlag = typeof flags["model-api-key-env"] === "string" ? flags["model-api-key-env"] : undefined;
+      const cfgLlm = (config.options.llm ?? {}) as { baseUrl?: unknown; apiKeyEnv?: unknown };
+      const effBase = typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : typeof cfgLlm.baseUrl === "string" ? cfgLlm.baseUrl : undefined;
+      const badEndpoint = checkModelEndpoint({ baseUrl: effBase, apiKeyEnv: keyFlag, scanHosts: config.scope.allowedHosts, configKeyEnv: keyFlag });
+      if (badEndpoint) { process.stderr.write(`${badEndpoint}\n`); return 2; }
       const sel = selectLlm({
         spec: typeof flags.model === "string" ? flags.model : undefined,
         baseUrl: typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : undefined,
@@ -545,7 +553,7 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus-4-8] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus-4-8] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
-      "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--effort low|medium|high|max] [--max-calls N] [--json] [--state dir]",
+      "  crenel explore [--config path] [--mode assist|full] [--model sonnet|openai:<m>|ollama:<m>|anthropic-api:<m>] [--model-base-url URL] [--model-api-key-env NAME] [--effort low|medium|high|max] [--max-calls N] [--llm-script file] [--json] [--state dir]",
       "                 free exploration by the model (claude -p); claims proven only by a validator's replay",
       "                 [--llm-script turns.json]: replay a recorded exploration, no model spent",
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",
