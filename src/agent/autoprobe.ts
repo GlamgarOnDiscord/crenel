@@ -12,6 +12,7 @@
 
 import type { Claim, ClaimVerdict, ValidatorEnv } from "./validators.js";
 import { validateClaim, actorToken } from "./validators.js";
+import { safeFetch } from "../core/net.js";
 
 export interface Endpoint { url: string; params?: string[]; graphql?: boolean }
 
@@ -50,9 +51,56 @@ export interface AutoProbeResult { proven: ClaimVerdict[]; tried: number }
 export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoint[]; origin?: string }, opts: { maxClaims?: number } = {}): Promise<AutoProbeResult> {
   const accounts = (["a", "b", "c"] as const).filter((a) => actorToken(env.options, a));
   const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin }).slice(0, opts.maxClaims ?? 120);
+  // A GraphQL endpoint with introspection open: its own String arguments become injection claims.
+  for (const ep of input.endpoints.filter((e) => e.graphql)) {
+    try {
+      const r = await safeFetch(ep.url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: GRAPHQL_SCHEMA_QUERY }), maxBytes: 2 * 1024 * 1024 });
+      if (r.status >= 200 && r.status < 300) claims.push(...graphqlArgClaims(r.body, ep.url, { mutations: env.scope.allowActiveTesting }));
+    } catch { /* no schema: nothing to add */ }
+  }
   const proven: ClaimVerdict[] = [];
   for (const c of claims) {
     try { const v = await validateClaim(c, env); if (v.state === "proven") proven.push(v); } catch { /* a probe that throws is not a proof */ }
   }
   return { proven, tried: claims.length };
+}
+
+/* GraphQL arguments from the API's own schema. When introspection is open (the
+ * floor check proves that separately), every String argument of a root field is
+ * a parameter like a query-string one: one injection claim each, with a template
+ * that selects the field's scalar results so a differential shows. Mutations only
+ * when active testing is on (they write). Generic: the names come from the
+ * target's schema, the techniques from the validators. Pure. */
+export const GRAPHQL_SCHEMA_QUERY = "query{__schema{queryType{name}mutationType{name}types{name kind fields{name type{kind name ofType{kind name ofType{kind name}}} args{name type{kind name ofType{kind name}}}}}}}";
+
+interface GqlTypeRef { kind: string; name: string | null; ofType?: GqlTypeRef | null }
+interface GqlField { name: string; type: GqlTypeRef; args?: { name: string; type: GqlTypeRef }[] }
+interface GqlType { name: string; kind: string; fields?: GqlField[] | null }
+
+const named = (t: GqlTypeRef | null | undefined): GqlTypeRef | null => (!t ? null : t.name ? t : named(t.ofType));
+
+export function graphqlArgClaims(schemaBody: string, url: string, opts: { mutations: boolean; max?: number }): Claim[] {
+  let s: { queryType?: { name: string } | null; mutationType?: { name: string } | null; types?: GqlType[] };
+  try { s = (JSON.parse(schemaBody) as { data?: { __schema?: typeof s } }).data?.__schema ?? {}; } catch { return []; }
+  const types = new Map((s.types ?? []).map((t) => [t.name, t]));
+  const selection = (t: GqlTypeRef): string | null => {
+    const n = named(t);
+    if (!n) return null;
+    if (n.kind === "SCALAR" || n.kind === "ENUM") return "";
+    const fields = (types.get(n.name ?? "")?.fields ?? []).filter((f) => { const k = named(f.type)?.kind; return k === "SCALAR" || k === "ENUM"; }).slice(0, 8);
+    return ` { __typename${fields.map((f) => ` ${f.name}`).join("")} }`;
+  };
+  const claims: Claim[] = [];
+  const roots: [string | undefined, string][] = [[s.queryType?.name, "query"], ...(opts.mutations ? [[s.mutationType?.name, "mutation"] as [string | undefined, string]] : [])];
+  for (const [root, op] of roots) {
+    for (const f of (root ? types.get(root)?.fields : undefined) ?? []) {
+      const sel = selection(f.type);
+      if (sel === null) continue;
+      for (const a of f.args ?? []) {
+        if (named(a.type)?.name !== "String" || !/^[_A-Za-z]\w*$/.test(a.name) || !/^[_A-Za-z]\w*$/.test(f.name)) continue;
+        claims.push({ id: `auto:gql:${claims.length}`, class: "explore.injection", source: "check", detail: { url, gql: `${op} { ${f.name}(${a.name}: "__INJECT__")${sel} }`, param: `${f.name}.${a.name}` } });
+      }
+    }
+  }
+  return claims.slice(0, opts.max ?? 40);
 }

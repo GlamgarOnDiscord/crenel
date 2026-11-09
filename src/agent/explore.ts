@@ -662,7 +662,7 @@ export function lossStage(v: ClaimVerdict): string {
 }
 
 /** Most requests a claim's validator can send, reserved before it runs so a proof is never cut halfway. */
-const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 32, graphql: 13, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
+const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 44, graphql: 13, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
 
 /** The state-changing method a claim's validator sends to its first URL, or null when it only reads. */
 export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>): string | null {

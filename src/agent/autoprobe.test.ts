@@ -43,3 +43,23 @@ test("runAutoProbe proves a public object leak deterministically (no model)", as
     assert.ok(r.proven.some((v) => /no token at all reads/i.test(v.reason)), `anon leak proven deterministically: ${JSON.stringify(r.proven.map((p) => p.reason))}`);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("graphqlArgClaims: every String argument of a root field becomes an injection claim; mutations only when asked", async () => {
+  const { graphqlArgClaims } = await import("./autoprobe.js");
+  const t = (kind: string, name: string | null, ofType: unknown = null) => ({ kind, name, ofType });
+  const schema = JSON.stringify({ data: { __schema: {
+    queryType: { name: "Q" }, mutationType: { name: "M" },
+    types: [
+      { name: "Q", kind: "OBJECT", fields: [
+        { name: "items", type: t("LIST", null, t("OBJECT", "Item")), args: [{ name: "filter", type: t("SCALAR", "String") }, { name: "limit", type: t("SCALAR", "Int") }] },
+        { name: "ping", type: t("SCALAR", "String"), args: [{ name: "msg", type: t("NON_NULL", null, t("SCALAR", "String")) }] },
+      ] },
+      { name: "M", kind: "OBJECT", fields: [{ name: "add", type: t("OBJECT", "Item"), args: [{ name: "title", type: t("SCALAR", "String") }] }] },
+      { name: "Item", kind: "OBJECT", fields: [{ name: "id", type: t("SCALAR", "Int") }, { name: "owner", type: t("OBJECT", "User") }] },
+    ],
+  } } });
+  const q = graphqlArgClaims(schema, "http://x/graphql", { mutations: false }).map((c) => c.detail.gql);
+  assert.deepEqual(q, ['query { items(filter: "__INJECT__") { __typename id } }', 'query { ping(msg: "__INJECT__") }']);
+  assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).length, 3);
+  assert.deepEqual(graphqlArgClaims("not json", "http://x/graphql", { mutations: true }), []);
+});

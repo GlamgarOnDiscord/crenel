@@ -470,6 +470,16 @@ export function controlUrl(url: string, id?: string): string {
   return u.toString();
 }
 
+/** True when the URL carries an object identifier: the claim's id, or a path segment or query value shaped like
+ * one (digits, a UUID, or a token mixing letters and digits). A collection ("/api/Addresses") or a "my …" route does not. */
+export function namesObject(url: string, id?: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (id && id.length >= 1 && (u.pathname.split("/").includes(id) || [...u.searchParams.values()].includes(id))) return true;
+  const idLike = (v: string) => /^\d+$/.test(v) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || (/[a-z]/i.test(v) && /\d/.test(v) && /^[\w-]{3,64}$/.test(v) && !/^v\d+$/i.test(v));
+  return u.pathname.split("/").filter(Boolean).some(idLike) || [...u.searchParams.values()].some(idLike);
+}
+
 const reqLine = (method: string, url: string, actor?: Actor) => `${method} ${url}\nauthorization: ${!actor || actor === "anon" ? "(none)" : `Bearer <${actor.toUpperCase()}_TOKEN>`}`;
 const parseActor = (x: unknown): Actor | undefined => (ACTORS as readonly unknown[]).includes(x) ? (x as Actor) : undefined;
 
@@ -595,6 +605,11 @@ const exploreCrossActorValidator: Validator = {
       control: `GET ${ctl} -> HTTP ${controlRes.status}; owner (${owner.toUpperCase()}) -> HTTP ${ownerRes.status}, sha256 ${sha(ownerRes.body).slice(0, 12)}`,
     };
     if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
+    // Without a marker the leak rests on "same body as the owner". That holds only for a URL that names one object:
+    // on a collection or a "my …" route every caller gets their own scope, and two empty or default scopes are equal.
+    if (!(marker && attackerRes.body.includes(marker)) && !namesObject(url, id)) {
+      return no(`the attacker gets the same body as ${owner.toUpperCase()}, but ${path} names no object: each account may simply get its own (empty or default) scope. Declare or derive ${owner.toUpperCase()}'s marker, or claim a URL with ${owner.toUpperCase()}'s object id`, evidence);
+    }
     // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out —
     // UNLESS that anonymous read carries the owner's own marker, which makes it a broken-authentication leak (worse
     // than cross-tenant). A generic catalog served identically to everyone has no per-owner marker, so it stays public.
@@ -793,12 +808,25 @@ const exploreInjectionValidator: Validator = {
         { t: `${baseVal}')) OR (('1'='1`, f: `${baseVal}')) AND (('1'='2` },   // two parens
         { t: `${baseVal}" OR "1"="1`, f: `${baseVal}" AND "1"="2` },           // double quote
         { t: `${baseVal} OR 1=1`, f: `${baseVal} AND 1=2` },                   // numeric, no quote
+        // AND-TRUE keeps the baseline's rows where OR-TRUE returns everything (a search, a list): the same
+        // closers with AND, and with a LIKE wildcard before the quote (a value inside '%…%').
+        { t: `${baseVal}' AND '1'='1`, f: `${baseVal}' AND '1'='2` },
+        { t: `${baseVal}') AND 1=1-- `, f: `${baseVal}') AND 1=2-- ` },
+        { t: `${baseVal}')) AND 1=1-- `, f: `${baseVal}')) AND 1=2-- ` },
+        { t: `${baseVal}%' AND '1'='1`, f: `${baseVal}%' AND '1'='2` },
+        { t: `${baseVal}%') AND 1=1-- `, f: `${baseVal}%') AND 1=2-- ` },
+        { t: `${baseVal}%')) AND 1=1-- `, f: `${baseVal}%')) AND 1=2-- ` },
       ];
       let decided = false;
       for (const c of contexts) {
         const truthy = await fetchWith(c.t);
         const falsy = await fetchWith(c.f);
-        const r = sqliOracle({ baseline, truthy, falsy });
+        let r = sqliOracle({ baseline, truthy, falsy });
+        // TRUE and FALSE differ but TRUE is not the baseline: ask the same TRUE written differently.
+        if (r.verdict === "lead") {
+          const t2 = c.t.replace("1=1", "2=2").replace("'1'='1", "'2'='2").replace('"1"="1', '"2"="2');
+          if (t2 !== c.t) r = sqliOracle({ baseline, truthy, falsy, truthy2: await fetchWith(t2) });
+        }
         if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `SQL injection in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
         if (r.verdict === "lead" && !decided) { leads.push(r.reason); decided = true; }
       }

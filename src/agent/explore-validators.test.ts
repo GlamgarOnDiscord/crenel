@@ -689,3 +689,30 @@ test("injection: markup reflected in a JSON response is NOT proven XSS (wrong co
     assert.equal(v.state, "unproven", v.reason); // JSON reflection is a lead, not proven XSS
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("cross-actor: two accounts reading the same empty \"my …\" collection is not a leak", async () => {
+  // Each caller gets their own scope; A and B both have no addresses, so the bodies are identical.
+  const srv = createServer((req, res) => {
+    const ok = req.headers.authorization === "Bearer tok-a" || req.headers.authorization === "Bearer tok-b";
+    if (req.url !== "/api/Addresses") { res.writeHead(404); res.end("{}"); return; }
+    res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+    res.end(ok ? JSON.stringify({ status: "success", data: [] }) : "{}");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-coll-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+      projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { token: "tok-b" } } } },
+    };
+    const v = await validateClaim(claim("explore.cross-actor", { url: "/api/Addresses", attacker: "a", owner: "b" }), env);
+    assert.equal(v.state, "unproven");
+    assert.match(v.reason, /names no object/);
+    const { namesObject } = await import("./validators.js");
+    assert.equal(namesObject(`${base}/api/Addresses`), false);
+    assert.equal(namesObject(`${base}/rest/basket/7`), true);
+    assert.equal(namesObject(`${base}/api/v1/items?id=proj_b_1`), true);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
