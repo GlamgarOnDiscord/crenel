@@ -834,7 +834,7 @@ test("priv-escalation: A's access to an admin gate flips from 403 to 200 after A
   }
 });
 
-test("data-exposure: a list returning two tenants' markers to A is proven; a single shared object or one marker is not", async () => {
+test("data-exposure: a list returning two tenants' markers to A is surfaced as a lead (not proven); a single object or one marker is not", async () => {
   const srv = createServer((req, res) => {
     const who = req.headers.authorization === "Bearer tok-a" ? "a" : null;
     const json = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
@@ -850,9 +850,11 @@ test("data-exposure: a list returning two tenants' markers to A is proven; a sin
   try {
     const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
       options: { "authz-matrix": { accounts: { a: { token: "tok-a", marker: "mk_a" }, b: { token: "tok-b", marker: "mk_b" }, c: { token: "tok-c", marker: "mk_c" } } } } };
+    // Lead-only: an aggregate of several accounts' markers is surfaced for review, never proven (a team roster looks the same).
     const leak = await validateClaim(claim("explore.data-exposure", { url: "/api/all-users", as: "a" }), env);
-    assert.equal(leak.state, "proven", leak.reason);
+    assert.equal(leak.state, "unproven", leak.reason);
     assert.match(leak.reason, /markers of 2 other accounts|other accounts/);
+    assert.match(leak.reason, /entitled|review/i);
     assert.equal((await validateClaim(claim("explore.data-exposure", { url: "/api/my-profile", as: "a" }), env)).state, "unproven");
     assert.equal((await validateClaim(claim("explore.data-exposure", { url: "/api/one-foreign", as: "a" }), env)).state, "unproven", "a single foreign object is cross-actor, not aggregate exposure");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -992,5 +994,24 @@ test("cross-actor: identical PUBLIC content to A and B (a shared article, no own
       options: { "authz-matrix": { accounts: { a: { token: "ta" }, b: { token: "tb" } } } } };
     const v = await validateClaim(claim("explore.cross-actor", { url: "/help/5", attacker: "a", owner: "b" }), env);
     assert.equal(v.state, "unproven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("data-exposure: A's own team roster (entitled teammates) is a lead, never proven", async () => {
+  // A legitimately sees its team's members (markers b, c); anon is denied. Indistinguishable from a leak, so never proven.
+  const srv = createServer((req, res) => {
+    const ok = req.headers.authorization === "Bearer ta";
+    res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+    res.end(ok ? JSON.stringify({ team: [{ m: "mk_a" }, { m: "mk_b" }, { m: "mk_c" }] }) : "{}");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp6-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "ta", marker: "mk_a" }, b: { token: "tb", marker: "mk_b" }, c: { token: "tc", marker: "mk_c" } } } } };
+    const v = await validateClaim(claim("explore.data-exposure", { url: "/my/team", as: "a" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+    assert.match(v.reason, /entitled|review/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
