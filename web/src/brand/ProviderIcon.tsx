@@ -14,7 +14,6 @@ import gemini from "@lobehub/icons-static-svg/icons/gemini-color.svg?raw";
 import xai from "@lobehub/icons-static-svg/icons/xai.svg?raw";
 import together from "@lobehub/icons-static-svg/icons/together-color.svg?raw";
 import fireworks from "@lobehub/icons-static-svg/icons/fireworks-color.svg?raw";
-import perplexity from "@lobehub/icons-static-svg/icons/perplexity-color.svg?raw";
 import ollama from "@lobehub/icons-static-svg/icons/ollama.svg?raw";
 import lmstudio from "@lobehub/icons-static-svg/icons/lmstudio.svg?raw";
 import vllm from "@lobehub/icons-static-svg/icons/vllm-color.svg?raw";
@@ -23,7 +22,7 @@ import vllm from "@lobehub/icons-static-svg/icons/vllm-color.svg?raw";
 const clean = (svg: string) => svg.replace(/\s(width|height)="[^"]*"/g, "").replace(/<title>.*?<\/title>/, "");
 
 const ICONS: Record<string, string> = Object.fromEntries(Object.entries({
-  openai, anthropic: claude, openrouter, groq, deepseek, mistral, gemini, xai, together, fireworks, perplexity, ollama, lmstudio, vllm,
+  openai, anthropic: claude, openrouter, groq, deepseek, mistral, gemini, xai, together, fireworks, ollama, lmstudio, vllm,
 }).map(([k, v]) => [k, clean(v)]));
 
 export const hasProviderIcon = (id: string | undefined) => !!id && Object.prototype.hasOwnProperty.call(ICONS, id);

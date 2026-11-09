@@ -91,7 +91,10 @@ export function claudeCli(model = DEFAULT_MODEL, opts: { effort?: Effort } = {})
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434";
 const DEFAULT_ANTHROPIC_BASE = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
+// The latest Messages API version (platform.claude.com/docs/en/api/versioning,
+// checked 2026-11-09). It drops temperature/top_p/top_k, which this provider
+// never sends, and changes nothing else in the request shape used here.
+const ANTHROPIC_VERSION = "2026-10-21";
 
 // One AbortSignal that fires on the caller's signal OR after timeoutMs, mirroring
 // runCli's `timeout`. Manual (no AbortSignal.any) so typing stays on @types/node.
@@ -138,6 +141,9 @@ export function endpointUrl(base: string, versioned: string, resource: string): 
   const b = base.replace(/\/+$/, "");
   let path = "";
   try { path = new URL(b).pathname.replace(/\/+$/, ""); } catch { /* left to fetch to reject */ }
+  // A full endpoint is taken as given (DeepSeek documents
+  // https://api.deepseek.com/chat/completions, with no version segment).
+  if (path.endsWith(resource)) return b;
   return path ? b + resource : b + versioned + resource;
 }
 
@@ -194,6 +200,8 @@ export function ollamaLlm(model: string, opts: { baseUrl?: string } = {}): Llm {
  * later, Fable and Mythos. Older ones reject it (400), so it is not sent there.
  */
 export function anthropicSupportsEffort(model: string): boolean {
+  // The effort page's supportedModels (platform.claude.com/docs/en/build-with-
+  // claude/effort, checked 2026-11-09) minus Opus 4.5, which has no `max`.
   return /^claude-(opus-(4-[6-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|haiku-[5-9]|fable|mythos)/.test(model);
 }
 
@@ -225,7 +233,7 @@ export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseU
 // owner's own file). GITHUB_TOKEN, AWS_* and the like are refused.
 export const MODEL_KEY_ENVS = new Set([
   "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY",
-  "GEMINI_API_KEY", "XAI_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "PERPLEXITY_API_KEY",
+  "GEMINI_API_KEY", "XAI_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY",
 ]);
 
 /**

@@ -88,7 +88,7 @@ test("anthropic-api: reads content[0].text, sends x-api-key + anthropic-version"
     const llm = anthropicApiLlm("claude-x", { baseUrl: s.base, apiKeyEnv: "CRENEL_TEST_ANTHROPIC" });
     assert.equal(await llm.ask("ping"), "claude says hi");
     assert.equal(s.seen[0].headers["x-api-key"], "sk-ant-xyz");
-    assert.equal(s.seen[0].headers["anthropic-version"], "2023-06-01");
+    assert.equal(s.seen[0].headers["anthropic-version"], "2026-10-21");
     assert.equal(s.seen[0].body.model, "claude-x");
     assert.ok(typeof s.seen[0].body.max_tokens === "number");
   } finally { delete process.env.CRENEL_TEST_ANTHROPIC; s.close(); }
@@ -235,4 +235,9 @@ test("anthropic-api: output_config.effort only for models that take it", async (
     assert.deepEqual(bodies[0]?.output_config, { effort: "max" });
     assert.equal(bodies[1]?.output_config, undefined);
   } finally { delete process.env.CRENEL_LLM_TEST_ANTHROPIC; await new Promise<void>((r) => srv.close(() => r())); }
+});
+
+test("endpointUrl: a full endpoint is taken as given (DeepSeek's documented URL)", () => {
+  assert.equal(endpointUrl("https://api.deepseek.com/chat/completions", "/v1", "/chat/completions"), "https://api.deepseek.com/chat/completions");
+  assert.equal(endpointUrl("https://api.anthropic.com/v1/messages", "/v1", "/messages"), "https://api.anthropic.com/v1/messages");
 });
