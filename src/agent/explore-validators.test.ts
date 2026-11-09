@@ -421,6 +421,29 @@ test("cors: a server reflecting any origin with credentials is proven; a fixed a
   }
 });
 
+test("redirect: a route that redirects to the ?next= value is proven; one that ignores it is not", async () => {
+  for (const vulnerable of [true, false]) {
+    const srv = createServer((req, res) => {
+      const next = new URL(req.url!, "http://x").searchParams.get("next") ?? "";
+      // vulnerable: send the browser wherever ?next points. fixed: always home.
+      res.writeHead(302, { location: vulnerable && next ? next : "/dashboard" });
+      res.end();
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-redir-"));
+    try {
+      const env: ValidatorEnv = {
+        scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+        projectDir: dir, stagingUrl: base, checks: [], options: {},
+      };
+      const v = await validateClaim(claim("explore.redirect", { url: "/login", param: "next" }), env);
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.equal(v.ceiling, "medium"); }
+      else assert.equal(v.state, "unproven", v.reason);
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test("cross-actor: an endpoint public to anon that carries the owner's marker escalates to a proven anonymous leak", async () => {
   // /obj/:id returns B's object (with B's marker) to EVERYONE incl. anon; a non-existent id -> 404.
   // Claimed as attacker A, the validator must escalate to a proven broken-authentication leak (anon).

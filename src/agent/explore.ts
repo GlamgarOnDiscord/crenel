@@ -91,7 +91,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", redirect: "explore.redirect", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -296,6 +296,7 @@ export class Explorer {
         `   mass-assignment: {url, field, value, update?, readUrl?, method?, bodyType?, as?}. Un champ que le client ne devrait pas pouvoir fixer (role, isAdmin, credits, plan, verified…): le validateur lit l'objet de l'acteur, fait un update SANS le champ (contrôle: il ne doit pas bouger) puis AVEC field=value, et prouve si la relecture montre exactement value. Mutant, sur l'objet de l'acteur, donc mode actif requis.`,
         `   cors: {url}. Mauvaise config CORS: le validateur envoie deux origines attaquantes distinctes et prouve si Access-Control-Allow-Origin les reflète toutes deux avec Allow-Credentials: true (lecture seule).`,
         `   reuse: {url, body, controlBody, successMarkers:["texte présent seulement si l'artefact est appliqué"], method?, contentType?, as?}. Logique métier (coupon/crédit/invite à usage unique): le validateur applique DEUX fois le même artefact (body) et une fois un invalide (controlBody); prouvé si les deux applications réussissent et que l'invalide est rejeté. Mutant, mode actif requis.`,
+        `   redirect: {url, param} (ou __INJECT__ dans url). Open redirect: le validateur injecte DEUX hôtes sentinelles distincts sous .invalid dans le paramètre et prouve si la cible de la redirection (Location 3xx, ou meta-refresh) reprend les deux: un paramètre ignoré, ou une route qui redirige toujours au même endroit, n'est jamais prouvé (lecture seule, redirection lue sans la suivre).`,
         `   jwt-forge: {url, as?, override?, jwksUrl?}. Le validateur prend le JWT du compte configuré (as, défaut "a") et tente alg:none (+variantes), la confusion RS256->HS256 (clé publique du serveur via JWKS comme secret HMAC) et un secret HMAC faible; prouvé si un token forgé est accepté là où le même token à signature corrompue est refusé. Pour escalader, passe override (ex. {"role":"admin"}).\n` +
         `   graphql: {url}. Endpoint GraphQL: le validateur prouve les suggestions de champs ("Did you mean", fuite de schéma même introspection coupée, lecture seule) ET le batching de requêtes (un lot de N requêtes exécuté en une fois, sans rate limit = amplification DoS, mode actif).`,
     ];
@@ -592,7 +593,7 @@ function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, 
     const urls = [d.storeUrl, d.retrieveUrl].filter((x): x is string => typeof x === "string").map((x) => resolveExploreUrl(x, base)).filter((u): u is string => !!u);
     return urls.length ? urls : null;
   }
-  const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "redirect" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
   return u ? [u] : null;
