@@ -105,7 +105,9 @@ test("a connector preset is remembered for its logo and label, and the temperatu
   assert.deepEqual(customSource(m), { logo: openrouter.logo, label: "OpenRouter" });
   const back = parseCustomModels(JSON.stringify([m]));
   assert.equal(back[0]?.connector, "openrouter");
-  assert.equal(parseCustomModels(JSON.stringify([{ ...m, connector: "nope" }]))[0]?.connector, undefined, "an unknown preset is dropped");
+  // An unknown preset is dropped, and only it: the rest of the model is kept as it was.
+  const { connector: _drop, ...rest } = m;
+  assert.deepEqual(parseCustomModels(JSON.stringify([{ ...m, connector: "nope" }])), [rest], "an unknown preset is dropped, the model kept");
   assert.deepEqual(modelSend("cm-or", [m]), { model: "openai:fournisseur/modele", modelBaseUrl: "https://openrouter.ai/api/v1", modelApiKeyEnv: "OPENROUTER_API_KEY", modelTemperature: 0.4 });
 });
 
