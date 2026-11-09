@@ -11,13 +11,14 @@ function target() {
   const FILES: Record<string, string> = { "/ftp/secret.bak": "db_password=Secret123\napi_key=sk_live_x" };
   const nb = /^(.*?)%(?:25)?00\.(?:md|png|ico|jpg|txt|json)$/i;
   return createServer((req, res) => {
-    const raw = (req.url ?? "/").split("?")[0];
+    const raw = (req.url ?? "/").split("?")[0]!;
     const m = raw.match(nb);
     const send = (s: number, b: string) => { res.writeHead(s, { "content-type": "text/plain" }); res.end(b); };
     if (m) {
-      const real = (() => { try { return decodeURIComponent(m[1]); } catch { return m[1]; } })();
+      const cap = m[1]!;
+      const real = (() => { try { return decodeURIComponent(cap); } catch { return cap; } })();
       if (real.startsWith("/secure/")) return send(403, "Forbidden");
-      return FILES[real] ? send(200, FILES[real]) : send(404, "no");
+      return FILES[real] ? send(200, FILES[real]!) : send(404, "no");
     }
     if (/\.bak$/i.test(raw)) return send(403, "Forbidden");
     return send(404, "no");
