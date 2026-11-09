@@ -568,7 +568,7 @@ export class Explorer {
     const missing = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k) && !actorMarker(this.options, k));
     if (!base || !missing.length || this.d.budget.maxRequests < 40) return;
     const am = (this.options["authz-matrix"] ?? {}) as AuthzOptions & { whoami?: unknown };
-    const paths = [...new Set([...(typeof am.whoami === "string" ? [am.whoami] : []), ...WHOAMI_PATHS])].slice(0, 4);
+    const paths = [...new Set([...(typeof am.whoami === "string" ? [am.whoami] : []), ...WHOAMI_PATHS])].slice(0, 6);
     const withToken = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k));
     const urls = paths.map((p) => resolveExploreUrl(p, base)).filter((u): u is string => !!u && this.scope.isHostAllowed(u));
     if (!urls.length || !(await this.gateFor("explore.http", urls.map((url) => ({ method: "GET", url }))))) return;

@@ -59,7 +59,7 @@ export function deriveMarkers(reads: Partial<Record<"a" | "b" | "c", Read>>, ano
 }
 
 /** Usual identity endpoints (paths only, the same for any API); options.authz-matrix.whoami puts one first. */
-export const WHOAMI_PATHS = ["/api/me", "/api/users/me", "/api/user", "/api/auth/me", "/api/profile", "/me", "/api/v1/me", "/api/account"];
+export const WHOAMI_PATHS = ["/api/me", "/me", "/api/users/me", "/api/user", "/api/auth/me", "/api/whoami", "/whoami", "/api/profile", "/api/v1/me", "/api/account", "/api/session", "/api/users/current"];
 
 /** Identity values carried by a JWT's payload (sub, id, userId, email, at the root or under data/user). Empty for a non-JWT. */
 export function tokenIdentity(token: string | undefined): string[] {

@@ -86,8 +86,8 @@ response and match a line in a file.
 **Account markers.** `explore.replay` and `explore.cross-actor` prove a
 cross-account read by an account's marker in the body. When an account has a
 token but no declared `marker`, the exploration first reads an identity endpoint
-(`options.authz-matrix.whoami`, then `/api/me`, `/api/users/me`, `/api/user`,
-`/api/auth/me`) as each account and as anonymous, and keeps an identity field
+(`options.authz-matrix.whoami` first, then common identity paths —
+`/api/me`, `/me`, `/api/users/me`, `/api/whoami`, …) as each account and as anonymous, and keeps an identity field
 (email, username, id, …) that only that account's read carries: 6+ characters
 with a letter or 8+ digits, absent from every other account's read and from the
 anonymous one (`src/agent/markers.ts`). It is read-only and gated, and a
