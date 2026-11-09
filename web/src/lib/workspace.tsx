@@ -200,12 +200,14 @@ const ANTHROPIC_EFFORT = /^claude-(opus-(4-[6-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|h
  *   endpoints and Ollama get none).
  * - available: false when the server is live but cannot run it (no claude CLI).
  */
-export function modelCaps(model: string, custom: CustomModel[], server: { live: boolean; llm: string | null }): { effort: boolean; available: boolean; why?: string } {
+export function modelCaps(model: string, custom: CustomModel[], server: { live: boolean; llm: string | null; customProviders?: string[] }): { effort: boolean; available: boolean; why?: string } {
   if (MODELS.some((m) => m.id === model)) {
     const available = !server.live || !!server.llm;
     return { effort: true, available, why: available ? undefined : "Le CLI claude est introuvable sur la machine qui lance Crenel." };
   }
   const c = custom.find((x) => x.id === model);
+  // A live server that does not offer this provider would reject the run: say it before.
+  if (c && server.live && server.customProviders && !server.customProviders.includes(customSpec(c).split(":")[0]!)) return { effort: false, available: false, why: "Ce serveur n'accepte pas les modèles personnalisés (lancez crenel serve avec --llm)." };
   if (c?.provider === "anthropic-api") return { effort: ANTHROPIC_EFFORT.test(c.name), available: true, why: ANTHROPIC_EFFORT.test(c.name) ? undefined : "Ce modèle ne prend pas de réglage d'effort." };
   return { effort: false, available: true, why: c ? "Ce fournisseur n'a pas de réglage d'effort : il décide seul." : undefined };
 }
@@ -213,7 +215,8 @@ export function modelCaps(model: string, custom: CustomModel[], server: { live: 
 /** What `start(...)` sends: a built-in id passes through; a custom id becomes its spec + connection (never a key value). */
 export function modelSend(model: string, custom: CustomModel[]): { model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number } {
   const c = custom.find((x) => x.id === model);
-  if (!c) return { model };
+  // An id that is neither built in nor custom (a model removed since) runs what the label shows: the default.
+  if (!c) return { model: MODELS.some((m) => m.id === model) ? model : DEFAULT_MODEL_ID };
   return {
     model: customSpec(c), modelBaseUrl: c.baseUrl || undefined, modelApiKeyEnv: c.apiKeyEnv || undefined,
     ...(c.temperature !== undefined ? { modelTemperature: c.temperature } : {}),

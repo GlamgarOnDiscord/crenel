@@ -191,6 +191,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   const runs = new Map<string, AgentRun>();
   const webDir = opts.webDir === undefined ? findWebDir() : opts.webDir;
   const llmOn = opts.llm !== "off" && (opts.claudeAvailable ?? false);
+  // HTTP providers need no CLI but are an outbound path: only when model access is explicitly on.
+  const customOn = opts.llm === "auto";
   const llmFor = (model: string, effort?: Effort): Llm | null => (llmOn ? (opts.llmFactory ?? claudeCli)(model, { effort }) : null);
   const config = (): Config => loadConfig(configPath);
 
@@ -208,13 +210,18 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   // process.env inside the provider at call time. A bad spec/connection -> 4xx.
   function runLlm(model: string, baseUrl: string | undefined, apiKeyEnv: string | undefined, temperature: number | undefined, effort: Effort | undefined, cfg: Config): Llm | null {
     if (!model.includes(":")) return llmFor(model, effort);
-    if (opts.llm === "off") throw new HttpError(400, "model access is off on this server (crenel serve --llm off)");
+    if (!customOn) throw new HttpError(400, "model access is off on this server (start crenel serve with --llm)");
     // The server reads the named env var and sends its value to the base URL:
     // both are checked (https or loopback, no URL credentials, not a scan
     // target, a model-key variable only), like the integrations' destinations.
     const cfgLlm = (cfg.options as Record<string, unknown>).llm;
-    const bad = checkModelEndpoint({ baseUrl, apiKeyEnv, scanHosts: cfg.scope.allowedHosts, configKeyEnv: configKeyEnv(cfg) });
+    // A key named by the request may go to the config's base URL when the request names none: that
+    // effective destination is the one checked, not only the request's own override.
+    const cfgBase = typeof (cfgLlm as { baseUrl?: unknown } | undefined)?.baseUrl === "string" ? (cfgLlm as { baseUrl: string }).baseUrl : undefined;
+    const bad = checkModelEndpoint({ baseUrl: baseUrl ?? (apiKeyEnv ? cfgBase : undefined), apiKeyEnv, scanHosts: cfg.scope.allowedHosts, configKeyEnv: configKeyEnv(cfg) });
     if (bad) throw new HttpError(400, bad);
+    // The Messages API version Crenel speaks has no temperature: say so instead of dropping it.
+    if (temperature !== undefined && model.startsWith("anthropic-api:")) throw new HttpError(400, "anthropic-api takes no temperature (Messages API 2026-10-21): leave it empty");
     const { llm, error } = selectLlm({ spec: model, baseUrl, apiKeyEnv, temperature, effort, config: cfgLlm });
     if (error) throw new HttpError(400, error);
     if (!llm) throw new HttpError(400, `unknown model spec: ${model.split(":")[0]}:…`);
@@ -283,10 +290,11 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       scope: cfg?.scope ?? null,
       llm: llmOn ? "claude -p" : null,
       // Provider prefixes the engine can reach over HTTP (names only, no secret).
-      customProviders: opts.llm === "off" ? [] : CUSTOM_PROVIDERS,
+      customProviders: customOn ? CUSTOM_PROVIDERS : [],
       // Model-key variables set on this machine, names only (never a value).
-      modelKeys: opts.llm === "off" ? [] : presentModelKeys(process.env, configKeyEnv(cfg)),
-      explore: cfg ? resolveExploreMode(cfg, llmOn) : "off",
+      modelKeys: customOn ? presentModelKeys(process.env, configKeyEnv(cfg)) : [],
+      // A custom provider can explore without the claude CLI: the toggle is live whenever some model can run.
+      explore: cfg ? resolveExploreMode(cfg, llmOn || customOn) : "off",
       grants: [...grants],
       checks: REGISTRY.map((c) => ({ name: c.name, title: c.title, readOnly: c.readOnly })),
       findings: f.items.map((x) => (meta.ignored[x.uid] ? { ...x, ignored: meta.ignored[x.uid] } : x)), checksRun: f.checksRun, scannedAt: f.updatedAt ?? null,

