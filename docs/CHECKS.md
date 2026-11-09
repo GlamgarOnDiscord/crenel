@@ -56,6 +56,7 @@ empty list runs every read-only check.
 | auth-injection | SQL/NoSQL authentication bypass on a declared login field (a tautology accepted where a benign value and a false tautology are denied) | yes (live differential with a control, opt-in) | **crafted logins**: allowActiveTesting + `options.auth-injection.enabled` + declared endpoints |
 | directory-listing | Open server directory index (autoindex) on a conventional folder path, exposing its files; confirms a sensitive file is actually served | yes (live, the listing + a fetched file) | yes (stagingUrl) |
 | live-ssrf | Server-side request forgery proven out-of-band: a unique nonce injected into a declared sink arrives at an ephemeral listener the target reached | yes (OOB callback, opt-in) | **outbound-triggering requests**: allowActiveTesting + `options.live-ssrf.enabled` + a callbackHost the target can reach |
+| command-injection | OS-command / template injection on a declared sink, proven by a computation (nonce next to 7*7 comes back as nonce49) | yes (computed differential, opt-in) | **payloads that run server-side**: allowActiveTesting + `options.command-injection.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
 ## exposed-secrets
