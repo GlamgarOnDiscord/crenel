@@ -205,6 +205,16 @@ export const MODEL_KEY_ENVS = new Set([
 ]);
 
 /**
+ * Which model-key variables are set in this process, by NAME only (never a
+ * value): the console shows "clé définie" or "clé absente" before a run. Covers
+ * the known provider names, any CRENEL_LLM_* and options.llm.apiKeyEnv.
+ */
+export function presentModelKeys(env: NodeJS.ProcessEnv = process.env, configKeyEnv?: string): string[] {
+  const names = new Set([...MODEL_KEY_ENVS, ...Object.keys(env).filter((k) => k.startsWith("CRENEL_LLM_")), ...(configKeyEnv && ENV_NAME.test(configKeyEnv) ? [configKeyEnv] : [])]);
+  return [...names].filter((n) => typeof env[n] === "string" && env[n]!.length > 0).sort();
+}
+
+/**
  * Checks a model endpoint that arrives from outside the config (a console
  * request): https, or plain http to the loopback only (local servers such as
  * Ollama or LM Studio); no credentials in the URL; not a remote host Crenel is

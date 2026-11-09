@@ -43,7 +43,7 @@ import type { RunResult } from "../core/runner.js";
 import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
 import { GrantSet, StateStore } from "../agent/state.js";
-import { checkModelEndpoint, claudeCli, DEFAULT_MODEL, selectLlm, type Llm } from "../agent/llm.js";
+import { checkModelEndpoint, claudeCli, presentModelKeys, DEFAULT_MODEL, selectLlm, type Llm } from "../agent/llm.js";
 import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/explore.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
@@ -174,6 +174,12 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   const llmFor = (model: string): Llm | null => (llmOn ? (opts.llmFactory ?? claudeCli)(model) : null);
   const config = (): Config => loadConfig(configPath);
 
+  // The key variable options.llm declares, if any (the owner's own choice).
+  const configKeyEnv = (cfg: Config | null | undefined): string | undefined => {
+    const llm = (cfg?.options as Record<string, unknown> | undefined)?.llm as { apiKeyEnv?: unknown } | undefined;
+    return typeof llm?.apiKeyEnv === "string" ? llm.apiKeyEnv : undefined;
+  };
+
   // Resolve the model for a run. A plain name is the claude CLI (unchanged, and
   // it still honours the test seam and the claude-available gate). A spec with a
   // provider ("openai:…", "ollama:…", "anthropic-api:…") is an HTTP provider,
@@ -186,8 +192,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     // The server reads the named env var and sends its value to the base URL:
     // both are checked (https or loopback, no URL credentials, not a scan
     // target, a model-key variable only), like the integrations' destinations.
-    const cfgLlm = (cfg.options as Record<string, unknown>).llm as { apiKeyEnv?: unknown } | undefined;
-    const bad = checkModelEndpoint({ baseUrl, apiKeyEnv, scanHosts: cfg.scope.allowedHosts, configKeyEnv: typeof cfgLlm?.apiKeyEnv === "string" ? cfgLlm.apiKeyEnv : undefined });
+    const cfgLlm = (cfg.options as Record<string, unknown>).llm;
+    const bad = checkModelEndpoint({ baseUrl, apiKeyEnv, scanHosts: cfg.scope.allowedHosts, configKeyEnv: configKeyEnv(cfg) });
     if (bad) throw new HttpError(400, bad);
     const { llm, error } = selectLlm({ spec: model, baseUrl, apiKeyEnv, temperature, config: cfgLlm });
     if (error) throw new HttpError(400, error);
@@ -250,6 +256,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       llm: llmOn ? "claude -p" : null,
       // Provider prefixes the engine can reach over HTTP (names only, no secret).
       customProviders: opts.llm === "off" ? [] : CUSTOM_PROVIDERS,
+      // Model-key variables set on this machine, names only (never a value).
+      modelKeys: opts.llm === "off" ? [] : presentModelKeys(process.env, configKeyEnv(cfg)),
       explore: cfg ? resolveExploreMode(cfg, llmOn) : "off",
       grants: [...grants],
       checks: REGISTRY.map((c) => ({ name: c.name, title: c.title, readOnly: c.readOnly })),

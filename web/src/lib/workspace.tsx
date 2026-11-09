@@ -56,23 +56,25 @@ export const providerOf = (id: CustomProvider) => PROVIDERS.find((p) => p.id ===
 // the same `openai:<model>`, only the base URL and the key's env-var name differ),
 // so no backend change is needed to add one. `apiKeyEnv` is a conventional env-var
 // NAME, never a key; `local: true` means no key. Pick one to pre-fill the card.
-export interface Connector { id: string; label: string; logo: Provider; provider: CustomProvider; baseUrl?: string; apiKeyEnv?: string; local?: boolean; hint?: string; example?: string }
+// `mono` + `tint`: a two-letter mark for connectors without a logo of their own
+// (no third-party artwork is copied; letters only).
+export interface Connector { id: string; label: string; logo: Provider; provider: CustomProvider; baseUrl?: string; apiKeyEnv?: string; local?: boolean; hint?: string; example?: string; mono?: string; tint?: string }
 export const CONNECTORS: Connector[] = [
   { id: "openai", label: "OpenAI", logo: "openai", provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY", example: "gpt-4o-mini" },
   { id: "anthropic", label: "Anthropic", logo: "claude", provider: "anthropic-api", baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY", example: "claude-opus-4-8" },
-  { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", example: "fournisseur/modèle" },
-  { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY", example: "nom du modèle" },
-  { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY", example: "deepseek-chat" },
+  { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", example: "openai/gpt-4o-mini", mono: "OR", tint: "#8B8CF8" },
+  { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY", example: "nom du modèle", mono: "Gq", tint: "#F7744F" },
+  { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY", example: "deepseek-chat", mono: "DS", tint: "#6B86FF" },
   { id: "mistral", label: "Mistral", logo: "mistral", provider: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", apiKeyEnv: "MISTRAL_API_KEY" },
   { id: "gemini", label: "Gemini", logo: "gemini", provider: "openai-compatible", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnv: "GEMINI_API_KEY" },
-  { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY", example: "nom du modèle" },
-  { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY", example: "fournisseur/modèle" },
-  { id: "fireworks", label: "Fireworks", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY", example: "accounts/fireworks/models/…" },
-  { id: "perplexity", label: "Perplexity", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY", example: "nom du modèle" },
-  { id: "ollama", label: "Ollama", logo: "custom", provider: "ollama", baseUrl: "http://127.0.0.1:11434", local: true, hint: "local", example: "llama3.1" },
-  { id: "lmstudio", label: "LM Studio", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:1234/v1", local: true, hint: "local", example: "nom du modèle chargé" },
-  { id: "vllm", label: "vLLM", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:8000/v1", local: true, hint: "local", example: "nom du modèle servi (vLLM, llama.cpp)" },
-  { id: "custom", label: "Autre", logo: "custom", provider: "openai-compatible", example: "nom du modèle" },
+  { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY", example: "nom du modèle", mono: "xA", tint: "#D4D4D8" },
+  { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY", example: "fournisseur/modèle", mono: "To", tint: "#4D8DFF" },
+  { id: "fireworks", label: "Fireworks", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY", example: "accounts/fireworks/models/…", mono: "Fw", tint: "#A77BF3" },
+  { id: "perplexity", label: "Perplexity", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY", example: "nom du modèle", mono: "Px", tint: "#34C3D6" },
+  { id: "ollama", label: "Ollama", logo: "custom", provider: "ollama", baseUrl: "http://127.0.0.1:11434", local: true, hint: "local", example: "llama3.1", mono: "Ol", tint: "#E4E4E7" },
+  { id: "lmstudio", label: "LM Studio", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:1234/v1", local: true, hint: "local", example: "nom du modèle chargé", mono: "LM", tint: "#9F7AEA" },
+  { id: "vllm", label: "vLLM", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:8000/v1", local: true, hint: "local", example: "nom du modèle servi (vLLM, llama.cpp)", mono: "vL", tint: "#F5B83D" },
+  { id: "custom", label: "Autre point d'accès", logo: "custom", provider: "openai-compatible", example: "nom du modèle", mono: "{}", tint: "#A1A1AA" },
 ];
 export const connectorOf = (id: string | undefined) => (id ? CONNECTORS.find((c) => c.id === id) : undefined);
 /** A fresh draft pre-filled from a connector preset (provider, base URL, key env). */

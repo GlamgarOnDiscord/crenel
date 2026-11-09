@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm, endpointUrl, displayBase, checkModelEndpoint, claudeCli } from "./llm.js";
+import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm, endpointUrl, displayBase, checkModelEndpoint, claudeCli, presentModelKeys } from "./llm.js";
 
 // A throwaway http server: `handler` sees the parsed JSON body and the headers, and
 // returns [status, bodyString]. Resolves to the base URL and a close().
@@ -194,4 +194,10 @@ test("selectLlm: a request temperature wins over the config's", async () => {
     await llm!.ask("hi");
     assert.equal(got, 0.7);
   } finally { await new Promise<void>((r) => srv.close(() => r())); }
+});
+
+test("presentModelKeys: names of the model keys that are set, never other variables", () => {
+  const env = { OPENAI_API_KEY: "x", GROQ_API_KEY: "", CRENEL_LLM_GATEWAY: "y", GITHUB_TOKEN: "z", MY_KEY: "w" };
+  assert.deepEqual(presentModelKeys(env), ["CRENEL_LLM_GATEWAY", "OPENAI_API_KEY"]);
+  assert.deepEqual(presentModelKeys(env, "MY_KEY"), ["CRENEL_LLM_GATEWAY", "MY_KEY", "OPENAI_API_KEY"]);
 });

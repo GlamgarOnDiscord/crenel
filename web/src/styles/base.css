@@ -823,40 +823,65 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .msel-add .msel-n { color: var(--fg-muted); }
 
 /* Config card for a custom model. Compact, same tokens as the rest of the pop. */
-/* Custom model card. The menu widens while it is open so the connectors sit in
-   three even columns; every track is minmax(0, 1fr) so nothing pushes past it. */
-.msel:has(.cmf) { width: 404px; }
+/* Custom model card, two steps (pick a connector, then name the model). The
+   menu widens while it is open; every track is minmax(0, 1fr) so nothing pushes
+   past it, and the height never exceeds the room Radix measured, so the sticky
+   actions stay on screen. */
+.msel:has(.cmf) { width: 400px; }
 .cmf { display: grid; gap: 10px; padding: 8px 8px 10px; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  /* Never taller than the room Radix measured on the side the menu opened to, so the sticky actions stay on screen. */
-  max-height: min(600px, calc(var(--radix-popover-content-available-height, 78vh) - 20px)); }
-.cmf-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.cmf-title { font-size: 13.5px; font-weight: 600; color: var(--fg); white-space: nowrap; }
-.cmf-spec { margin-left: auto; min-width: 0; font-size: 11px; color: var(--fg-faint); background: var(--well); border-radius: 7px; padding: 3px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-sec { display: grid; gap: 6px; }
-.cmf-sec-l { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-ghost); padding: 2px 2px 0; }
-.cmf-conns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.cmf-conn { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 0; border-radius: 9px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
-.cmf-conn > svg, .cmf-conn > img { flex: none; }
-.cmf-conn:hover { background: var(--hover); color: var(--fg); }
+  max-height: min(600px, calc(var(--radix-popover-content-available-height, 78vh) - 20px)); animation: cmf-in .18s var(--ease); }
+@keyframes cmf-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+.cmf-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
+.cmf-head-t { display: grid; min-width: 0; }
+.cmf-title { font-size: 14px; font-weight: 600; color: var(--fg); white-space: nowrap; }
+.cmf-sub { font-size: 11.5px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-sec-l { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-ghost); padding: 4px 2px 0; }
+.cmf-sec-l em { font-style: normal; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--fg-faint); background: var(--well); border-radius: 5px; padding: 1px 6px; }
+.cmf-conns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.cmf-conn { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 12.5px; font-weight: 500; cursor: pointer; text-align: left;
+  transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease), transform .12s var(--ease); }
+.cmf-conn:hover { background: var(--hover); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.cmf-conn:active { transform: scale(.98); }
 .cmf-conn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--line), 0 0 0 2px var(--brand-ring); }
-.cmf-conn.on { color: var(--fg); background: var(--active); box-shadow: inset 0 0 0 1.5px var(--brand-line); }
+.cmf-conn.wide { grid-column: 1 / -1; }
 .cmf-conn-l { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-picked { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 11px; border-radius: 11px; background: color-mix(in srgb, var(--brand) 5%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
-.cmf-picked-t { display: grid; min-width: 0; }
-.cmf-picked-t b { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+.cmf-conn-d { font-size: 10.5px; color: var(--fg-ghost); white-space: nowrap; }
+.cmark { flex: none; display: inline-grid; place-items: center; border-radius: 7px; font-family: var(--f-mono); font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.cmark.logo { background: var(--well); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); }
+.cmf-picked { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 10px 10px 11px; border-radius: 12px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.cmf-picked-t { display: grid; min-width: 0; flex: 1; }
+.cmf-picked-t b { font-size: 13px; font-weight: 600; color: var(--fg); }
 .cmf-picked-t span { font-size: 11px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-field { display: grid; gap: 4px; min-width: 0; }
-.cmf-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; }
-.cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
-.cmf-opt { font-size: 10.5px; font-weight: 400; color: var(--fg-ghost); }
+.cmf-change { flex: none; font-size: 12px; font-weight: 500; color: var(--fg-muted); padding: 5px 9px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.cmf-change:hover { color: var(--fg); background: var(--hover); }
+.cmf-field { display: grid; gap: 5px; min-width: 0; }
+.cmf-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; }
+.cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); }
 .cmf-in { width: 100%; min-width: 0; box-sizing: border-box; background: var(--well); border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-strong); padding: 8px 10px; font-size: 12.5px; color: var(--fg); outline: none; transition: box-shadow .12s var(--ease); }
+.cmf-in.big { padding: 11px 12px; font-size: 14px; border-radius: 11px; }
 .cmf-in::placeholder { color: var(--fg-ghost); }
 .cmf-in:focus { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--brand-ring); }
 .cmf-in[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger-line); }
-.cmf-hint { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; line-height: 1.4; color: var(--fg-faint); }
-.cmf-hint svg { flex: none; margin-top: 2px; }
-.cmf-err { font-size: 11px; line-height: 1.4; color: var(--danger-ink); }
-.cmf-warn { font-size: 11px; line-height: 1.4; color: var(--brand-ink); }
+.cmf-hint { font-size: 11px; line-height: 1.45; color: var(--fg-faint); }
+.cmf-err { font-size: 11px; line-height: 1.45; color: var(--danger-ink); }
+.cmf-warn { font-size: 11px; line-height: 1.45; color: var(--brand-ink); }
+.cmf-key { display: flex; align-items: flex-start; gap: 9px; padding: 9px 11px; border-radius: 11px; font-size: 12px; line-height: 1.45; color: var(--fg-muted); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.cmf-key svg { flex: none; margin-top: 1px; color: var(--fg-faint); }
+.cmf-key b { color: var(--fg); font-weight: 600; }
+.cmf-key code { font-size: 11px; color: var(--fg); background: var(--panel); border-radius: 5px; padding: 0 4px; }
+.cmf-key.ok { background: color-mix(in srgb, #22C55E 7%, var(--well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #22C55E 28%, transparent); }
+.cmf-key.ok svg { color: #4ADE80; }
+.cmf-key.miss { background: color-mix(in srgb, var(--brand) 7%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.cmf-key.miss svg { color: var(--brand); }
+.cmf-key.bad { background: color-mix(in srgb, var(--danger) 7%, var(--well)); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.cmf-key.bad svg { color: var(--danger-ink); }
+.cmf-adv { border-radius: 11px; box-shadow: inset 0 0 0 1px var(--line); }
+.cmf-adv-t { width: 100%; display: flex; align-items: center; gap: 7px; padding: 9px 11px; font-size: 12px; font-weight: 500; color: var(--fg-muted); text-align: left; border-radius: 11px; }
+.cmf-adv-t:hover { color: var(--fg); background: var(--hover); }
+.cmf-adv-chev { flex: none; transform: rotate(-90deg); transition: transform .18s var(--ease); }
+.cmf-adv.open .cmf-adv-chev { transform: none; }
+.cmf-adv-sum { margin-left: auto; min-width: 0; font-size: 11px; color: var(--fg-ghost); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-adv-b { display: grid; gap: 10px; padding: 2px 11px 12px; }
 .cmf-actions { position: sticky; bottom: -10px; z-index: 1; display: flex; justify-content: flex-end; gap: 8px; margin: 2px -8px -10px; padding: 10px 8px; border-top: 1px solid var(--line); background: var(--panel-raised); }
 
 .ctxbtn { gap: 6px; padding: 0 8px; color: var(--fg-faint); }
