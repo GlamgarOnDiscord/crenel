@@ -26,7 +26,7 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
-import { massAssignOracle, buildBody } from "./massassign.js";
+import { massAssignOracle, buildBody, fieldRaw, fieldValue } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
 import { redirectOracle, type RedirectResp } from "./redirect.js";
@@ -1072,26 +1072,48 @@ const exploreMassAssignValidator: Validator = {
     const readUrl = resolveExploreUrl(typeof d.readUrl === "string" ? d.readUrl : d.url, env.stagingUrl);
     if (!upUrl || !readUrl) return no("not http(s) URLs");
     if (!env.scope.isHostAllowed(upUrl) || !env.scope.isHostAllowed(readUrl)) return no("off-scope host");
+    // Writes go to the declared staging origin only, and the read-back to the same origin (the token goes to both).
+    const origin = (u: string) => new URL(u).origin;
+    if (!env.stagingUrl || origin(upUrl) !== origin(env.stagingUrl)) return no("mass-assignment writes only to the declared stagingUrl's origin");
+    if (origin(readUrl) !== origin(upUrl)) return no("detail.readUrl must be on the same origin as the update endpoint");
     const actor = parseActor(d.as);
-    const method = typeof d.method === "string" ? d.method : "PUT";
+    if (!actor || actor === "anon") return no("need detail.as: a configured account whose own object is updated");
+    if (!actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : "PUT";
+    if (!["POST", "PUT", "PATCH"].includes(method)) return no(`method ${method}: an update is POST, PUT or PATCH`);
     const bodyType: "json" | "form" = d.bodyType === "form" ? "form" : "json";
     const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
-    const readBack = async () => { const r = await sendAs({ url: d.url as string, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
+    const readBack = async () => { const r = await sendAs({ url: readUrl, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
     const writeThen = async (extra: Record<string, unknown> | null) => {
       const { body, contentType } = buildBody(base, extra, bodyType);
-      await sendAs({ url: d.url as string, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
+      await sendAs({ url: upUrl, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
     };
     let baseline, control, injectedRead;
+    let restore = "";
     try {
       baseline = await readBack();
+      // Nothing is written unless the actor can read the object and it is shown to be the actor's own.
+      if (!ok2xx(baseline.status)) return no(`cannot read the object as ${actor.toUpperCase()} (HTTP ${baseline.status}): nothing written`);
+      const marker = actorMarker(env.options, actor);
+      if (marker && !baseline.body.includes(marker)) return no(`the read does not carry ${actor.toUpperCase()}'s marker: not shown to be ${actor.toUpperCase()}'s own object, nothing written`);
+      const anon = await sendAs({ url: readUrl, method: "GET" }, "anon", env, readUrl);
+      if (ok2xx(anon.status) && anon.body === baseline.body) return no("an anonymous read returns the same object: not shown to be the actor's own, nothing written");
+      const v0 = fieldRaw(baseline.body, d.field);
+      if (v0 === undefined) return no(`field "${d.field}" is not in the actor's own read: cannot prove persistence, nothing written`);
       await writeThen(null);
       control = await readBack();
       await writeThen({ [d.field]: d.value });
       injectedRead = await readBack();
+      // Put the field back as it was (best effort; the result says if it did not stick).
+      try {
+        await writeThen({ [d.field]: v0 });
+        const after = await readBack();
+        restore = fieldValue(after.body, d.field) === String(v0) ? `; "${d.field}" restored to ${String(v0)}` : `; WARNING: "${d.field}" could not be restored to ${String(v0)}, reset it by hand`;
+      } catch (e) { restore = `; WARNING: restoring "${d.field}" failed (${(e as Error).message}), reset it to ${String(v0)} by hand`; }
     } catch (e) { return no(`request failed: ${(e as Error).message}`); }
     const r = massAssignOracle({ field: d.field, injected: d.value, baseline, control, injectedRead });
-    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor ? actor.toUpperCase() : "anon"}`, response: r.reason }, ceiling: "medium" };
-    return no(r.reason);
+    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)${restore}`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor.toUpperCase()}`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason + restore);
   },
 };
 

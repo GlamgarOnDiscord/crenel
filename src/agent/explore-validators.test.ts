@@ -378,10 +378,32 @@ test("mass-assignment: a vulnerable update binds the privileged field (proven), 
         options: { "authz-matrix": { accounts: { a: { token: "tok-a" } } } },
       };
       const v = await validateClaim(claim("explore.mass-assignment", { url: "/profile", field: "role", value: "admin", update: { name: "a2" }, as: "a" }), env);
-      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.equal(v.ceiling, "medium"); assert.equal(state.role, "admin"); }
+      // Proven, and the field is put back as it was afterwards.
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.equal(v.ceiling, "medium"); assert.equal(state.role, "user"); assert.match(v.reason, /restored/); }
       else { assert.equal(v.state, "unproven", v.reason); assert.equal(state.role, "user"); }
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
+});
+
+test("mass-assignment: refuses to write off the staging origin, with a non-update method, or as anonymous", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-ma3-"));
+  try {
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1", "localhost"], allowPrivate: true, stagingUrl: "http://127.0.0.1:1", allowActiveTesting: true }),
+      projectDir: dir, stagingUrl: "http://127.0.0.1:1", checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a" } } } },
+    };
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ url: "http://localhost:1/profile", field: "role", value: "admin", as: "a" }, /stagingUrl/],
+      [{ url: "/profile", readUrl: "http://localhost:1/me", field: "role", value: "admin", as: "a" }, /same origin/],
+      [{ url: "/profile", field: "role", value: "admin", as: "a", method: "DELETE" }, /POST, PUT or PATCH/],
+      [{ url: "/profile", field: "role", value: "admin" }, /configured account/],
+    ];
+    for (const [detail, re] of cases) {
+      const v = await validateClaim(claim("explore.mass-assignment", detail), env);
+      assert.equal(v.state, "unproven"); assert.match(v.reason, re);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("mass-assignment: without active mode it refuses", async () => {
