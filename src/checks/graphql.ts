@@ -127,6 +127,22 @@ export const graphql: Check = {
       const bt = await batchingAt(base + path, ctx);
       if (bt) findings.push(bt);
     }
+    // An in-browser GraphQL IDE (GraphiQL, Playground) served in production: anyone gets a query console with the schema.
+    for (const path of ["/graphiql", "/graphql", "/playground"]) {
+      let res;
+      try { res = await safeFetch(base + path, ctx.scope, { headers: { accept: "text/html" } }); } catch { continue; }
+      // The IDE's own page: HTML that loads GraphiQL or Playground (an SPA's index.html does not name them).
+      const ide = /graphiql|graphql-playground/i.exec(res.body)?.[0];
+      if (res.status !== 200 || !/<html/i.test(res.body) || !ide) continue;
+      findings.push({
+        id: `graphql:ide:${path}`, check: "graphql", title: `GraphQL IDE (${ide}) served on ${path}`, severity: "low", state: "proven", location: `${base}${path}`,
+        description: `${path} serves the ${ide} page: anyone gets a ready query console against the API, with schema browsing when introspection is on.`,
+        remediation: "Serve the GraphQL IDE in development only.",
+        proof: { method: "GET with accept: text/html, no credentials", replay: `curl -s -H 'accept: text/html' '${base}${path}' | grep -i ${ide}`, evidence: `HTTP 200, an HTML page loading ${ide}` },
+        regressionHint: `After deploy, ${path} must not serve the ${ide} page.`,
+      });
+      break;
+    }
     if (!findings.length) ctx.log("graphql: no open introspection on the usual paths (GET and POST)");
     return findings;
   },

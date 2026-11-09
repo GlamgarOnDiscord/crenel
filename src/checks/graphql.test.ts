@@ -99,3 +99,18 @@ test("a server that refuses array bodies gets no batching finding", async () => 
     assert.ok(!found.find((f) => f.id.startsWith("graphql:batching:")), "no batching finding when arrays are refused");
   } finally { srv.close(); }
 });
+
+test("a GraphiQL page is reported; an SPA index on the same path is not", async () => {
+  for (const ide of [true, false]) {
+    const srv = createServer((req, res) => {
+      if (req.url === "/graphiql") { res.writeHead(200, { "content-type": "text/html" }); return res.end(ide ? '<html><script src="/static/graphiql.min.js"></script></html>' : "<html><div id=app></div></html>"); }
+      res.writeHead(404); res.end("{}");
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    try {
+      const found = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
+      assert.equal(found.some((f) => f.id.startsWith("graphql:ide:")), ide);
+    } finally { srv.close(); }
+  }
+});
