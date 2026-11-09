@@ -857,3 +857,37 @@ test("data-exposure: a list returning two tenants' markers to A is proven; a sin
     assert.equal((await validateClaim(claim("explore.data-exposure", { url: "/api/one-foreign", as: "a" }), env)).state, "unproven", "a single foreign object is cross-actor, not aggregate exposure");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("bfla: a normal account reaching a flagged-admin function (anon+control denied) is proven; an enforced one is not", async () => {
+  for (const vulnerable of [true, false]) {
+    const srv = createServer((req, res) => {
+      const who = req.headers.authorization === "Bearer tok-admin" ? "admin" : req.headers.authorization === "Bearer tok-a" ? "a" : null;
+      const json = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+      if (req.url !== "/api/admin/users") return json(404, {});
+      if (!who) return json(401, {});
+      if (who === "admin" || vulnerable) return json(200, { users: [1, 2, 3], view: "admin" });
+      return json(403, {});
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-bfla-"));
+    try {
+      const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+        options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, c: { token: "tok-admin", privileged: true } } } } };
+      const v = await validateClaim(claim("explore.bfla", { url: "/api/admin/users", privileged: "c", normal: "a" }), env);
+      assert.equal(v.state, vulnerable ? "proven" : "unproven", v.reason);
+      if (vulnerable) assert.match(v.reason, /function-level/i);
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test("bfla: without a flagged privileged account it stays a lead", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-bfla2-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: "http://127.0.0.1:1" }), projectDir: dir, stagingUrl: "http://127.0.0.1:1", checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, c: { token: "tok-c" } } } } };
+    const v = await validateClaim(claim("explore.bfla", { url: "/api/admin/users", normal: "a" }), env);
+    assert.equal(v.state, "unproven");
+    assert.match(v.reason, /flagged accounts\.<x>\.privileged/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
