@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="brand/motion/crenel-idle.svg" alt="Crenel, the jackdaw holding the key it found" width="132">
+<img src="brand/readme-banner.png" alt="Crenel — the jackdaw that proves the bug it found" width="880">
 
 # Crenel
 

@@ -39,6 +39,11 @@ export const ModelSelectorItem = ({ className, ...props }: ComponentProps<typeof
 export function ModelSelectorLogo({ provider, size = 16 }: { provider: Provider; size?: number }) {
   return <span className="msel-logo"><ModelLogo provider={provider} size={size} title /></span>;
 }
-export function ModelSelectorName({ children, desc }: { children: ReactNode; desc?: string }) {
-  return <span className="msel-name"><span className="msel-n">{children}</span>{desc && <span className="msel-d">{desc}</span>}</span>;
+export function ModelSelectorName({ children, desc, recommended }: { children: ReactNode; desc?: string; recommended?: boolean }) {
+  return (
+    <span className="msel-name">
+      <span className="msel-n">{children}{recommended && <span className="msel-rec">Conseillé</span>}</span>
+      {desc && <span className="msel-d">{desc}</span>}
+    </span>
+  );
 }

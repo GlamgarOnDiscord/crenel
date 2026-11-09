@@ -815,7 +815,9 @@ export function FunnelChart({
   if (!first) {
     return null;
   }
-  const max = first.value;
+  // An empty funnel (nothing detected yet) has a first stage of 0: divide by 1,
+  // not 0, so every segment is flat instead of a NaN path the browser rejects.
+  const max = first.value > 0 ? first.value : 1;
   const n = data.length;
   const norms = data.map((d) => d.value / max);
   const horiz = orientation === "horizontal";

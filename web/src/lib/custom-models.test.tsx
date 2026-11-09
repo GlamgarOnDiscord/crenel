@@ -1,10 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  activeModelView, customSpec, draftToModel, emptyDraft, modelSend, parseCustomModels, validateDraft,
-  CONNECTORS, connectorOf, connectorToDraft,
-  type CustomModel, type ModelDraft,
-} from "./workspace.tsx";
+import { activeModelView, customSpec, draftToModel, emptyDraft, modelSend, parseCustomModels, validateDraft, CONNECTORS, connectorOf, connectorToDraft, type CustomModel, type ModelDraft, customSource, draftNotes } from "./workspace.tsx";
 
 const draft = (p: Partial<ModelDraft> = {}): ModelDraft => ({ ...emptyDraft(), ...p });
 
@@ -78,4 +74,34 @@ test("connectors: presets prefill a valid draft and map to the right engine spec
   // local presets carry no key and are flagged
   assert.equal(connectorOf("ollama")!.local, true);
   assert.equal(connectorToDraft(connectorOf("lmstudio")!).apiKeyEnv, "");
+});
+
+test("validateDraft mirrors the server: https or localhost, no URL credentials, French decimal comma", () => {
+  const base = { ...emptyDraft(), name: "m" };
+  assert.equal(validateDraft({ ...base, baseUrl: "https://api.example.com/v1" }).baseUrl, undefined);
+  assert.equal(validateDraft({ ...base, baseUrl: "http://127.0.0.1:1234/v1" }).baseUrl, undefined);
+  assert.match(validateDraft({ ...base, baseUrl: "http://models.example.com" }).baseUrl ?? "", /https/);
+  assert.match(validateDraft({ ...base, baseUrl: "https://u:p@models.example.com" }).baseUrl ?? "", /identifiant/);
+  assert.equal(validateDraft({ ...base, temperature: "0,2" }).temperature, undefined, "0,2 is a valid temperature");
+  assert.equal(draftToModel({ ...base, temperature: "0,2" }).temperature, 0.2);
+  assert.ok(validateDraft({ ...base, temperature: "3" }).temperature);
+  assert.ok(validateDraft({ ...base, name: "two words" }).name);
+});
+
+test("draftNotes warns when the server would refuse the key's variable name", () => {
+  const base = { ...emptyDraft(), name: "m" };
+  assert.equal(draftNotes({ ...base, apiKeyEnv: "OPENROUTER_API_KEY" }).apiKeyEnv, undefined);
+  assert.equal(draftNotes({ ...base, apiKeyEnv: "CRENEL_LLM_GATEWAY" }).apiKeyEnv, undefined);
+  assert.match(draftNotes({ ...base, apiKeyEnv: "GITHUB_TOKEN" }).apiKeyEnv ?? "", /refusera/);
+});
+
+test("a connector preset is remembered for its logo and label, and the temperature is sent", () => {
+  const openrouter = CONNECTORS.find((c) => c.id === "openrouter")!;
+  const m = draftToModel({ ...connectorToDraft(openrouter, "fournisseur/modele"), temperature: "0.4" }, "cm-or");
+  assert.equal(m.connector, "openrouter");
+  assert.deepEqual(customSource(m), { logo: openrouter.logo, label: "OpenRouter" });
+  const back = parseCustomModels(JSON.stringify([m]));
+  assert.equal(back[0]?.connector, "openrouter");
+  assert.equal(parseCustomModels(JSON.stringify([{ ...m, connector: "nope" }]))[0]?.connector, undefined, "an unknown preset is dropped");
+  assert.deepEqual(modelSend("cm-or", [m]), { model: "openai:fournisseur/modele", modelBaseUrl: "https://openrouter.ai/api/v1", modelApiKeyEnv: "OPENROUTER_API_KEY", modelTemperature: 0.4 });
 });

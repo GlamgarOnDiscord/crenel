@@ -93,13 +93,13 @@ export function useLiveAgent(s: Setters) {
   }, [onEntry]);
 
   /** Start a run (or a goal) and follow it. Events are appended to the current conversation. */
-  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; goal?: string; explore?: string }) => {
+  const start = useCallback(async (prompt: string, opts: { mode: string; model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number; goal?: string; explore?: string }) => {
     setError(null);
     s.setPhase("running");
     try {
       // For a custom model, carry its spec plus the connection; the key itself is
       // never sent, only the NAME of its env var (modelApiKeyEnv). See llm.ts.
-      const m = { model: opts.model, modelBaseUrl: opts.modelBaseUrl, modelApiKeyEnv: opts.modelApiKeyEnv };
+      const m = { model: opts.model, modelBaseUrl: opts.modelBaseUrl, modelApiKeyEnv: opts.modelApiKeyEnv, modelTemperature: opts.modelTemperature };
       const r = opts.goal
         ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, ...m } })
         : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, ...m, explore: opts.explore } });

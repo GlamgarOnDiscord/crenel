@@ -14,7 +14,7 @@ export interface LlmCall {
   timeoutMs?: number;
 }
 export interface Llm {
-  /** Short name shown in the UI, e.g. "claude -p (opus)". */
+  /** Short name shown in the UI, e.g. "claude -p (opus-4-8)". */
   label: string;
   ask(prompt: string, call?: LlmCall): Promise<string>;
 }
@@ -43,13 +43,25 @@ function runCli(args: string[], input: string, call: LlmCall = {}): Promise<stri
 
 // Only Claude models go through claude -p. Other entries of the console's
 // model menu are not wired: asking for them returns null and the run says so.
-const CLAUDE_MODELS = new Set(["opus", "sonnet", "haiku"]);
+// Each console id maps to what `claude --model` receives: an alias for the
+// latest of a line, or a full model id when a specific version is pinned.
+// Opus 4.8 is the default: Opus 5.5 runs broader safety classifiers (cyber
+// among them), which a security tool trips more often.
+export const DEFAULT_MODEL = "opus-4-8";
+const CLAUDE_MODELS: Record<string, string> = {
+  "opus-4-8": "claude-opus-4-8",
+  opus: "opus",
+  sonnet: "sonnet",
+  haiku: "haiku",
+};
 
-export function claudeCli(model = "opus"): Llm | null {
-  if (!CLAUDE_MODELS.has(model)) return null;
+export function claudeCli(model = DEFAULT_MODEL): Llm | null {
+  // Own keys only: "constructor" or "__proto__" must not pass as a model.
+  if (!Object.prototype.hasOwnProperty.call(CLAUDE_MODELS, model)) return null;
+  const cliModel = CLAUDE_MODELS[model]!;
   return {
     label: `claude -p (${model})`,
-    ask: (prompt, call) => runCli(["-p", "--model", model], prompt, call),
+    ask: (prompt, call) => runCli(["-p", "--model", cliModel], prompt, call),
   };
 }
 
@@ -96,6 +108,25 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   try { return JSON.parse(text); } catch { throw new Error(`${label} returned invalid JSON: ${text.trim().slice(0, 200)}`); }
 }
 
+// A base URL as shown in a label or a journal: origin and path only, so a
+// "https://user:pass@host" never lands in a run's journal or an error.
+export function displayBase(base: string): string {
+  try { const u = new URL(base); return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`; } catch { return "(invalid url)"; }
+}
+
+// Where a provider's endpoint lives under a base URL. Vendors document their
+// base either bare ("https://api.deepseek.com") or with the version segment
+// already in it ("https://api.openai.com/v1", ".../openai/v1", ".../api/v1",
+// Gemini's ".../v1beta/openai"). A base with a path is taken as the API root and
+// only the resource is appended; a bare host gets the conventional "/v1" too.
+// Without this, "…/v1" + "/v1/chat/completions" hit "/v1/v1/…" and a 404.
+export function endpointUrl(base: string, versioned: string, resource: string): string {
+  const b = base.replace(/\/+$/, "");
+  let path = "";
+  try { path = new URL(b).pathname.replace(/\/+$/, ""); } catch { /* left to fetch to reject */ }
+  return path ? b + resource : b + versioned + resource;
+}
+
 const pick = (o: unknown, ...keys: (string | number)[]): unknown => keys.reduce<unknown>((v, k) => (v == null ? v : (v as Record<string | number, unknown>)[k]), o);
 
 /**
@@ -106,9 +137,9 @@ const pick = (o: unknown, ...keys: (string | number)[]): unknown => keys.reduce<
  */
 export function openAiCompatibleLlm(model: string, opts: { baseUrl?: string; apiKeyEnv?: string; path?: string; temperature?: number } = {}): Llm {
   const base = (opts.baseUrl ?? DEFAULT_OLLAMA_BASE).replace(/\/+$/, "");
-  const url = base + (opts.path ?? "/v1/chat/completions");
+  const url = opts.path ? base + opts.path : endpointUrl(base, "/v1", "/chat/completions");
   return {
-    label: `openai (${model} @ ${base})`,
+    label: `openai (${model} @ ${displayBase(base)})`,
     async ask(prompt, call = {}) {
       const headers: Record<string, string> = {};
       const key = opts.apiKeyEnv ? process.env[opts.apiKeyEnv] : undefined;
@@ -128,7 +159,7 @@ export function ollamaLlm(model: string, opts: { baseUrl?: string } = {}): Llm {
   const base = (opts.baseUrl ?? DEFAULT_OLLAMA_BASE).replace(/\/+$/, "");
   const url = base + "/api/generate";
   return {
-    label: `ollama (${model} @ ${base})`,
+    label: `ollama (${model} @ ${displayBase(base)})`,
     async ask(prompt, call = {}) {
       const json = await postJson(url, {}, { model, prompt, stream: false }, call, "ollama");
       const resp = pick(json, "response");
@@ -145,7 +176,7 @@ export function ollamaLlm(model: string, opts: { baseUrl?: string } = {}): Llm {
  */
 export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseUrl?: string; maxTokens?: number } = {}): Llm {
   const base = (opts.baseUrl ?? DEFAULT_ANTHROPIC_BASE).replace(/\/+$/, "");
-  const url = base + "/v1/messages";
+  const url = endpointUrl(base, "/v1", "/messages");
   const keyEnv = opts.apiKeyEnv ?? "ANTHROPIC_API_KEY";
   return {
     label: `anthropic-api (${model})`,
@@ -160,6 +191,55 @@ export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseU
       return text.trim();
     },
   };
+}
+
+// Env var names a console request may ask the engine to read for a model key.
+// The console only ever sends a NAME, but the server reads that variable and
+// puts its value in a header to the chosen base URL, so the name is limited to
+// model keys: the conventional ones of the providers the console offers, any
+// CRENEL_LLM_* name, and the one options.llm.apiKeyEnv sets (the config is the
+// owner's own file). GITHUB_TOKEN, AWS_* and the like are refused.
+export const MODEL_KEY_ENVS = new Set([
+  "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY",
+  "GEMINI_API_KEY", "XAI_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "PERPLEXITY_API_KEY",
+]);
+
+/**
+ * Which model-key variables are set in this process, by NAME only (never a
+ * value): the console shows "clé définie" or "clé absente" before a run. Covers
+ * the known provider names, any CRENEL_LLM_* and options.llm.apiKeyEnv.
+ */
+export function presentModelKeys(env: NodeJS.ProcessEnv = process.env, configKeyEnv?: string): string[] {
+  const names = new Set([...MODEL_KEY_ENVS, ...Object.keys(env).filter((k) => k.startsWith("CRENEL_LLM_")), ...(configKeyEnv && ENV_NAME.test(configKeyEnv) ? [configKeyEnv] : [])]);
+  return [...names].filter((n) => typeof env[n] === "string" && env[n]!.length > 0).sort();
+}
+
+/**
+ * Checks a model endpoint that arrives from outside the config (a console
+ * request): https, or plain http to the loopback only (local servers such as
+ * Ollama or LM Studio); no credentials in the URL; not a remote host Crenel is
+ * told to test (the prompt carries what the run saw); and a key env var limited as
+ * above. Returns an error message, or null when the endpoint is acceptable.
+ * Same rules as the integrations' destinations.
+ */
+export function checkModelEndpoint(input: { baseUrl?: string; apiKeyEnv?: string; scanHosts?: string[]; configKeyEnv?: string }): string | null {
+  if (input.apiKeyEnv !== undefined) {
+    if (!ENV_NAME.test(input.apiKeyEnv)) return "the key's env var must be a NAME (A-Z, 0-9, _), never a key";
+    const ok = MODEL_KEY_ENVS.has(input.apiKeyEnv) || input.apiKeyEnv.startsWith("CRENEL_LLM_") || input.apiKeyEnv === input.configKeyEnv;
+    if (!ok) return `${input.apiKeyEnv} is not a model key variable: use a provider's usual name (e.g. OPENAI_API_KEY), a CRENEL_LLM_* name, or set options.llm.apiKeyEnv in the config`;
+  }
+  if (input.baseUrl !== undefined) {
+    let u: URL;
+    try { u = new URL(input.baseUrl); } catch { return "the model base URL is not a valid URL"; }
+    if (u.username || u.password) return "the model base URL must not carry credentials: put the key in an env var";
+    const host = u.hostname.toLowerCase();
+    const loopback = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+    if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) return "the model base URL must be https (plain http only to localhost)";
+    // A remote host Crenel tests is refused; the loopback is a local model server
+    // (Ollama, LM Studio) the owner runs, even when a local app is the target.
+    if (!loopback && (input.scanHosts ?? []).some((h) => h.toLowerCase() === host)) return `${host} is a scan target (scope.allowedHosts): it cannot also be the model endpoint`;
+  }
+  return null;
 }
 
 /** options.llm in the config: provider, model and connection, never a key value. */
@@ -202,7 +282,7 @@ export function resolveLlm(spec: string, opts: { baseUrl?: string; apiKeyEnv?: s
  * caller then checks the CLI is installed), and a config error when options.llm is
  * malformed. Default, when nothing is set: the claude CLI with `sonnet`.
  */
-export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: string; config?: unknown }): { llm: Llm | null; usesCli: boolean; error?: string } {
+export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: string; temperature?: number; config?: unknown }): { llm: Llm | null; usesCli: boolean; error?: string } {
   let cfg: LlmConfig = {};
   if (input.config !== undefined) {
     const r = LlmOptions.safeParse(input.config);
@@ -216,7 +296,7 @@ export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: 
       spec = `${cfg.provider}:${cfg.model}`;
     } else spec = cfg.model ?? "sonnet"; // claude CLI
   }
-  const opts = { baseUrl: input.baseUrl ?? cfg.baseUrl, apiKeyEnv: input.apiKeyEnv ?? cfg.apiKeyEnv, temperature: cfg.temperature, path: cfg.path, maxTokens: cfg.maxTokens };
+  const opts = { baseUrl: input.baseUrl ?? cfg.baseUrl, apiKeyEnv: input.apiKeyEnv ?? cfg.apiKeyEnv, temperature: input.temperature ?? cfg.temperature, path: cfg.path, maxTokens: cfg.maxTokens };
   return { llm: resolveLlm(spec, opts), usesCli: spec.indexOf(":") < 0 };
 }
 

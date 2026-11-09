@@ -14,6 +14,8 @@ export interface Data {
   llm: string | null;
   /** Custom model provider specs the engine supports (names only, never a key). */
   customProviders: string[];
+  /** Model-key env var NAMES set on the server; null when unknown (demo). */
+  modelKeys: string[] | null;
   /** Free exploration by default for a run (the config's choice; off without a model). */
   explore: "off" | "assist" | "full";
   project: string;
@@ -34,7 +36,7 @@ export interface Data {
 }
 
 export const demo: Data = {
-  live: false, llm: null, customProviders: [], explore: "off", project: "acme-app",
+  live: false, llm: null, customProviders: [], modelKeys: null, explore: "off", project: "acme-app",
   targets: mock.targets, findings: mock.findings, tasks: mock.tasks, tests: mock.tests, secrets: mock.secrets,
   authzResources: mock.authzResources, authzActors: mock.authzActors, authzReplay: {},
   daily: mock.daily, activity: mock.activity, onboarding: mock.onboarding,
@@ -104,6 +106,7 @@ export interface ServerState {
   scope: { allowedHosts: string[]; stagingUrl?: string; allowActiveTesting: boolean } | null;
   llm: string | null;
   customProviders?: string[];
+  modelKeys?: string[];
   explore?: "off" | "assist" | "full";
   findings: ServerFinding[];
   scannedAt: string | null;
@@ -196,7 +199,7 @@ export function toData(s: ServerState): Data {
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6).map(({ at: _at, ...x }) => x);
 
   return {
-    live: true, llm: s.llm, customProviders: s.customProviders ?? [], explore: s.explore ?? (s.llm ? "assist" : "off"), project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
+    live: true, llm: s.llm, customProviders: s.customProviders ?? [], modelKeys: s.modelKeys ?? null, explore: s.explore ?? (s.llm ? "assist" : "off"), project, targets, findings, tasks, tests, secrets, authzResources, authzActors,
     authzReplay: s.authz?.replay ?? {}, daily, activity,
     onboarding: mock.onboarding.map((o) => ({ ...o, done: o.id === "target" ? (s.scope?.allowedHosts.length ?? 0) > 0 : false })),
     guardedCount: 0,

@@ -8,14 +8,17 @@ import type { Target } from "./types.ts";
 // small context mounted by the Shell, so Home and Agent stay in sync.
 
 export const MODELS = [
-  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus capable, pour les audits profonds." },
-  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis, le bon défaut." },
+  { id: "opus-4-8", label: "Opus 4.8", provider: "claude", vendor: "Anthropic", desc: "Moins souvent bloqué sur les audits.", recommended: true },
+  { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus récent, mais plus souvent bloqué." },
+  { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis." },
   { id: "haiku", label: "Haiku 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus rapide, pour les vérifications simples." },
   { id: "gpt", label: "GPT-5.5", provider: "openai", vendor: "OpenAI", desc: "Modèle généraliste d'OpenAI." },
-  { id: "gemini", label: "Gemini 3.5", provider: "gemini", vendor: "Google", desc: "Grande fenêtre de contexte, pour les gros dépôts." },
-  { id: "mistral", label: "Mistral Large", provider: "mistral", vendor: "Mistral AI", desc: "Hébergé en Europe." },
+  { id: "gemini", label: "Gemini 3.5", provider: "gemini", vendor: "Google", desc: "Grande fenêtre de contexte, pour les gros dépôts.", example: "nom du modèle" },
+  { id: "mistral", label: "Mistral Large", provider: "mistral", vendor: "Mistral AI", desc: "Hébergé en Europe.", example: "mistral-large-latest" },
 ] as const;
 export type ModelId = (typeof MODELS)[number]["id"];
+/** The recommended built-in model, selected when nothing else is stored. */
+export const DEFAULT_MODEL_ID: ModelId = "opus-4-8";
 
 /* ---------------- custom / local models ----------------
    The composer can point a run at a model the engine reaches over HTTP (see
@@ -37,10 +40,12 @@ export interface CustomModel {
   apiKeyEnv?: string;
   /** Optional sampling temperature (0..2). */
   temperature?: number;
+  /** The preset it was made from (logo and label in the menu), e.g. "openrouter". */
+  connector?: string;
 }
 
 export const PROVIDERS: { id: CustomProvider; label: string; logo: Provider; prefix: string; basePlaceholder: string; needsKey: boolean }[] = [
-  { id: "openai-compatible", label: "OpenAI compatible", logo: "openai", prefix: "openai", basePlaceholder: "https://api.openai.com (ou http://127.0.0.1:1234/v1)", needsKey: true },
+  { id: "openai-compatible", label: "OpenAI compatible", logo: "openai", prefix: "openai", basePlaceholder: "https://api.example.com/v1", needsKey: true },
   { id: "ollama", label: "Ollama", logo: "custom", prefix: "ollama", basePlaceholder: "http://127.0.0.1:11434", needsKey: false },
   { id: "anthropic-api", label: "Anthropic API", logo: "claude", prefix: "anthropic-api", basePlaceholder: "https://api.anthropic.com", needsKey: true },
 ] as const;
@@ -51,52 +56,88 @@ export const providerOf = (id: CustomProvider) => PROVIDERS.find((p) => p.id ===
 // the same `openai:<model>`, only the base URL and the key's env-var name differ),
 // so no backend change is needed to add one. `apiKeyEnv` is a conventional env-var
 // NAME, never a key; `local: true` means no key. Pick one to pre-fill the card.
-export interface Connector { id: string; label: string; logo: Provider; provider: CustomProvider; baseUrl?: string; apiKeyEnv?: string; local?: boolean; hint?: string }
+// `mono` + `tint`: a two-letter mark for connectors without a logo of their own
+// (no third-party artwork is copied; letters only).
+export interface Connector { id: string; label: string; logo: Provider; provider: CustomProvider; baseUrl?: string; apiKeyEnv?: string; local?: boolean; hint?: string; example?: string; mono?: string; tint?: string }
 export const CONNECTORS: Connector[] = [
-  { id: "openai", label: "OpenAI", logo: "openai", provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY" },
-  { id: "anthropic", label: "Anthropic", logo: "claude", provider: "anthropic-api", baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY" },
-  { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY" },
-  { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY" },
-  { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY" },
+  { id: "openai", label: "OpenAI", logo: "openai", provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY", example: "gpt-4o-mini" },
+  { id: "anthropic", label: "Anthropic", logo: "claude", provider: "anthropic-api", baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY", example: "claude-opus-4-8" },
+  { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", example: "openai/gpt-4o-mini", mono: "OR", tint: "#8B8CF8" },
+  { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY", example: "nom du modèle", mono: "Gq", tint: "#F7744F" },
+  { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY", example: "deepseek-chat", mono: "DS", tint: "#6B86FF" },
   { id: "mistral", label: "Mistral", logo: "mistral", provider: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", apiKeyEnv: "MISTRAL_API_KEY" },
   { id: "gemini", label: "Gemini", logo: "gemini", provider: "openai-compatible", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnv: "GEMINI_API_KEY" },
-  { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY" },
-  { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY" },
-  { id: "fireworks", label: "Fireworks", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY" },
-  { id: "perplexity", label: "Perplexity", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY" },
-  { id: "ollama", label: "Ollama", logo: "custom", provider: "ollama", baseUrl: "http://127.0.0.1:11434", local: true, hint: "local" },
-  { id: "lmstudio", label: "LM Studio", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:1234/v1", local: true, hint: "local" },
-  { id: "vllm", label: "vLLM / llama.cpp", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:8000/v1", local: true, hint: "local" },
-  { id: "custom", label: "Autre (OpenAI-compatible)", logo: "custom", provider: "openai-compatible" },
+  { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY", example: "nom du modèle", mono: "xA", tint: "#D4D4D8" },
+  { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY", example: "fournisseur/modèle", mono: "To", tint: "#4D8DFF" },
+  { id: "fireworks", label: "Fireworks", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY", example: "accounts/fireworks/models/…", mono: "Fw", tint: "#A77BF3" },
+  { id: "perplexity", label: "Perplexity", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY", example: "nom du modèle", mono: "Px", tint: "#34C3D6" },
+  { id: "ollama", label: "Ollama", logo: "custom", provider: "ollama", baseUrl: "http://127.0.0.1:11434", local: true, hint: "local", example: "llama3.1", mono: "Ol", tint: "#E4E4E7" },
+  { id: "lmstudio", label: "LM Studio", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:1234/v1", local: true, hint: "local", example: "nom du modèle chargé", mono: "LM", tint: "#9F7AEA" },
+  { id: "vllm", label: "vLLM", logo: "custom", provider: "openai-compatible", baseUrl: "http://127.0.0.1:8000/v1", local: true, hint: "local", example: "nom du modèle servi (vLLM, llama.cpp)", mono: "vL", tint: "#F5B83D" },
+  { id: "custom", label: "Autre point d'accès", logo: "custom", provider: "openai-compatible", example: "nom du modèle", mono: "{}", tint: "#A1A1AA" },
 ];
-export const connectorOf = (id: string) => CONNECTORS.find((c) => c.id === id);
+export const connectorOf = (id: string | undefined) => (id ? CONNECTORS.find((c) => c.id === id) : undefined);
 /** A fresh draft pre-filled from a connector preset (provider, base URL, key env). */
-export const connectorToDraft = (c: Connector, name = ""): ModelDraft => ({ provider: c.provider, name, baseUrl: c.baseUrl ?? "", apiKeyEnv: c.apiKeyEnv ?? "", temperature: "" });
+export const connectorToDraft = (c: Connector, name = ""): ModelDraft => ({ connector: c.id, provider: c.provider, name, baseUrl: c.baseUrl ?? "", apiKeyEnv: c.apiKeyEnv ?? "", temperature: "" });
 /** The engine spec for a custom model: "openai:<name>", "ollama:<name>", "anthropic-api:<name>". */
 export const customSpec = (m: CustomModel) => `${providerOf(m.provider).prefix}:${m.name}`;
+/** Logo and short source label of a custom model ("OpenRouter", "Ollama", ...). */
+export const customSource = (m: CustomModel): { logo: Provider; label: string } => {
+  const c = connectorOf(m.connector);
+  return c && c.id !== "custom" ? { logo: c.logo, label: c.label } : { logo: providerOf(m.provider).logo, label: providerOf(m.provider).label };
+};
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+// Same list as the engine (src/agent/llm.ts MODEL_KEY_ENVS): the server only
+// reads these names, CRENEL_LLM_*, or the one options.llm.apiKeyEnv declares.
+export const MODEL_KEY_ENVS = [
+  "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY",
+  "GEMINI_API_KEY", "XAI_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "PERPLEXITY_API_KEY",
+];
+export const isModelKeyEnv = (n: string) => MODEL_KEY_ENVS.includes(n) || n.startsWith("CRENEL_LLM_");
 
-export interface ModelDraft { provider: CustomProvider; name: string; baseUrl: string; apiKeyEnv: string; temperature: string }
-export const emptyDraft = (): ModelDraft => ({ provider: "openai-compatible", name: "", baseUrl: "", apiKeyEnv: "", temperature: "" });
+export interface ModelDraft { connector?: string; provider: CustomProvider; name: string; baseUrl: string; apiKeyEnv: string; temperature: string }
+export const emptyDraft = (): ModelDraft => ({ connector: "custom", provider: "openai-compatible", name: "", baseUrl: "", apiKeyEnv: "", temperature: "" });
 
-/** Soft validation of the config card. Returns a field->message map (empty = ok). */
+/** "0,2" (French) and "0.2" both read as 0.2; NaN when it is not a number. */
+const readTemperature = (raw: string) => Number(raw.trim().replace(",", "."));
+const isLoopback = (host: string) => ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host.toLowerCase());
+
+/** Validation of the config card, mirroring what the server accepts. Field -> message (empty = ok). */
 export function validateDraft(d: ModelDraft): Partial<Record<keyof ModelDraft, string>> {
   const e: Partial<Record<keyof ModelDraft, string>> = {};
   if (!d.name.trim()) e.name = "Nom du modèle requis.";
-  if (d.apiKeyEnv.trim() && !ENV_NAME.test(d.apiKeyEnv.trim())) e.apiKeyEnv = "MAJUSCULES et underscore, ex. CRENEL_LLM_API_KEY.";
-  if (d.baseUrl.trim() && /\s/.test(d.baseUrl.trim())) e.baseUrl = "URL invalide.";
-  if (d.temperature.trim()) { const t = Number(d.temperature); if (!Number.isFinite(t) || t < 0 || t > 2) e.temperature = "Entre 0 et 2."; }
+  else if (/\s/.test(d.name.trim())) e.name = "Pas d'espace dans le nom du modèle.";
+  const key = d.apiKeyEnv.trim();
+  if (key && !ENV_NAME.test(key)) e.apiKeyEnv = "MAJUSCULES, chiffres et _, ex. OPENAI_API_KEY.";
+  const base = d.baseUrl.trim();
+  if (base) {
+    let u: URL | null = null;
+    try { u = new URL(base); } catch { e.baseUrl = "URL invalide."; }
+    if (u) {
+      if (u.username || u.password) e.baseUrl = "Pas d'identifiant dans l'URL : la clé passe par une variable d'environnement.";
+      else if (u.protocol !== "https:" && !(u.protocol === "http:" && isLoopback(u.hostname))) e.baseUrl = "https requis (http seulement vers localhost).";
+    }
+  }
+  if (d.temperature.trim()) { const t = readTemperature(d.temperature); if (!Number.isFinite(t) || t < 0 || t > 2) e.temperature = "Un nombre entre 0 et 2."; }
   return e;
+}
+/** Non-blocking notes: the server refuses a key name outside the model-key list unless the config declares it. */
+export function draftNotes(d: ModelDraft): Partial<Record<keyof ModelDraft, string>> {
+  const n: Partial<Record<keyof ModelDraft, string>> = {};
+  const key = d.apiKeyEnv.trim();
+  if (key && ENV_NAME.test(key) && !isModelKeyEnv(key)) n.apiKeyEnv = "Le serveur refusera ce nom, sauf s'il est déclaré dans options.llm.apiKeyEnv. Préférez un nom CRENEL_LLM_*.";
+  return n;
 }
 
 /** Build a CustomModel from a valid draft (caller checks validateDraft first). */
 export function draftToModel(d: ModelDraft, id = `cm-${Math.random().toString(36).slice(2, 9)}`): CustomModel {
-  const t = d.temperature.trim() ? Number(d.temperature) : undefined;
+  const t = d.temperature.trim() ? readTemperature(d.temperature) : undefined;
   return {
     id, provider: d.provider, name: d.name.trim(),
     baseUrl: d.baseUrl.trim() || undefined, apiKeyEnv: d.apiKeyEnv.trim() || undefined,
     temperature: t !== undefined && Number.isFinite(t) ? t : undefined,
+    ...(d.connector && d.connector !== "custom" && connectorOf(d.connector) ? { connector: d.connector } : {}),
   };
 }
 
@@ -116,6 +157,7 @@ export function parseCustomModels(raw: string | null): CustomModel[] {
       ...(typeof m.baseUrl === "string" ? { baseUrl: m.baseUrl } : {}),
       ...(typeof m.apiKeyEnv === "string" ? { apiKeyEnv: m.apiKeyEnv } : {}),
       ...(typeof m.temperature === "number" ? { temperature: m.temperature } : {}),
+      ...(typeof m.connector === "string" && connectorOf(m.connector) ? { connector: m.connector } : {}),
     }));
   } catch { return []; }
 }
@@ -143,16 +185,19 @@ export function activeModelView(model: string, custom: CustomModel[]): { label: 
   const m = MODELS.find((x) => x.id === model);
   if (m) return { label: m.label, provider: m.provider, custom: false };
   const c = custom.find((x) => x.id === model);
-  if (c) return { label: c.name, provider: providerOf(c.provider).logo, custom: true };
-  const d = MODELS[0]!;
+  if (c) return { label: c.name, provider: customSource(c).logo, custom: true };
+  const d = MODELS.find((x) => x.id === DEFAULT_MODEL_ID) ?? MODELS[0]!;
   return { label: d.label, provider: d.provider, custom: false };
 }
 
 /** What `start(...)` sends: a built-in id passes through; a custom id becomes its spec + connection (never a key value). */
-export function modelSend(model: string, custom: CustomModel[]): { model: string; modelBaseUrl?: string; modelApiKeyEnv?: string } {
+export function modelSend(model: string, custom: CustomModel[]): { model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number } {
   const c = custom.find((x) => x.id === model);
   if (!c) return { model };
-  return { model: customSpec(c), modelBaseUrl: c.baseUrl || undefined, modelApiKeyEnv: c.apiKeyEnv || undefined };
+  return {
+    model: customSpec(c), modelBaseUrl: c.baseUrl || undefined, modelApiKeyEnv: c.apiKeyEnv || undefined,
+    ...(c.temperature !== undefined ? { modelTemperature: c.temperature } : {}),
+  };
 }
 
 export const EFFORTS = [
@@ -190,7 +235,7 @@ export const GOALS = [
 export type GoalId = (typeof GOALS)[number]["id"];
 
 export const CONTEXT_WINDOW: Record<string, number> = {
-  opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
+  "opus-4-8": 200_000, opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
 };
 /** Context window for any model id (built-in or custom); a safe default otherwise. */
 export const contextWindowOf = (model: string) => CONTEXT_WINDOW[model] ?? 128_000;
@@ -217,7 +262,7 @@ interface Workspace {
 const noop = () => {};
 const WorkspaceContext = createContext<Workspace>({
   target: targets[0]!, setTargetId: noop,
-  model: "opus", setModel: noop,
+  model: DEFAULT_MODEL_ID, setModel: noop,
   customModels: [], addCustomModel: noop, removeCustomModel: noop,
   effort: "med", setEffort: noop,
   mode: "ask", setMode: noop,
@@ -228,7 +273,7 @@ const WorkspaceContext = createContext<Workspace>({
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [targetId, setTargetId] = useState(targets[0]!.id);
   const [customModels, setCustomModels] = useState<CustomModel[]>(() => loadCustomModels());
-  const [model, setModelState] = useState<string>(() => loadModelId("opus"));
+  const [model, setModelState] = useState<string>(() => loadModelId(DEFAULT_MODEL_ID));
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
   const [goal, setGoal] = useState<GoalId>("none");
@@ -237,7 +282,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Workspace>(() => {
     const setModel = (m: string) => { setModelState(m); saveModelId(m); };
     const addCustomModel = (m: CustomModel) => setCustomModels((l) => { const next = [...l.filter((x) => x.id !== m.id), m]; saveCustomModels(next); return next; });
-    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel("opus"); return next; });
+    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); return next; });
     return {
       target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
       setTargetId, model, setModel, customModels, addCustomModel, removeCustomModel,
