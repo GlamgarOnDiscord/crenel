@@ -30,6 +30,7 @@ empty list runs every read-only check.
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
+| null-byte-exposure | A sensitive file blocked by its extension (401/403 for *.bak, *.sql …) but served through a poison-null-byte suffix (`.bak%00.md`) | yes (blocked direct vs null-byte served, with a non-existent control) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
