@@ -24,7 +24,7 @@ async function run(mode: "reflect-creds" | "reflect-no-creds" | "wildcard") {
 }
 test("cors-reflection: reflected origin + credentials is proven", async () => {
   const f = await run("reflect-creds");
-  assert.equal(f.length, 1); assert.equal(f[0].state, "proven");
+  assert.equal(f.length, 1); assert.equal(f[0]!.state, "proven");
 });
 test("cors-reflection: reflected origin without credentials is not flagged", async () => {
   assert.equal((await run("reflect-no-creds")).filter((x) => x.state === "proven").length, 0);
