@@ -17,7 +17,7 @@
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
-import { authzOracle } from "../agent/validators.js";
+import { authzOracle, ownerValue } from "../agent/validators.js";
 
 interface ResourceSpec {
   /** e.g. "project" */
@@ -28,6 +28,19 @@ interface ResourceSpec {
   methods?: string[];
   /** Public by design (a trust boundary): never probed, never reported. */
   public?: boolean;
+  /** Owner-id field in the object body (e.g. "UserId", "owner_id"). Enables the
+   * owner-id differential: proves a cross-tenant read without B's token/marker. */
+  ownerField?: string;
+  /** Ids belonging to OTHER tenants (not account A), to attempt as A for the
+   * owner-id differential. No ownership is claimed about them; the proof reads
+   * the owner-id field out of the response itself. Needs `ownerField` and an id
+   * of this resource under accounts.a.owns (A's own object, the baseline). */
+  probeIds?: string[];
+  /** GraphQL transport for the owner-id differential: a query string with :id,
+   * e.g. `{ paste(id: :id) { ownerId } }`. When set, the resource is read by POST
+   * to `path` (the GraphQL endpoint) and the owner field is taken from the object
+   * under `data`. Lets the same validated oracle cover a GraphQL API. */
+  gql?: string;
 }
 
 interface AccountSpec {
@@ -54,6 +67,7 @@ export const authzMatrix: Check = {
     const cfg = (ctx.options["authz-matrix"] ?? {}) as AuthzOptions;
     const resources = cfg.resources ?? [];
     const findings: Finding[] = [];
+    const provenIds = new Set<string>();
 
     if (resources.length === 0) {
       ctx.log("authz-matrix: no resources declared, nothing to check");
@@ -74,10 +88,15 @@ export const authzMatrix: Check = {
 
     ctx.log(`authz-matrix: ${resources.length} resource(s), ${cases.length} cross-tenant case(s)`);
 
-    const canProbe =
-      !!ctx.stagingUrl && !!cfg.accounts?.a?.token && cases.length > 0;
+    // Owner-id differential work is independent of b.owns cases: it needs only a
+    // resource with ownerField + probeIds and A's own id of that resource.
+    const ownerFieldResources = resources.filter(
+      (r) => !r.public && r.ownerField && (r.probeIds?.length ?? 0) > 0,
+    );
+    const canProbe = !!ctx.stagingUrl && !!cfg.accounts?.a?.token && cases.length > 0;
+    const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (!!cfg.accounts?.a?.token || ownerFieldResources.some((r) => r.gql));
 
-    if (!canProbe) {
+    if (!canProbe && !canOwnerField) {
       // Offline: emit one finding that carries the generated test as its proof-of-intent.
       // It is "unproven" because we have not run it; it is a lead to wire into CI.
       findings.push({
@@ -107,7 +126,7 @@ export const authzMatrix: Check = {
     ctx.scope.assertActiveAllowed("authz-matrix (live probe)");
     const base = ctx.stagingUrl!.replace(/\/$/, "");
     ctx.scope.assertUrlAllowed(base);
-    const accounts = cfg.accounts!;
+    const accounts = cfg.accounts ?? {};
     const markers = [accounts.b?.marker ?? ""].filter(Boolean);
     // Distinct contexts (Teycir's guard): if A and B are the same account, every
     // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
@@ -132,7 +151,7 @@ export const authzMatrix: Check = {
     // token, C's if declared, then with no token at all: a route can refuse a
     // wrong token and still serve an anonymous caller.
     const actors: { key: "a" | "c" | "anon"; who: string; token?: string }[] = [
-      { key: "a", who: "account A's token", token: accounts.a!.token },
+      { key: "a", who: "account A's token", token: accounts.a?.token },
       ...(accounts.c?.token ? [{ key: "c" as const, who: "account C's token (another tenant)", token: accounts.c.token }] : []),
       { key: "anon", who: "no token at all" },
     ];
@@ -176,10 +195,83 @@ export const authzMatrix: Check = {
             },
             regressionHint: renderTestFile([c.resource]),
           });
-          if (proven) break; // one proof per object is enough
+          if (proven) { provenIds.add(`${c.resource.name}:${c.id}`); break; } // one proof per object is enough
         }
       } catch (err) {
         ctx.log(`authz-matrix: ${c.method} ${url} failed: ${(err as Error).message}`);
+      }
+    }
+
+    // Owner-id differential: when a resource carries an owner-id field and account
+    // A owns an id of it, prove a cross-tenant read without B's token or a marker.
+    // A reads a target id (another tenant's) and its OWN id; if the owner field
+    // differs and a control does not answer the same way, A read an object it does
+    // not own. Covers objects whose body names its owner (UserId, owner_id, ...).
+    const aOwns = accounts.a?.owns ?? {};
+    const field = (r: ResourceSpec) => r.ownerField!;
+    const aToken = accounts.a?.token;
+    // Read a resource by id over its transport: a GraphQL POST (object taken from
+    // under `data`) when `gql` is set, else a REST GET. The attacker is A when a
+    // token is configured, otherwise anonymous (unauthenticated APIs like DVGA).
+    const readOwner = async (r: ResourceSpec, idOrRaw: string, raw = false): Promise<{ status: number; body: string }> => {
+      if (r.gql) {
+        const q = r.gql.replace(/:id/g, raw ? idOrRaw : JSON.stringify(idOrRaw).slice(1, -1));
+        const res = await safeFetch(base + r.path, ctx.scope, { method: "POST", headers: { "content-type": "application/json", ...(aToken ? { authorization: `Bearer ${aToken}` } : {}) }, body: JSON.stringify({ query: q }) }).then((x) => ({ status: x.status, body: x.body }));
+        try { const j = JSON.parse(res.body); const obj = j?.data && typeof j.data === "object" ? Object.values(j.data)[0] : undefined; return { status: obj == null ? 404 : res.status, body: JSON.stringify(obj ?? null) }; } catch { return res; }
+      }
+      return get(base + r.path.replace(":id", raw ? idOrRaw : encodeURIComponent(idOrRaw)), aToken);
+    };
+    for (const r of ownerFieldResources) {
+      const targetIds = (r.probeIds ?? []).filter((id) => !provenIds.has(`${r.name}:${id}`));
+      if (!targetIds.length) continue;
+      try {
+        const control = await readOwner(r, `crenel-nonexistent-${randomBytes(6).toString("hex")}`, true);
+        // The attacker's own object (if declared) gives A's own owner-id, so a
+        // target whose owner-id differs is provably not A's.
+        let selfVal: string | undefined;
+        const selfId = (aOwns[r.name] ?? [])[0];
+        if (selfId !== undefined) selfVal = ownerValue((await readOwner(r, selfId)).body, field(r));
+        // Read each target, keep the ones that return a 2xx carrying an owner-id.
+        const seen: { id: string; url: string; status: number; val: string }[] = [];
+        for (const id of targetIds) {
+          const url = r.gql ? `${base}${r.path} ${r.name}(${id})` : base + r.path.replace(":id", encodeURIComponent(id));
+          const res = await readOwner(r, id);
+          if (res.status < 200 || res.status >= 300) continue;
+          if (control.status >= 200 && control.status < 300 && control.body === res.body) continue; // generic page
+          const val = ownerValue(res.body, field(r));
+          if (val !== undefined) seen.push({ id, url, status: res.status, val });
+        }
+        const caller = aToken ? "account A" : "an unauthenticated caller";
+        const verb = r.gql ? "a GraphQL query" : "a GET";
+        const prove = (id: string, url: string, status: number, reason: string) => {
+          provenIds.add(`${r.name}:${id}`);
+          findings.push({
+            id: `authz-matrix:${r.name}:owner-field:${id}`, check: "authz-matrix",
+            title: `${caller[0]!.toUpperCase() + caller.slice(1)} read a ${r.name} it does not own (${status}, owner-id ${field(r)})`,
+            severity: "critical", state: "proven", location: url,
+            description: `With ${caller}, ${verb} on ${r.name} ${id} returned an object whose ${field(r)} is not the caller's: ${reason}. This is broken object-level authorization (IDOR/BOLA).`,
+            remediation: `Enforce the ownership check at the data layer for ${r.name}, comparing ${field(r)} to the caller's identity, and add the generated regression test.`,
+            proof: {
+              method: `live owner-id differential on staging: targets read as ${caller} over ${r.gql ? "GraphQL" : "REST"}, their owner-id field, negative control` + (selfVal !== undefined ? ", the attacker's own object" : ""),
+              replay: r.gql ? `POST ${base}${r.path} with query ${r.gql.replace(":id", id)}` : `curl -i${aToken ? " -H 'authorization: Bearer <A_TOKEN>'" : ""} '${url}'`,
+              evidence: `HTTP ${status}; control ${control.status}. ${reason}`,
+            },
+            regressionHint: renderTestFile([r]),
+          });
+        };
+        if (selfVal !== undefined) {
+          for (const s of seen) if (String(s.val) !== String(selfVal)) prove(s.id, s.url, s.status, `${field(r)}=${s.val}, while A's own object carries ${field(r)}=${selfVal}`);
+        } else {
+          // No self baseline: if A reads objects with >=2 distinct owner-ids, one
+          // account cannot own them all, so at least one is a cross-tenant read.
+          const distinct = [...new Set(seen.map((s) => s.val))];
+          if (distinct.length >= 2) {
+            const s = seen[0]!, other = seen.find((x) => x.val !== s.val)!;
+            prove(s.id, s.url, s.status, `the caller also reads ${r.name} ${other.id} with ${field(r)}=${other.val}; one owner cannot hold both ${field(r)}=${s.val} and ${field(r)}=${other.val}, so at least one is read across owners`);
+          }
+        }
+      } catch (err) {
+        ctx.log(`authz-matrix: owner-field ${r.name} failed: ${(err as Error).message}`);
       }
     }
 

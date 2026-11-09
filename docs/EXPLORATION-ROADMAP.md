@@ -11,28 +11,27 @@ On neutral targets (DVGA + Juice Shop + crAPI, ground truth /32, proven findings
 
 ## Why the gap is structural, not just missing checks
 
-The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee and the reason it has zero false positives. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
+The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee: false positives are kept out by the validators and none has been observed on the bench, which is not a claim that there can be none. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
 
 So the gap closes on two tracks, and neither is overfitting (no target signatures, no self-asserted proofs):
 
 ## Track A — more generic validators (incremental)
 
-Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none, mass-assignment, CORS.
+Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none and forgery, mass-assignment, CORS, business-logic **reuse** (the same artifact applied twice, an invalid one rejected), GraphQL suggestions and batching, **open-redirect** (two-sentinel differential).
 
 Candidates next, with an honest oracle:
-- **business-logic / reuse** — the same coupon, credit, or invite accepted beyond its limit, proven by replay + a state re-read (active mode). Overlaps the existing `race` check; fold them.
 - **BFLA (function-level auth)** — a low-privilege actor reaches an admin function that anon is denied, proven by a differential across actors.
 - **excessive-data-exposure** — deliberately NOT a keyword list (that would be a signature). The honest version only: a response to actor A carries records bearing *other* configured accounts' markers (already partly covered by `replay`/`cross-actor`).
 
 ## Track B — let the model work like a free agent (the real lever)
 
-Today the exploration model is called through `claude -p` as a pure text completion that emits JSON for Crenel's own tool loop (`http.request`, `toolbox.run`, `claim.submit`). It cannot run its own tools or skills, and `claim.submit` only accepts known classes. That is why it under-explores versus HexStrike (150+ tools) and Claude Code (full agent).
+Today the exploration model (the `claude` CLI or a custom provider) is called as a pure text completion that emits JSON for Crenel's own tool loop (`http.request`, `toolbox.run`, `claim.submit`). It cannot run its own tools or skills, and `claim.submit` only accepts known classes. That is why it under-explores versus HexStrike (150+ tools) and Claude Code (full agent).
 
 The plan: run the exploration model as a **free agent with real tools and skills** (shell, scripting, the toolbox, Cloudflare and other skills) — but **inside the proxied perimeter**, so Crenel's "scope in code, not in a prompt" safety guarantee holds, and with **proof still gated by the generic validators**, so freedom raises recall without adding false positives or overfitting.
 
 Enabling pieces:
-- **Custom / local model providers** (in progress): an `Llm` provider registry so exploration can target any OpenAI-compatible endpoint, Ollama, or the Anthropic API directly — not only the `claude` CLI. Keys only from the environment.
+- **Custom / local model providers** (done): an `Llm` provider registry (`src/agent/llm.ts`) so exploration can target any OpenAI-compatible endpoint, Ollama, or the Anthropic API directly — not only the `claude` CLI. Keys only from the environment.
 - A broader, higher-budget toolbox (done: full mode now 24 calls / 300 requests / 10 tool runs / 25 min), and an aggressive, persistent exploitation prompt (done).
-- The agent-freedom step itself: give the spawned agent its own tools/skills within the perimeter proxy, keeping every request on the scoped client.
+- The agent-freedom step itself: give the spawned agent its own tools/skills within the perimeter proxy, keeping every request on the scoped client. A shell alone does not keep it in the perimeter (a direct socket skips the proxy): the agent runs where egress is restricted at the network layer (a container whose only route out is the proxy), as `docs/TRACK-B-FREE-AGENT.md` details.
 
 The guarantee throughout: a finding is `proven` only when a deterministic validator replays it. Freedom and more models change what the agent *reaches*, never what counts as proof.

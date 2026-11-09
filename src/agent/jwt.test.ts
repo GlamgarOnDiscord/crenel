@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, createPublicKey } from "node:crypto";
-import { forgeNoneToken, forgeNoneVariants, forgeHs256, jwkToPems, jwtForgeOracle, corruptSig, headerOf, payloadOf, isRsaAlg, isHmacAlg, WEAK_SECRETS } from "./jwt.js";
+import { forgeNoneToken, forgeNoneVariants, forgeHs256, jwkToPems, jwtForgeOracle, jwtNoneOracle, corruptSig, headerOf, payloadOf, isRsaAlg, isHmacAlg, WEAK_SECRETS } from "./jwt.js";
 
 const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
 const mkToken = (alg: string, payload: object, sig = "sig") => `${b64({ alg, typ: "JWT" })}.${b64(payload)}.${sig}`;
@@ -49,6 +49,18 @@ test("corruptSig flips the signature", () => {
 
 const ok = { status: 200, body: '{"ok":1}' };
 const denied = { status: 401, body: "no" };
+test("jwtNoneOracle: proven only when anon denied AND a corrupt-signature control is denied", () => {
+  const ok = { status: 200, body: '{"role":"admin"}' }, denied = { status: 401, body: "" };
+  // forged accepted, anon denied, corrupt-sig control denied -> proven
+  assert.equal(jwtNoneOracle({ forged: ok, anon: denied, control: denied }).verdict, "proven");
+  // server also accepts a corrupt signature (same body) -> not specific to alg:none
+  assert.equal(jwtNoneOracle({ forged: ok, anon: denied, control: { status: 200, body: '{"role":"admin"}' } }).verdict, "lead");
+  // anon not denied -> lead
+  assert.equal(jwtNoneOracle({ forged: ok, anon: { status: 200, body: "x" }, control: denied }).verdict, "lead");
+  // forged rejected -> denied
+  assert.equal(jwtNoneOracle({ forged: denied, anon: denied, control: denied }).verdict, "denied");
+});
+
 test("jwtForgeOracle: forged accepted + corrupted rejected -> proven", () => {
   assert.equal(jwtForgeOracle({ forged: ok, control: denied }).verdict, "proven");
 });

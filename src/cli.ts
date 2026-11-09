@@ -20,8 +20,9 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
-import { claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
-import { crawlLiveBundle } from "./checks/live-bundle.js";
+import { checkModelEndpoint, claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
+import { crawlLiveBundle, extractEndpoints } from "./checks/live-bundle.js";
+import { runAutoProbe, type Endpoint } from "./agent/autoprobe.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
 import { SEVERITIES } from "./report/render.js";
@@ -400,6 +401,14 @@ async function main(): Promise<number> {
       // tuned by --model-base-url / --model-api-key-env or options.llm. Keys come
       // only from the env var named by --model-api-key-env/apiKeyEnv, never argv.
       if (typeof flags.effort === "string" && !parseEffort(flags.effort)) { process.stderr.write(`--effort must be low, medium, high, xhigh or max\n`); return 2; }
+      // The model endpoint is outside the scoped client (it is not a scan target): it gets the same checks as the
+      // console's, so prompts that carry target responses go over https (or to the loopback), never to a scan target,
+      // and the key's variable is a NAME. On the owner's own command line any variable name they choose is allowed.
+      const keyFlag = typeof flags["model-api-key-env"] === "string" ? flags["model-api-key-env"] : undefined;
+      const cfgLlm = (config.options.llm ?? {}) as { baseUrl?: unknown; apiKeyEnv?: unknown };
+      const effBase = typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : typeof cfgLlm.baseUrl === "string" ? cfgLlm.baseUrl : undefined;
+      const badEndpoint = checkModelEndpoint({ baseUrl: effBase, apiKeyEnv: keyFlag, scanHosts: config.scope.allowedHosts, configKeyEnv: keyFlag });
+      if (badEndpoint) { process.stderr.write(`${badEndpoint}\n`); return 2; }
       const sel = selectLlm({
         spec: typeof flags.model === "string" ? flags.model : undefined,
         baseUrl: typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : undefined,
@@ -499,6 +508,35 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  if (cmd === "autoprobe") {
+    // Deterministic exploration: recon the endpoints, then submit a systematic set
+    // of claims to the generic validators (no model, reproducible). Proof stays gated.
+    const configPath = (flags.config as string) ?? defaultConfigPath();
+    let config;
+    try { config = loadConfig(configPath); } catch (err) { process.stderr.write(`${(err as Error).message}\n`); return 2; }
+    if (!config.scope.stagingUrl) { process.stderr.write("autoprobe needs a stagingUrl in the config.\n"); return 2; }
+    const scope = new Scope(scopeSettings(config.scope));
+    const log = (m: string) => { if (!flags.json) process.stderr.write(`${m}\n`); };
+    const base = config.scope.stagingUrl.replace(/\/+$/, "");
+    const { files } = await crawlLiveBundle({ scope, log }, config.scope.stagingUrl);
+    const paths = new Set<string>();
+    for (const f of files) if (f.kind !== "map") for (const e of extractEndpoints(f.body)) paths.add(e);
+    const authz = (config.options["authz-matrix"] ?? {}) as { resources?: { path?: string }[] };
+    for (const r of authz.resources ?? []) if (typeof r.path === "string") paths.add(r.path);
+    const endpoints: Endpoint[] = [...paths].map((p) => {
+      const u = new URL(p.replace(/:id|\{[^}]+\}/g, "1"), base + "/").toString();
+      const ps = [...new URL(u).searchParams.keys()];
+      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p) };
+    });
+    log(`autoprobe: ${endpoints.length} endpoint(s) discovered; probing...`);
+    const env = { scope, projectDir: config.projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };
+    const r = await runAutoProbe(env, { endpoints, origin: base }, { maxClaims: typeof flags.max === "string" ? Number(flags.max) : 200 });
+    const findings = r.proven.map((v) => ({ check: "autoprobe", title: v.reason.slice(0, 160), state: "proven", severity: v.ceiling ?? "high", location: "/", proof: { evidence: v.reason }, validator: v.validator }));
+    if (flags.json) process.stdout.write(JSON.stringify({ findings, tried: r.tried, proven: findings.length }, null, 2) + "\n");
+    else { for (const f of findings) process.stdout.write(`• PROVEN ${f.title}\n`); process.stdout.write(`\n${findings.length} proven / ${r.tried} claims tried (deterministic, no model).\n`); }
+    return 0;
+  }
+
   process.stdout.write(
     [
       "Crenel - a defensive security harness for SaaS",
@@ -515,7 +553,7 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus-4-8] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus-4-8] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
-      "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--effort low|medium|high|max] [--max-calls N] [--json] [--state dir]",
+      "  crenel explore [--config path] [--mode assist|full] [--model sonnet|openai:<m>|ollama:<m>|anthropic-api:<m>] [--model-base-url URL] [--model-api-key-env NAME] [--effort low|medium|high|max] [--max-calls N] [--llm-script file] [--json] [--state dir]",
       "                 free exploration by the model (claude -p); claims proven only by a validator's replay",
       "                 [--llm-script turns.json]: replay a recorded exploration, no model spent",
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",

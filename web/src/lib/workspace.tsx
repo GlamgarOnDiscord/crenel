@@ -87,7 +87,7 @@ export const customSource = (m: CustomModel): { logo: Provider; label: string } 
   return c && c.id !== "custom" ? { logo: c.logo, label: c.label } : { logo: providerOf(m.provider).logo, label: providerOf(m.provider).label };
 };
 
-const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/; // the server's rule: 128 characters at most
 // Same list as the engine (src/agent/llm.ts MODEL_KEY_ENVS): the server only
 // reads these names, CRENEL_LLM_*, or the one options.llm.apiKeyEnv declares.
 export const MODEL_KEY_ENVS = [
@@ -109,7 +109,7 @@ export function validateDraft(d: ModelDraft): Partial<Record<keyof ModelDraft, s
   if (!d.name.trim()) e.name = "Nom du modèle requis.";
   else if (/\s/.test(d.name.trim())) e.name = "Pas d'espace dans le nom du modèle.";
   const key = d.apiKeyEnv.trim();
-  if (key && !ENV_NAME.test(key)) e.apiKeyEnv = "MAJUSCULES, chiffres et _, ex. OPENAI_API_KEY.";
+  if (key && !ENV_NAME.test(key)) e.apiKeyEnv = "MAJUSCULES, chiffres et _, 128 caractères au plus, ex. OPENAI_API_KEY.";
   const base = d.baseUrl.trim();
   if (base) {
     let u: URL | null = null;
@@ -200,12 +200,14 @@ const ANTHROPIC_EFFORT = /^claude-(opus-(4-[6-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|h
  *   endpoints and Ollama get none).
  * - available: false when the server is live but cannot run it (no claude CLI).
  */
-export function modelCaps(model: string, custom: CustomModel[], server: { live: boolean; llm: string | null }): { effort: boolean; available: boolean; why?: string } {
+export function modelCaps(model: string, custom: CustomModel[], server: { live: boolean; llm: string | null; customProviders?: string[] }): { effort: boolean; available: boolean; why?: string } {
   if (MODELS.some((m) => m.id === model)) {
     const available = !server.live || !!server.llm;
     return { effort: true, available, why: available ? undefined : "Le CLI claude est introuvable sur la machine qui lance Crenel." };
   }
   const c = custom.find((x) => x.id === model);
+  // A live server that does not offer this provider would reject the run: say it before.
+  if (c && server.live && server.customProviders && !server.customProviders.includes(customSpec(c).split(":")[0]!)) return { effort: false, available: false, why: "Ce serveur n'accepte pas les modèles personnalisés (lancez crenel serve avec --llm)." };
   if (c?.provider === "anthropic-api") return { effort: ANTHROPIC_EFFORT.test(c.name), available: true, why: ANTHROPIC_EFFORT.test(c.name) ? undefined : "Ce modèle ne prend pas de réglage d'effort." };
   return { effort: false, available: true, why: c ? "Ce fournisseur n'a pas de réglage d'effort : il décide seul." : undefined };
 }
@@ -213,7 +215,8 @@ export function modelCaps(model: string, custom: CustomModel[], server: { live: 
 /** What `start(...)` sends: a built-in id passes through; a custom id becomes its spec + connection (never a key value). */
 export function modelSend(model: string, custom: CustomModel[]): { model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number } {
   const c = custom.find((x) => x.id === model);
-  if (!c) return { model };
+  // An id that is neither built in nor custom (a model removed since) runs what the label shows: the default.
+  if (!c) return { model: MODELS.some((m) => m.id === model) ? model : DEFAULT_MODEL_ID };
   return {
     model: customSpec(c), modelBaseUrl: c.baseUrl || undefined, modelApiKeyEnv: c.apiKeyEnv || undefined,
     ...(c.temperature !== undefined ? { modelTemperature: c.temperature } : {}),
@@ -307,8 +310,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const data = useData();
   const value = useMemo<Workspace>(() => {
     const setModel = (m: string) => { setModelState(m); saveModelId(m); };
-    const addCustomModel = (m: CustomModel) => setCustomModels((l) => { const next = [...l.filter((x) => x.id !== m.id), m]; saveCustomModels(next); return next; });
-    const removeCustomModel = (id: string) => setCustomModels((l) => { const next = l.filter((x) => x.id !== id); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); return next; });
+    // The next list is computed from this render's list; state and storage are updated outside any updater.
+    const addCustomModel = (m: CustomModel) => { const next = [...customModels.filter((x) => x.id !== m.id), m]; setCustomModels(next); saveCustomModels(next); };
+    const removeCustomModel = (id: string) => { const next = customModels.filter((x) => x.id !== id); setCustomModels(next); saveCustomModels(next); if (model === id) setModel(DEFAULT_MODEL_ID); };
     return {
       target: data.targets.find((t) => t.id === targetId) ?? data.targets[0]!,
       setTargetId, model, setModel, customModels, addCustomModel, removeCustomModel,

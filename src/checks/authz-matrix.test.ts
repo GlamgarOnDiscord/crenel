@@ -122,3 +122,46 @@ test("a route that leaks only once in three replays is not proven", async () => 
     assert.ok(!found.some((f) => f.state === "proven"), "a one-off 200 is not a proof");
   } finally { server.close(); }
 });
+
+test("owner-id differential over GraphQL: an anonymous caller reading objects with distinct owner-ids is proven", async () => {
+  const http = await import("node:http");
+  // An unauthenticated GraphQL API: paste(id) returns the object with its ownerId,
+  // regardless of who asks. Distinct owners across readable ids prove broken authz.
+  const owners: Record<string, number> = { "1": 1, "2": 1, "3": 2, "4": 3 };
+  const server = http.createServer((req, res) => {
+    let b = ""; req.on("data", (c) => (b += c));
+    req.on("end", () => {
+      const q = (() => { try { return JSON.parse(b).query as string; } catch { return ""; } })();
+      const id = q.match(/id:\s*([^)\s]+)/)?.[1] ?? "";
+      const o = owners[id];
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: { paste: o === undefined ? null : { ownerId: o } } }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "paste", path: "/graphql", ownerField: "ownerId", gql: "{ paste(id: :id) { ownerId } }", probeIds: ["1", "3", "4"] }] } },
+    });
+    assert.ok(found.some((f) => f.state === "proven" && /IDOR|BOLA/i.test(f.description ?? "")), "distinct owner-ids over GraphQL prove BOLA");
+  } finally { server.close(); }
+});
+
+test("owner-id differential: a single owner across all reads is NOT proven (no false positive)", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    let b = ""; req.on("data", (c) => (b += c));
+    req.on("end", () => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ data: { paste: { ownerId: 1 } } })); });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "paste", path: "/graphql", ownerField: "ownerId", gql: "{ paste(id: :id) { ownerId } }", probeIds: ["1", "2", "3"] }] } },
+    });
+    assert.ok(!found.some((f) => f.state === "proven"), "all one owner: nothing to prove");
+  } finally { server.close(); }
+});

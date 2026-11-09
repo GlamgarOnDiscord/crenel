@@ -53,6 +53,10 @@ empty list runs every read-only check.
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
 | race | A limit (coupon, credits, invite) consumed more than allowed by concurrent requests | yes (responses and A's read both above the limit) | **writes**: allowActiveTesting + `options.race.enabled`, one burst of at most 25 |
 | mass-assignment | Privileged fields (role, plan, credits, isAdmin, owner) accepted in a user's own update | yes (A's next read shows the value) | **writes**: allowActiveTesting + `options.mass-assignment.enabled` |
+| auth-injection | SQL/NoSQL authentication bypass on a declared login field (a tautology accepted where a benign value and a false tautology are denied) | yes (live differential with a control, opt-in) | **crafted logins**: allowActiveTesting + `options.auth-injection.enabled` + declared endpoints |
+| directory-listing | Open server directory index (autoindex) on a conventional folder path, exposing its files; confirms a sensitive file is actually served | yes (live, the listing + a fetched file) | yes (stagingUrl) |
+| live-ssrf | Server-side request forgery proven out-of-band: a unique nonce injected into a declared sink arrives at an ephemeral listener the target reached | yes (OOB callback, opt-in) | **outbound-triggering requests**: allowActiveTesting + `options.live-ssrf.enabled` + a callbackHost the target can reach |
+| command-injection | OS-command / template injection on a declared sink, proven by a computation (nonce next to 7*7 comes back as nonce49) | yes (computed differential, opt-in) | **payloads that run server-side**: allowActiveTesting + `options.command-injection.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
 ## exposed-secrets

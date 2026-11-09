@@ -62,21 +62,42 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 
 | Claim class | What it proves | Oracle |
 |---|---|---|
-| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection, NoSQL operator injection ($ne/$eq) in one parameter. REST query or form body, JSON-body operators, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database/parse error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
+| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection, NoSQL operator injection ($ne against $eq to a fresh nonce, or $in: [] in JSON) in one parameter, or a JSON `bodyTemplate` with `"__INJECT__"` at the field. REST query or form body, JSON-body operators, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database/parse error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
 | `explore.ssrf` | The server fetches a URL taken from a parameter (REST or GraphQL) | out-of-band: Crenel starts a listener and injects a callback URL with a nonce; a hit proves it |
 | `explore.stored-xss` | Markup sent through a store request is served unescaped by another request | reflection, on the retrieve response |
 | `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
 | `explore.lfi` | Path traversal reading a system file | file signature (`/etc/passwd` or `win.ini` content) over several traversal encodings |
 | `explore.jwt-none` | A forged unsigned `alg:none` token is accepted | differential: accepted where the anonymous request is denied |
-| `explore.mass-assignment` | A body field the client should not set is accepted and persisted | differential: the actor's own re-read shows the injected value; a control update without the field leaves it unchanged (active mode) |
-| `explore.cors` | CORS reflects any origin with credentials | differential: two distinct attacker origins are both reflected into `Access-Control-Allow-Origin` with `Allow-Credentials: true` (a wildcard is only a lead) |
+| `explore.mass-assignment` | A body field is accepted and persisted by the update (whether the client should be able to set it is the model's reading) | differential on the actor's own object (its marker in the read, not what anonymous gets), writes only to the staging origin with POST/PUT/PATCH: the re-read shows the injected value, a control update without the field leaves it exactly unchanged; the field is restored afterwards (active mode) |
+| `explore.cors` | CORS reflects any origin with credentials | differential: two distinct attacker origins are both reflected into `Access-Control-Allow-Origin` with the exact `Allow-Credentials: true`, or `Access-Control-Allow-Origin: null` with credentials on both (a sandboxed iframe); a wildcard or a single reflected origin is only a lead |
 | `explore.reuse` | A single-use artifact (coupon, credit, invite) applied more than once | differential: the same application succeeds twice while an invalid artifact is rejected (active mode) |
+| `explore.redirect` | A parameter whose value becomes the redirect target (open redirect) | differential: two distinct unguessable sentinel hosts under `.invalid` are both reflected into the redirect (3xx `Location` or a meta-refresh), read without following; a route that always redirects to one fixed place, or an allowlist that permits only one guess, is never proven (read-only) |
 | `explore.graphql` | GraphQL field suggestions enabled, or query batching with no rate limit | suggestions: a near-miss of common fields returns "Did you mean" (read-only); batching: a batch of N queries runs as N results (active mode) |
 | `explore.jwt-forge` | JWT signature bypass: alg:none (+ case variants), RS256→HS256 algorithm confusion (server public key as HMAC secret), weak HMAC secret | a forged token is accepted while the same token with a corrupted signature is rejected (public keys fetched from the usual JWKS paths) |
 
 The older classes (`explore.replay`, `explore.cross-actor`, `explore.secret`,
 `explore.file-match`) replay a request, compare two actors, check a secret in a
 response and match a line in a file.
+
+**Account markers.** `explore.replay` and `explore.cross-actor` prove a
+cross-account read by an account's marker in the body. When an account has a
+token but no declared `marker`, the exploration first reads an identity endpoint
+(`options.authz-matrix.whoami`, then `/api/me`, `/api/users/me`, `/api/user`,
+`/api/auth/me`) as each account and as anonymous, and keeps an identity field
+(email, username, id, …) that only that account's read carries: 6+ characters
+with a letter or 8+ digits, absent from every other account's read and from the
+anonymous one (`src/agent/markers.ts`). It is read-only and gated, and a
+declared marker always wins. Without either, those claims stay leads.
+
+**Funnel.** `explore.end` reports, per claim class, how many claims were
+submitted and proven and where the rest stopped (`scope`, `budget`, `gate`,
+`write-mode`, `detail`, or the `validator`'s own verdict), plus the leads noted
+without a claim and the model's requests per account. A low recall shows there
+where it is lost.
+
+A claim whose validator writes (mass-assignment, reuse, stored XSS, an injection
+or SSRF in a body) is gated as a write with its real method: only in `full`
+exploration, with `allowActiveTesting`, and the gate asks every time.
 
 Options for the classes above, under `options.explore`:
 

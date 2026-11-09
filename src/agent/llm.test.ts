@@ -111,8 +111,23 @@ test("timeoutMs is respected: a slow server makes ask reject", async () => {
 });
 
 test("call.signal: an already-aborted signal rejects without a request", async () => {
-  const llm = openAiCompatibleLlm("m", { baseUrl: "http://127.0.0.1:1" });
-  await assert.rejects(llm.ask("hi", { signal: AbortSignal.abort() }), /request failed/);
+  // A live server that would answer: only the signal can make this reject, and it must not be reached.
+  const s = await server(() => [200, JSON.stringify({ choices: [{ message: { content: "ok" } }] })]);
+  try {
+    const llm = openAiCompatibleLlm("m", { baseUrl: s.base });
+    await assert.rejects(llm.ask("hi", { signal: AbortSignal.abort() }), /request failed/);
+    assert.equal(s.seen.length, 0);
+  } finally { s.close(); }
+});
+
+test("timeoutMs covers the body: headers then a stalled body still rejects", async () => {
+  const srv = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.write("{"); /* never ends */ });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const llm = openAiCompatibleLlm("m", { baseUrl: base });
+    await assert.rejects(llm.ask("hi", { timeoutMs: 200 }), /request failed/);
+  } finally { srv.closeAllConnections(); srv.close(); }
 });
 
 test("resolveLlm: claude CLI models unchanged, providers routed, bad specs -> null", () => {
@@ -133,6 +148,9 @@ test("selectLlm: flag spec wins, config fallback works, usesCli flag is correct"
   const fromCfg = selectLlm({ config: { provider: "ollama", model: "qwen", baseUrl: "http://127.0.0.1:11434" } });
   assert.equal(fromCfg.usesCli, false);
   assert.ok(fromCfg.llm?.label.startsWith("ollama (qwen"));
+  // Both given: the flag's spec wins over options.llm.
+  const both = selectLlm({ spec: "opus", config: { provider: "ollama", model: "qwen", baseUrl: "http://127.0.0.1:11434" } });
+  assert.equal(both.llm?.label, "claude -p (opus)");
 });
 
 test("selectLlm: malformed options.llm -> clear error, no llm", () => {
@@ -240,4 +258,13 @@ test("anthropic-api: output_config.effort only for models that take it", async (
 test("endpointUrl: a full endpoint is taken as given (DeepSeek's documented URL)", () => {
   assert.equal(endpointUrl("https://api.deepseek.com/chat/completions", "/v1", "/chat/completions"), "https://api.deepseek.com/chat/completions");
   assert.equal(endpointUrl("https://api.anthropic.com/v1/messages", "/v1", "/messages"), "https://api.anthropic.com/v1/messages");
+});
+
+test("endpointUrl: a query stays a query and a fragment is dropped", () => {
+  assert.equal(endpointUrl("https://x.example/openai/v1?api-version=2024-10-21", "/v1", "/chat/completions"), "https://x.example/openai/v1/chat/completions?api-version=2024-10-21");
+  assert.equal(endpointUrl("https://x.example#frag", "/v1", "/chat/completions"), "https://x.example/v1/chat/completions");
+});
+
+test("presentModelKeys: a CRENEL_LLM_ name that is not a valid env name is never reported", () => {
+  assert.deepEqual(presentModelKeys({ "CRENEL_LLM_ok": "x", CRENEL_LLM_KEY: "y" } as NodeJS.ProcessEnv), ["CRENEL_LLM_KEY"]);
 });

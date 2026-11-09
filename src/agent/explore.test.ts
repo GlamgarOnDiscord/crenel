@@ -9,7 +9,7 @@ import { ConfigSchema } from "../core/config.js";
 import { AgentRun } from "./run.js";
 import { StateStore } from "./state.js";
 import { scriptedLlm } from "./llm.js";
-import { parseTurn, resolveExploreMode } from "./explore.js";
+import { claimWriteMethod, parseTurn, resolveExploreMode } from "./explore.js";
 import type { Backend } from "../toolbox/backend.js";
 
 // A small multi-tenant API whose flaw no check's schema describes: an export
@@ -37,6 +37,8 @@ function app() {
       return json(200, { id: "n1", owner: "acct_b_marker", body: "B's note" });
     }
     if (u.pathname === "/hello") return json(200, { msg: INJECTION });
+    // An identity endpoint: each account's own id, which its objects carry as owner.
+    if (u.pathname === "/api/me") return who ? json(200, { user: { id: who === "t_a" ? "acct_a_marker" : "acct_b_marker", plan: "pro" } }) : json(401, { error: "auth" });
     json(404, { error: "not found" });
   });
   return { srv, hits };
@@ -165,6 +167,11 @@ test("explore: a claim no validator proves is kept as a lead, with the reasoning
     assert.match(plan.verdict ?? plan.description, /marker|public|owner/);
     assert.equal(plan.severity, "medium", "an unproven claim is capped");
     assert.equal(items.find((f) => f.title.startsWith("Statement"))!.severity, "medium");
+    // The funnel says where each claim was lost: here, both reached the validator and failed there.
+    const end = events(t.run, "explore.end")[0]!.funnel as { claims: Record<string, { submitted: number; proven: number; lost: Record<string, number> }>; notedLeads: number; requestsByActor: Record<string, number> };
+    assert.deepEqual(end.claims["cross-actor"], { submitted: 2, proven: 0, lost: { validator: 2 } });
+    assert.equal(end.notedLeads, 1);
+    assert.equal(end.requestsByActor.a, 1);
   } finally { t.close(); }
 });
 
@@ -186,10 +193,10 @@ test("explore: the model-call and token budgets are enforced in code", async () 
     await t.run.start();
     assert.equal(t.llm.prompts.length, 2);
   } finally { t.close(); }
-  const k = await setup({ options: { explore: { maxTokens: 2200 } }, script: [turn([]), turn([]), turn([])] });
+  const k = await setup({ options: { explore: { maxTokens: 2300 } }, script: [turn([]), turn([]), turn([])] });
   try {
     await k.run.start();
-    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past 2200 tokens: not sent");
+    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past 2300 tokens: not sent");
     assert.ok(events(k.run, "explore.stop").some((e) => String(e.reason).includes("token")));
   } finally { k.close(); }
 });
@@ -267,4 +274,32 @@ test("explore: toolbox.run with free arguments keeps the proxy and the budget; u
 test("explore: a model answer that is not JSON runs nothing", () => {
   assert.equal(parseTurn("I think we should curl evil.example"), null);
   assert.deepEqual(parseTurn('```json\n{"calls":[],"done":true}\n```')?.done, true);
+});
+
+test("claimWriteMethod: a proof that writes is gated as a write with its real method", () => {
+  assert.equal(claimWriteMethod("mass-assignment", { url: "/me" }), "PUT");
+  assert.equal(claimWriteMethod("mass-assignment", { url: "/me", method: "patch" }), "PATCH");
+  assert.equal(claimWriteMethod("reuse", { url: "/coupon" }), "POST");
+  assert.equal(claimWriteMethod("stored-xss", { storeUrl: "/c", storeMethod: "PUT" }), "PUT");
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q" }), null);
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q", where: "json" }), "POST");
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q", method: "DELETE" }), "DELETE");
+  assert.equal(claimWriteMethod("replay", { request: { url: "/x", method: "DELETE" } }), null);
+  assert.equal(claimWriteMethod("cross-actor", { url: "/x" }), null);
+});
+
+test("explore: without declared markers, each account's marker is derived from its identity read, and a cross-account read is proven", async () => {
+  const t = await setup({
+    options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { token: "tok-b" } } } },
+    script: [
+      turn([{ tool: "claim.submit", args: { class: "replay", title: "A reads B's billing statement", severity: "critical", reasoning: "query-param id", detail: { request: { url: "/rpc/billing.getStatement?statement=stm_b_19", as: "a" }, expect: { status: 200, bodyIncludes: ["acct_b_marker"] }, id: "stm_b_19" } } }], true),
+    ],
+  });
+  try {
+    await t.run.start();
+    assert.deepEqual(events(t.run, "explore.markers")[0], { path: "/api/me", accounts: ["a", "b"] });
+    assert.ok(t.hits.includes("GET /api/me anon"), "the anonymous control read was sent");
+    const f = t.store.findings().items.find((x) => x.check === "explore")!;
+    assert.equal(f.state, "proven", f.verdict ?? f.description);
+  } finally { t.close(); }
 });

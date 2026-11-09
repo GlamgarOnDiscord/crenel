@@ -112,15 +112,32 @@ function withTimeout(call: LlmCall): { signal: AbortSignal; done: () => void } {
 // POST JSON and parse JSON back, with the same clear-error discipline as runCli:
 // a non-2xx, a connection failure, or a body that is not JSON each throw a short
 // labelled message; the response body is truncated and never assumed well-formed.
+// The provider's answer is read as a stream and cut at this size: a faulty or hostile endpoint cannot fill memory.
+const MAX_PROVIDER_BYTES = 8 * 1024 * 1024;
+
 async function postJson(url: string, headers: Record<string, string>, body: unknown, call: LlmCall, label: string): Promise<unknown> {
+  // The timeout and the caller's abort cover the whole exchange, body included: a stalled body cannot hang ask().
   const { signal, done } = withTimeout(call);
   let res: Response;
+  let text = "";
   try {
     res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal });
+    if (res.body) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let n = 0;
+      for (;;) {
+        const { value, done: end } = await reader.read();
+        if (end) break;
+        n += value.byteLength;
+        if (n > MAX_PROVIDER_BYTES) { await reader.cancel().catch(() => {}); throw new Error(`response larger than ${MAX_PROVIDER_BYTES} bytes`); }
+        text += dec.decode(value, { stream: true });
+      }
+      text += dec.decode();
+    }
   } catch (e) {
     throw new Error(`${label} request failed: ${(e as Error).message}`);
   } finally { done(); }
-  const text = await res.text();
   if (!res.ok) throw new Error(`${label} HTTP ${res.status}: ${text.trim().slice(0, 300)}`);
   try { return JSON.parse(text); } catch { throw new Error(`${label} returned invalid JSON: ${text.trim().slice(0, 200)}`); }
 }
@@ -138,13 +155,15 @@ export function displayBase(base: string): string {
 // only the resource is appended; a bare host gets the conventional "/v1" too.
 // Without this, "…/v1" + "/v1/chat/completions" hit "/v1/v1/…" and a 404.
 export function endpointUrl(base: string, versioned: string, resource: string): string {
-  const b = base.replace(/\/+$/, "");
-  let path = "";
-  try { path = new URL(b).pathname.replace(/\/+$/, ""); } catch { /* left to fetch to reject */ }
+  let u: URL;
+  try { u = new URL(base); } catch { return base.replace(/\/+$/, "") + versioned + resource; /* left to fetch to reject */ }
+  // The path is built on the URL's pathname, so a query (Azure's ?api-version=…) stays a query; a fragment is never sent.
+  u.hash = "";
+  const path = u.pathname.replace(/\/+$/, "");
   // A full endpoint is taken as given (DeepSeek documents
   // https://api.deepseek.com/chat/completions, with no version segment).
-  if (path.endsWith(resource)) return b;
-  return path ? b + resource : b + versioned + resource;
+  u.pathname = path.endsWith(resource) ? path : path ? path + resource : versioned + resource;
+  return u.toString();
 }
 
 const pick = (o: unknown, ...keys: (string | number)[]): unknown => keys.reduce<unknown>((v, k) => (v == null ? v : (v as Record<string | number, unknown>)[k]), o);
@@ -175,13 +194,14 @@ export function openAiCompatibleLlm(model: string, opts: { baseUrl?: string; api
 }
 
 /** Native Ollama generate endpoint: POST <baseUrl>/api/generate, reads .response. */
-export function ollamaLlm(model: string, opts: { baseUrl?: string } = {}): Llm {
+export function ollamaLlm(model: string, opts: { baseUrl?: string; temperature?: number } = {}): Llm {
   const base = (opts.baseUrl ?? DEFAULT_OLLAMA_BASE).replace(/\/+$/, "");
   const url = base + "/api/generate";
   return {
     label: `ollama (${model} @ ${displayBase(base)})`,
     async ask(prompt, call = {}) {
-      const json = await postJson(url, {}, { model, prompt, stream: false }, call, "ollama");
+      // Ollama takes sampling settings under options (docs.ollama.com/api/generate).
+      const json = await postJson(url, {}, { model, prompt, stream: false, ...(opts.temperature !== undefined ? { options: { temperature: opts.temperature } } : {}) }, call, "ollama");
       const resp = pick(json, "response");
       if (typeof resp !== "string") throw new Error("ollama: no .response in the response");
       return resp.trim();
@@ -242,7 +262,7 @@ export const MODEL_KEY_ENVS = new Set([
  * the known provider names, any CRENEL_LLM_* and options.llm.apiKeyEnv.
  */
 export function presentModelKeys(env: NodeJS.ProcessEnv = process.env, configKeyEnv?: string): string[] {
-  const names = new Set([...MODEL_KEY_ENVS, ...Object.keys(env).filter((k) => k.startsWith("CRENEL_LLM_")), ...(configKeyEnv && ENV_NAME.test(configKeyEnv) ? [configKeyEnv] : [])]);
+  const names = new Set([...MODEL_KEY_ENVS, ...Object.keys(env).filter((k) => k.startsWith("CRENEL_LLM_") && ENV_NAME.test(k)), ...(configKeyEnv && ENV_NAME.test(configKeyEnv) ? [configKeyEnv] : [])]);
   return [...names].filter((n) => typeof env[n] === "string" && env[n]!.length > 0).sort();
 }
 
@@ -301,7 +321,7 @@ export function resolveLlm(spec: string, opts: { baseUrl?: string; apiKeyEnv?: s
   if (!model) return null;
   switch (provider) {
     case "openai": return openAiCompatibleLlm(model, { baseUrl: opts.baseUrl, apiKeyEnv: opts.apiKeyEnv ?? "CRENEL_LLM_API_KEY", path: opts.path, temperature: opts.temperature });
-    case "ollama": return ollamaLlm(model, { baseUrl: opts.baseUrl });
+    case "ollama": return ollamaLlm(model, { baseUrl: opts.baseUrl, temperature: opts.temperature });
     case "anthropic-api": return anthropicApiLlm(model, { apiKeyEnv: opts.apiKeyEnv ?? "ANTHROPIC_API_KEY", baseUrl: opts.baseUrl, maxTokens: opts.maxTokens, effort: opts.effort });
     default: return null;
   }

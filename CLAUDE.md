@@ -35,7 +35,7 @@ These are not style preferences. Breaking one makes the benchmark a lie.
 - **No target-specific signatures.** An oracle proves a *mechanism* (a differential, a reflection, a computation, a replay with a control) — never a string, path, or value that matches one bench's answer. If a change would only help one known target, it is overfitting; delete it.
 - **Validate on targets the change has never seen.** A new validator must prove its class on benches it was not written against, with the same generic logic.
 - **Never self-assert proof.** The model's confidence, a script's `[VULN]`, a tool's output — none of these set `proven`. Only a validator does.
-- **Never loosen the scorer to match a finding.** If `bench/*/score.mjs` or a ground-truth regex misses a real finding, that is an honest miss — report it, do not widen the pattern to catch your own output.
+- **Never loosen the scorer to match a finding.** If the scorer in `bench/run.mjs` or a case's ground truth (`bench/cases/*/case.json`) misses a real finding, that is an honest miss — report it, do not widen the pattern to catch your own output.
 - **Never inflate a score** by scoring against the home bench, counting leads as proven, or reporting a number you did not measure. The honest metric excludes the home bench (neutral targets only).
 - **Secrets from the environment only.** Never write a key into config, logs, argv, or a committed file; pass the env-var *name*, read the value at call time.
 - **Stay in the perimeter.** Every request goes through the scoped client; active (writing) probes need `allowActiveTesting` and touch only declared staging objects. Do not add a path that reaches an undeclared host.

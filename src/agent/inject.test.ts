@@ -45,6 +45,22 @@ test("sqli: boolean-based is proven when TRUE==baseline and FALSE diverges", () 
   assert.equal(r.kind, "sqli-boolean");
 });
 
+test("sqli: auth bypass is proven when TRUE succeeds where baseline and FALSE are denied", () => {
+  const r = sqliOracle({
+    baseline: { status: 401, body: '{"error":"invalid"}' },
+    truthy: { status: 200, body: '{"token":"ey.."}' },
+    falsy: { status: 401, body: '{"error":"invalid"}' },
+  });
+  assert.equal(r.verdict, "proven");
+  assert.equal(r.kind, "sqli-bypass");
+});
+
+test("sqli: TRUE succeeds but FALSE also succeeds -> not a bypass (no control)", () => {
+  const ok = { status: 200, body: "welcome" };
+  const r = sqliOracle({ baseline: { status: 401, body: "no" }, truthy: ok, falsy: ok });
+  assert.notEqual(r.verdict, "proven");
+});
+
 test("sqli: identical true/false is denied (no differential)", () => {
   const r = sqliOracle({
     baseline: { status: 200, body: "same" },
@@ -94,6 +110,18 @@ test("nosql: no differential -> denied", () => {
 test("nosql: always-true succeeds where literal and always-false are denied -> proven (bypass)", () => {
   const r = nosqlOracle({ baseline: { status: 401, body: "no" }, truthy: { status: 200, body: '{"token":"x"}' }, falsy: { status: 401, body: "no" } });
   assert.equal(r.verdict, "proven");
+  assert.equal(r.kind, "nosqli-bypass");
+});
+
+test("nosql: a 2xx that reads as an error is only a lead, not a bypass", () => {
+  const r = nosqlOracle({ baseline: { status: 401, body: "no" }, truthy: { status: 200, body: '{"error":"invalid credentials"}' }, falsy: { status: 401, body: "no" } });
+  assert.equal(r.verdict, "lead");
+  assert.equal(r.kind, "nosqli-bypass");
+});
+
+test("nosql: a document-store word already on the baseline page is not proof", () => {
+  const r = nosqlOracle({ baseline: { status: 200, body: "docs: BSON types" }, truthy: { status: 200, body: "docs: BSON types" }, falsy: { status: 200, body: "docs: BSON types" } });
+  assert.notEqual(r.verdict, "proven");
 });
 
 test("sqli: an error string already in the baseline is not proof", () => {

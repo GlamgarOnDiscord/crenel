@@ -829,8 +829,11 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 /* Custom-model entries in the list: a delete button that never selects the row,
    and the "add a model" affordance. */
 .msel-del { opacity: 0; flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-faint); cursor: pointer; transition: opacity .12s var(--ease), background .12s var(--ease), color .12s var(--ease); }
-.msel-item:hover .msel-del, .msel-item[data-selected="true"] .msel-del { opacity: 1; }
-.msel-del:hover { background: var(--danger-wash, var(--hover)); color: var(--danger-ink); }
+.msel-row { position: relative; }
+.msel-row > .msel-item { padding-right: 40px; }
+.msel-row > .msel-del { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+.msel-row:hover > .msel-del, .msel-row:has(> .msel-item[data-selected="true"]) > .msel-del, .msel-del:focus-visible { opacity: 1; }
+.msel-del:hover { background: var(--danger-soft); color: var(--danger-ink); }
 .msel-add .msel-logo-add { color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; }
 .msel-add .msel-n { color: var(--fg-muted); }
 
@@ -867,7 +870,7 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .cmf-search input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 8px 0; font-size: 12.5px; color: var(--fg); }
 .cmf-search input::placeholder { color: var(--fg-ghost); }
 /* "Key set on the server": a dot on the mark's corner, so the label keeps its room. */
-.cmf-ready { position: absolute; left: 24px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: #4ADE80; box-shadow: 0 0 0 2px var(--panel), 0 0 8px rgba(74, 222, 128, .6); }
+.cmf-ready { position: absolute; left: 24px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--success-ink); box-shadow: 0 0 0 2px var(--panel), 0 0 8px color-mix(in srgb, var(--success-ink) 60%, transparent); }
 .cmf-empty { font-size: 12px; color: var(--fg-faint); padding: 6px 2px; }
 .cmf-empty button { color: var(--brand-ink); font-weight: 500; }
 .cmf-picked { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 10px 10px 11px; border-radius: 12px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
@@ -894,8 +897,8 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .cmf-key svg { flex: none; margin-top: 1px; color: var(--fg-faint); }
 .cmf-key b { color: var(--fg); font-weight: 600; }
 .cmf-key code { font-size: 11px; color: var(--fg); background: var(--panel); border-radius: 5px; padding: 0 4px; }
-.cmf-key.ok { background: color-mix(in srgb, #22C55E 7%, var(--well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #22C55E 28%, transparent); }
-.cmf-key.ok svg { color: #4ADE80; }
+.cmf-key.ok { background: color-mix(in srgb, var(--success) 7%, var(--well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 28%, transparent); }
+.cmf-key.ok svg { color: var(--success-ink); }
 .cmf-key.miss { background: color-mix(in srgb, var(--brand) 7%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
 .cmf-key.miss svg { color: var(--brand); }
 .cmf-key.bad { background: color-mix(in srgb, var(--danger) 7%, var(--well)); box-shadow: inset 0 0 0 1px var(--danger-line); }

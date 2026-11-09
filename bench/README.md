@@ -18,3 +18,11 @@ caseConfig, tmp })` returning `{ findings }`). The plan is to add adapters for
 the alternatives (gitleaks, trufflehog, Semgrep, Nuclei, ZAP, AuthProbe, ...)
 and publish the comparison, misses included. The cases must stay neutral: they
 model flaws seen in real SaaS apps, not Crenel's own checks.
+
+The `base` adapter ("Claude Code alone") runs `claude -p` in the logged-in
+config directory named by `CRENEL_BENCH_CC_CONFIG` (required). By default the
+model may only read the case and run `curl` (`--allowedTools
+Read,Grep,Glob,Bash(curl:*)`); a full shell needs `CRENEL_BENCH_ALLOW_SHELL=1`,
+and then only inside a sandbox whose egress is limited to the bench targets. The
+model is `CRENEL_BENCH_MODEL` (default `claude-opus-4-8`). A "proven" finding
+with no evidence is scored as a lead.

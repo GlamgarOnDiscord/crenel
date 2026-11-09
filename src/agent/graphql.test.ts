@@ -29,3 +29,13 @@ test("graphql batch: non-json -> denied", () => {
   const r = graphqlBatchOracle({ status: 400, body: "nope", sent: 5 });
   assert.equal(r.verdict, "denied");
 });
+
+test("graphql: 'Did you mean' outside a GraphQL error (an HTML page) proves nothing", () => {
+  const r = graphqlSuggestionsOracle({ status: 404, body: "<html><p>Page not found. Did you mean /users?</p></html>" });
+  assert.equal(r.verdict, "denied");
+});
+
+test("graphql batch: a throttled entry in the array is only a lead", () => {
+  const r = graphqlBatchOracle({ status: 200, body: JSON.stringify([{ data: { __typename: "Query" } }, { errors: [{ message: "rate limited" }] }]), sent: 2 });
+  assert.equal(r.verdict, "lead");
+});

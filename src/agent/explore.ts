@@ -24,6 +24,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { z } from "zod";
 import type { Config } from "../core/config.js";
 import { safeFetch, type SafeResponse } from "../core/net.js";
+import { deriveMarkers, WHOAMI_PATHS } from "./markers.js";
 import { Scope, type NetEvent } from "../core/scope.js";
 import type { Check, Finding, Severity } from "../core/types.js";
 import { relative, walkFiles } from "../core/walk.js";
@@ -91,7 +92,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", redirect: "explore.redirect", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -168,8 +169,15 @@ export class Explorer {
   private readonly claimed = new Set<string>();
   private bundle?: ServedFile[];
   private readonly approved = new Set<string>();
+  // Where findings are lost, per claim class: submitted, proven, and the stage that stopped the rest.
+  private readonly funnel: Record<string, { submitted: number; proven: number; lost: Record<string, number> }> = {};
+  private notedLeads = 0;
+  // The config's options, with account markers derived at run time where none is declared.
+  private options: Record<string, unknown>;
+  private rejectedTurns = 0;
 
   constructor(private readonly d: ExploreDeps) {
+    this.options = d.config.options;
     const onAbort = () => this.ac.abort(d.signal.reason);
     if (d.signal.aborted) onAbort(); else d.signal.addEventListener("abort", onAbort, { once: true });
     const s = d.config.scope;
@@ -209,14 +217,16 @@ export class Explorer {
     // Reconnaissance before the first model call, deterministic and cheap: the
     // page and the routes its scripts cite, so the first turn already has
     // something to work on (a model call costs more than a few GETs).
+    await this.deriveAccountMarkers();
     if (this.d.config.scope.stagingUrl && this.d.budget.maxRequests >= 10) {
       const out = await this.tool("bundle.fetch", {});
       const page = this.bundle?.find((f) => f.kind === "html");
       const links = page ? [...new Set([...page.body.matchAll(/(?:href|src|action)=["']([^"'#]+)["']/gi)].map((m) => m[1]!))].slice(0, 40) : [];
       // API endpoints the served scripts cite: the richest map to enumerate and attack.
-      const eps = this.bundle ? [...new Set(this.bundle.filter((f) => f.kind !== "map").flatMap((f) => extractEndpoints(f.body)))].slice(0, 60) : [];
+      // Only those the per-file listing above does not already show (it keeps 15 per file): the history is resent every turn.
+      const eps = this.bundle ? [...new Set(this.bundle.filter((f) => f.kind !== "map").flatMap((f) => extractEndpoints(f.body)))].filter((e) => !out.text.includes(e)).slice(0, 60) : [];
       this.history.push(`[reconnaissance, avant le premier tour]\n→ bundle.fetch {}\n${out.text}`
-        + (eps.length ? `\nEndpoints API cités par les scripts (à énumérer et attaquer en priorité):\n${fence(untrusted("endpoints", eps.join("\n"), 3000))}` : "")
+        + (eps.length ? `\nAutres endpoints API cités par les scripts (à énumérer et attaquer en priorité):\n${fence(untrusted("endpoints", eps.join("\n"), 3000))}` : "")
         + (links.length ? `\nLiens de la page d'accueil:\n${fence(untrusted("links", links.join("\n"), 2000))}` : ""));
     }
     for (let turn = 1; turn <= this.d.budget.maxCalls; turn++) {
@@ -236,6 +246,7 @@ export class Explorer {
       this.tokens += estimateTokens(prompt) + estimateTokens(raw);
       const parsed = parseTurn(raw);
       if (!parsed) {
+        this.rejectedTurns++;
         this.d.emit("explore.rejected", { turn, reason: "not the expected JSON", sha256: sha(raw) });
         this.history.push(`[tour ${turn}] ta réponse n'était pas le JSON attendu, rien n'a été exécuté.`);
         continue;
@@ -255,12 +266,15 @@ export class Explorer {
     const over = this.overBudget();
     if (over && !this.stopped && this.calls < this.d.budget.maxCalls) this.stopped = over;
     const proven = this.found.filter((x) => x.f.state === "proven").length;
+    const funnel = { claims: this.funnel, notedLeads: this.notedLeads, rejectedTurns: this.rejectedTurns, requestsByActor: this.byActor() };
+    const funnelLine = Object.entries(this.funnel).map(([c, v]) => `${c} ${v.proven}/${v.submitted}${Object.keys(v.lost).length ? ` (perdu: ${Object.entries(v.lost).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`).join(" · ");
     const lines = [
       `${this.calls} appel(s) au modèle, ${this.requests} requête(s), ~${this.tokens} jetons${this.toolRuns ? `, ${this.toolRuns} outil(s) lancé(s)` : ""}`,
       `${proven} prouvé(s) par un validateur générique, ${this.found.length - proven} piste(s) gardée(s)`,
+      ...(funnelLine ? [`entonnoir: ${funnelLine}${this.notedLeads ? ` · ${this.notedLeads} piste(s) notée(s) sans claim` : ""}`] : this.notedLeads ? [`entonnoir: aucune claim, ${this.notedLeads} piste(s) notée(s)`] : []),
       ...(this.stopped ? [`arrêt: ${this.stopped}`] : []),
     ];
-    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, proven, leads: this.found.length - proven });
+    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, proven, leads: this.found.length - proven, funnel });
     return { found: this.found, calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, lines };
   }
 
@@ -271,9 +285,9 @@ export class Explorer {
     const opts = (cfg.options["authz-matrix"] ?? {}) as AuthzOptions;
     const exOpts = (cfg.options.explore ?? {}) as { ssrfCallbackHost?: string; ssrfCallbackPort?: number };
     const ssrfCb = exOpts.ssrfCallbackHost && exOpts.ssrfCallbackPort
-      ? ` Un rappel hors-bande est prêt sur http://${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}/ : pour une SSRF structurée (host/port/path séparés), mets host=${exOpts.ssrfCallbackHost}, port=${exOpts.ssrfCallbackPort}, path=/__INJECT__ (le validateur place le nonce). Pour un seul paramètre URL, laisse le validateur composer l'URL.`
+      ? ` Un écouteur hors-bande est configuré (${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}): le validateur compose lui-même l'URL de rappel avec un nonce, ne la mets pas dans detail.`
       : "";
-    const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(cfg.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(cfg.options, k)})` : ""}`);
+    const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(this.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(this.options, k)})` : ""}`);
     const b = this.d.budget;
     const tools = [
       `http.request {method?, url, as?, headers?, body?}: une requête vers un hôte déclaré (url absolue ou chemin relatif à la cible). as = "a" | "b" | "c" | "anon" (le jeton du compte est ajouté par l'outil; tu ne le vois jamais). GET/HEAD seulement${this.d.mode === "full" ? "; une écriture (POST, PUT, PATCH, DELETE) passe par la porte et allowActiveTesting, et l'utilisateur est sollicité à chaque fois" : ""}.`,
@@ -287,8 +301,8 @@ export class Explorer {
         `   cross-actor: {url, attacker:"a"|"c"|"anon", owner?:"b", id?}. Prouvé si l'attaquant lit l'objet du propriétaire (même réponse ou marqueur), qu'un id inexistant ne répond pas pareil, et qu'un anonyme ne l'obtient pas. Tente aussi attacker:"anon" sur tout endpoint d'objet authentifié: si l'anonyme obtient l'objet d'un compte avec son marqueur, c'est une fuite d'auth prouvée (le validateur escalade seul).\n` +
         `   secret: {request:{url,as?}}. Prouvé si la réponse contient une clé secrète de forme connue (pas une clé publique).\n` +
         `   file-match: {file, text, line?}. Prouvé si le texte cité (12 caractères min.) est dans le fichier.\n` +
-        `   injection: {url, param, where?:"query"|"body", value?, method?, as?} pour un point REST, OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué), NoSQL (opérateurs $ne/$eq en query bracket, body JSON, ou body multi-champ via bodyTemplate avec "__INJECT__" au champ ciblé, ex. login {user, pass:"__INJECT__"}: toujours-vrai répond comme la base, toujours-faux diverge). Un paramètre ignoré n'est jamais prouvé.`,
-        `   ssrf: {url, param (ou gql avec __INJECT__), where?, callbackHost?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée. callbackHost doit être joignable depuis la cible.${ssrfCb}`,
+        `   injection: {url, param, where?:"query"|"body"|"json", value?, method?, as?} pour un point REST (where:"json" place le paramètre dans un corps JSON pour les API JSON), OU {url, gql:"{ champ(arg:\\"__INJECT__\\"){...} }"} pour GraphQL (mets __INJECT__ là où la charge entre). Le validateur génère LUI-MÊME ses charges et prouve par oracle générique: SQLi (une condition VRAIE répond comme la base, une FAUSSE diverge; ou une erreur SQL), XSS réfléchi (balise injectée renvoyée non échappée), injection de template/commande (un calcul 7*7=49 que le serveur a évalué), NoSQL (opérateurs $ne/$eq en query bracket, body JSON, ou body multi-champ via bodyTemplate avec "__INJECT__" au champ ciblé, ex. login {user, pass:"__INJECT__"}: toujours-vrai répond comme la base, toujours-faux diverge). Un paramètre ignoré n'est jamais prouvé.`,
+        `   ssrf: {url, param (ou gql avec __INJECT__), where?, method?, as?}. Prouvé hors-bande : un écouteur reçoit la requête que le serveur a faite vers l'URL de rappel injectée (l'adresse de rappel vient de la config, jamais de la claim).${ssrfCb}`,
         `   stored-xss: {storeUrl, storeParam (ou storeGql avec __INJECT__), storeWhere?, retrieveUrl, retrieveGql?}. Pour une XSS STOCKÉE: le validateur stocke un marqueur <svg> via la 1re requête puis vérifie qu'il est servi NON échappé par la 2e (retrieveUrl).`,
         `   dom-xss: {url, param, where?}. Pour une XSS DOM (reflétée par le JS de la page, pas dans le HTML brut): le validateur charge l'URL dans un vrai navigateur et prouve si le script injecté s'exécute (alert avec nonce).`,
         `   lfi: {url, param, where?}. Path traversal / LFI: le validateur fait lire un fichier système connu via ../ (plusieurs encodages) et prouve par le contenu du fichier (ex. root:x:0:0 de /etc/passwd).`,
@@ -296,8 +310,9 @@ export class Explorer {
         `   mass-assignment: {url, field, value, update?, readUrl?, method?, bodyType?, as?}. Un champ que le client ne devrait pas pouvoir fixer (role, isAdmin, credits, plan, verified…): le validateur lit l'objet de l'acteur, fait un update SANS le champ (contrôle: il ne doit pas bouger) puis AVEC field=value, et prouve si la relecture montre exactement value. Mutant, sur l'objet de l'acteur, donc mode actif requis.`,
         `   cors: {url}. Mauvaise config CORS: le validateur envoie deux origines attaquantes distinctes et prouve si Access-Control-Allow-Origin les reflète toutes deux avec Allow-Credentials: true (lecture seule).`,
         `   reuse: {url, body, controlBody, successMarkers:["texte présent seulement si l'artefact est appliqué"], method?, contentType?, as?}. Logique métier (coupon/crédit/invite à usage unique): le validateur applique DEUX fois le même artefact (body) et une fois un invalide (controlBody); prouvé si les deux applications réussissent et que l'invalide est rejeté. Mutant, mode actif requis.`,
+        `   redirect: {url, param} (ou __INJECT__ dans url). Open redirect: le validateur injecte DEUX hôtes sentinelles distincts sous .invalid dans le paramètre et prouve si la cible de la redirection (Location 3xx, ou meta-refresh) reprend les deux: un paramètre ignoré, ou une route qui redirige toujours au même endroit, n'est jamais prouvé (lecture seule, redirection lue sans la suivre).`,
         `   jwt-forge: {url, as?, override?, jwksUrl?}. Le validateur prend le JWT du compte configuré (as, défaut "a") et tente alg:none (+variantes), la confusion RS256->HS256 (clé publique du serveur via JWKS comme secret HMAC) et un secret HMAC faible; prouvé si un token forgé est accepté là où le même token à signature corrompue est refusé. Pour escalader, passe override (ex. {"role":"admin"}).\n` +
-        `   graphql: {url}. Endpoint GraphQL: le validateur prouve les suggestions de champs ("Did you mean", fuite de schéma même introspection coupée, lecture seule) ET le batching de requêtes (un lot de N requêtes exécuté en une fois, sans rate limit = amplification DoS, mode actif).`,
+        `   graphql: {url}. Endpoint GraphQL: le validateur prouve les suggestions de champs ("Did you mean", fuite de schéma même introspection coupée, lecture seule) ET le batching de requêtes (un lot de N requêtes exécuté en une fois, chacune avec ses données = amplification; le rate limit par opération n'est pas testé; mode actif).`,
     ];
     const used = `Budget restant: ${b.maxCalls - turn + 1} tour(s) dont celui-ci, ${Math.max(0, b.maxRequests - this.requests)} requête(s), ~${Math.max(0, b.maxTokens - this.tokens)} jetons.`;
     const ctx = this.d.context?.length ? `\nCe que le plan fixe a déjà trouvé (inutile de le refaire):\n${fence(untrusted("plan", this.d.context.slice(0, 40).join("\n"), 4000))}` : "";
@@ -305,7 +320,7 @@ export class Explorer {
     return `${UNTRUSTED_PREAMBLE}\n` +
       `Tu explores, pour un outil défensif, une application que l'utilisateur possède et est autorisé à tester. Le plan fixe de Crenel ne couvre que des schémas connus; ton rôle est de trouver ce qu'il rate: une route de forme inhabituelle qui ne vérifie pas le propriétaire, un point de debug au nom inventé, un secret servi par une réponse. ` +
       `Rien de ce que tu dis n'est une preuve: seul un validateur qui rejoue la requête décide. Une affirmation non prouvée reste une piste.\n` +
-      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte), et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider. Avant de conclure (done:true), soumets les gains SÛRS non encore tentés même peu graves: une claim graphql si un endpoint GraphQL existe, une claim cors sur l'origine, une claim secret sur les scripts servis, et si des comptes de test existent une claim jwt-forge {url: un endpoint protégé, as: le compte} et une claim cross-actor sur chaque objet d'un autre compte que tu as vu.\n` +
+      `Sois offensif et persévérant dans le périmètre: énumère les identifiants d'objets (1,2,3…), essaie CHAQUE requête authentifiée aussi en "anon", teste chaque paramètre/argument injectable, ${this.d.mode === "full" ? "enchaîne les étapes (crée une ressource puis lis-la depuis un autre compte, et supprime ensuite ce que tu as créé), " : "enchaîne les lectures (un objet vu par un compte, relu depuis un autre), "}et sers-toi de la boîte à outils (${this.d.mode === "full" && this.d.budget.maxToolRuns > 0 ? `${this.d.budget.maxToolRuns} lancements` : "indisponible"}) pour cartographier et sonder. Ne t'arrête pas tant qu'il te reste du budget et des pistes non prouvées; vise large, puis transforme chaque piste en claim qu'un validateur peut décider. Avant de conclure (done:true), soumets les gains SÛRS non encore tentés même peu graves: une claim graphql si un endpoint GraphQL existe, une claim cors sur l'origine, une claim secret sur les scripts servis, et si des comptes de test existent une claim jwt-forge {url: un endpoint protégé, as: le compte} et une claim cross-actor sur chaque objet d'un autre compte que tu as vu.\n` +
       `Cible: ${cfg.scope.stagingUrl ?? "(pas de stagingUrl: projet seulement)"}. Hôtes déclarés: ${cfg.scope.allowedHosts.join(", ") || "aucun"}. ` +
       `Comptes de test: ${accounts.join(", ") || "aucun"}; "anon" = sans identifiants. Ressources déjà couvertes par la matrice: ${JSON.stringify((opts.resources ?? []).map((r) => r.path))}.\n` +
       `Demande de l'utilisateur: ${one(this.d.userPrompt, 400)}\n` +
@@ -523,6 +538,7 @@ export class Explorer {
     const id = `explore:lead:${sha(`${a.title}|${a.location ?? ""}`).slice(0, 12)}`;
     if (this.claimed.has(id)) return { text: "déjà noté", summary: "duplicate lead" };
     this.claimed.add(id);
+    this.notedLeads++;
     const reqs = (a.requests ?? []).map((r) => `${(r.method ?? "GET").toUpperCase()} ${resolveExploreUrl(r.url, this.d.config.scope.stagingUrl) ?? r.url} as=${r.as ?? "anon"}`);
     this.found.push({
       f: {
@@ -533,6 +549,51 @@ export class Explorer {
       },
     });
     return { text: "piste notée (non prouvée)", summary: "lead noted" };
+  }
+
+  /**
+   * Accounts with a token but no declared marker: read each one's identity
+   * endpoint (and the same as anonymous) and keep a value only that account's read
+   * carries (markers.ts). Without a marker, cross-account claims can only be leads;
+   * with one, the validators still apply all their controls. Read-only, gated, and
+   * stops at the first path every account can read.
+   */
+  private async deriveAccountMarkers(): Promise<void> {
+    const base = this.d.config.scope.stagingUrl;
+    const missing = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k) && !actorMarker(this.options, k));
+    if (!base || !missing.length || this.d.budget.maxRequests < 40) return;
+    const am = (this.options["authz-matrix"] ?? {}) as AuthzOptions & { whoami?: unknown };
+    const paths = [...new Set([...(typeof am.whoami === "string" ? [am.whoami] : []), ...WHOAMI_PATHS])].slice(0, 4);
+    const withToken = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k));
+    const urls = paths.map((p) => resolveExploreUrl(p, base)).filter((u): u is string => !!u && this.scope.isHostAllowed(u));
+    if (!urls.length || !(await this.gateFor("explore.http", urls.map((url) => ({ method: "GET", url }))))) return;
+    for (const url of urls) {
+      if (this.ac.signal.aborted) return;
+      const read = async (k: "a" | "b" | "c" | "anon") => {
+        const token = k === "anon" ? undefined : actorToken(this.options, k);
+        try { const r = await safeFetch(url, this.scope, { headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, maxBytes: 64 * 1024 }); return { status: r.status, body: r.body }; }
+        catch { return { status: 0, body: "" }; }
+      };
+      const reads: Partial<Record<"a" | "b" | "c", { status: number; body: string }>> = {};
+      for (const k of withToken) reads[k] = await read(k);
+      if (!withToken.every((k) => reads[k]!.status >= 200 && reads[k]!.status < 300)) continue;
+      const derived = deriveMarkers(reads, await read("anon"));
+      const got = missing.filter((k) => derived[k]);
+      if (!got.length) continue;
+      const accounts = { ...(am.accounts ?? {}) } as Record<string, Record<string, unknown>>;
+      for (const k of got) accounts[k] = { ...(accounts[k] ?? {}), marker: derived[k] };
+      this.options = { ...this.options, "authz-matrix": { ...am, accounts } };
+      this.d.emit("explore.markers", { path: pathOf(url), accounts: got });
+      this.history.push(`[reconnaissance] marqueurs de compte tirés de ${pathOf(url)} (lecture de chaque compte, absent des autres et de l'anonyme): ${got.map((k) => `${k}`).join(", ")}. Ils servent aux validateurs cross-actor et replay.`);
+      return;
+    }
+  }
+
+  /** The model's own requests per actor: an exploration that never authenticates shows here. */
+  private byActor(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const l of this.log) out[l.as] = (out[l.as] ?? 0) + 1;
+    return out;
   }
 
   /** The last requests the model sent, kept with every claim and lead. */
@@ -550,21 +611,29 @@ export class Explorer {
     // Only the detail goes to the validator; any "state" or "proven" the model writes is ignored.
     const claim: Claim = { id: `claim:${key}`, class: cls, source: "llm", detail: a.detail };
     const urls = claimUrls(a.class, a.detail, this.d.config.scope.stagingUrl);
-    let env: ValidatorEnv = { scope: this.scope, projectDir: this.d.projectDir, options: this.d.config.options, stagingUrl: this.d.config.scope.stagingUrl, checks: this.d.checks };
+    const writes = claimWriteMethod(a.class, a.detail);
+    let env: ValidatorEnv = { scope: this.scope, projectDir: this.d.projectDir, options: this.options, stagingUrl: this.d.config.scope.stagingUrl, checks: this.d.checks };
     let verdict: ClaimVerdict;
     const offline = new Scope({ allowedHosts: [], signal: this.ac.signal });
     if (urls === null) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "no request or file to replay in the detail" };
     else if (urls.some((u) => !this.scope.isHostAllowed(u))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "a URL of the claim is not on a declared host: nothing was sent" };
-    else if (urls.length && this.requests + 6 > this.d.budget.maxRequests) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "request budget too low to replay it" };
-    else if (urls.length && !(await this.gateFor("explore.http", urls.map((url) => ({ method: "GET", url }))))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "the gate refused the replay: nothing was sent" };
+    else if (urls.length && this.requests + (CLAIM_COST[a.class] ?? 6) > this.d.budget.maxRequests) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "request budget too low to replay it" };
+    else if (writes && this.d.mode !== "full") verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state: only in "full" exploration` };
+    else if (writes && !this.scope.allowActiveTesting) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state, and allowActiveTesting is off in the config` };
+    // A proof that writes is approved as a write, with its real method, every time (never on a read's approval).
+    else if (urls.length && !(await this.gateFor(writes ? "explore.write" : "explore.http", urls.map((url, i) => ({ method: i === 0 && writes ? writes : "GET", url }))))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "the gate refused the replay: nothing was sent" };
     else {
       if (!urls.length) env = { ...env, scope: offline };
       verdict = await validateClaim(claim, env);
     }
     this.d.emit("verdict", { claim, verdict, source: "explore" });
     const proven = verdict.state === "proven";
+    const fc = (this.funnel[a.class] ??= { submitted: 0, proven: 0, lost: {} });
+    fc.submitted++;
+    if (proven) fc.proven++;
+    else { const stage = lossStage(verdict); fc.lost[stage] = (fc.lost[stage] ?? 0) + 1; }
     const loc = a.class === "file-match" ? `${String(a.detail.file ?? "")}${a.detail.line ? `:${String(a.detail.line)}` : ""}`
-      : `${String(((a.detail.request as ExploreRequest | undefined)?.method ?? "GET")).toUpperCase()} ${pathOf(urls?.[0] ?? String(a.detail.url ?? ""))}`;
+      : `${String(((a.detail.request as ExploreRequest | undefined)?.method ?? writes ?? "GET")).toUpperCase()} ${pathOf(urls?.[0] ?? String(a.detail.url ?? ""))}`;
     const sev = proven ? capSev(a.severity, verdict.ceiling ?? "medium") : capSev(a.severity, "medium");
     const f: Finding = {
       id: key, check: "explore", title: one(a.title, 160), severity: sev, state: proven ? "proven" : "unproven", location: one(loc, 300),
@@ -582,6 +651,36 @@ export class Explorer {
   }
 }
 
+/** The stage that stopped an unproven claim, for the funnel: before any request, or the validator's own verdict. */
+export function lossStage(v: ClaimVerdict): string {
+  if (v.validator !== null) return "validator";
+  if (/declared host/.test(v.reason)) return "scope";
+  if (/budget/.test(v.reason)) return "budget";
+  if (/gate/.test(v.reason)) return "gate";
+  if (/changes state/.test(v.reason)) return "write-mode";
+  return "detail";
+}
+
+/** Most requests a claim's validator can send, reserved before it runs so a proof is never cut halfway. */
+const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 32, graphql: 13, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
+
+/** The state-changing method a claim's validator sends to its first URL, or null when it only reads. */
+export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>): string | null {
+  const m = (x: unknown) => (typeof x === "string" && x ? x.toUpperCase() : null);
+  const isWrite = (x: string) => x !== "GET" && x !== "HEAD";
+  let method: string;
+  switch (cls) {
+    case "mass-assignment": method = m(d.method) ?? "PUT"; break;
+    case "reuse": method = m(d.method) ?? "POST"; break;
+    case "stored-xss": method = m(d.storeMethod) ?? "POST"; break;
+    case "injection": case "ssrf": case "lfi":
+      method = m(d.method) ?? (typeof d.gql === "string" || typeof d.bodyTemplate === "string" || d.where === "body" || d.where === "json" ? "POST" : "GET"); break;
+    // GET reads; the replay validator refuses any write but a read-only POST, and the GraphQL probes are read-only queries.
+    default: return null;
+  }
+  return isWrite(method) ? method : null;
+}
+
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
@@ -592,10 +691,13 @@ function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, 
     const urls = [d.storeUrl, d.retrieveUrl].filter((x): x is string => typeof x === "string").map((x) => resolveExploreUrl(x, base)).filter((u): u is string => !!u);
     return urls.length ? urls : null;
   }
-  const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
+  const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "redirect" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
-  return u ? [u] : null;
+  if (!u) return null;
+  // Mass-assignment reads the object back (with the actor's token): that URL is checked too.
+  const read = cls === "mass-assignment" && typeof d.readUrl === "string" ? resolveExploreUrl(d.readUrl, base) : null;
+  return read && read !== u ? [u, read] : [u];
 }
 
 function canonical(x: unknown): unknown {

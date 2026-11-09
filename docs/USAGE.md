@@ -6,7 +6,7 @@
 | --- | --- |
 | `crenel scan` | Run the checks. `--json`, `--out`, `--sarif` (SARIF 2.1.0), `--junit` (JUnit XML), `--fail-on critical\|high\|medium\|low` (default `high`, proven findings only), `--audit` (JSONL), `--baseline`, `--update-baseline`, `--notify` (send new proven findings to Slack and webhooks, [`INTEGRATIONS.md`](INTEGRATIONS.md)), `--verbose`. |
 | `crenel serve` | The web console and its local API. `--config`, `--port` (4100), `--open`, `--llm` (opt-in: use the local `claude -p`, which spends your subscription). See [CONSOLE.md](CONSOLE.md). |
-| `crenel explore` | Free exploration by a model, every claim replayed by a validator (see [ARCHITECTURE.md](ARCHITECTURE.md#free-exploration)). `--config`, `--mode assist\|full`, `--max-calls`, `--model` (default `sonnet`), `--llm-script` (replay a recorded run, no model), `--state`, `--json`. Needs the `claude` CLI or `--llm-script`. |
+| `crenel explore` | Free exploration by a model, every claim replayed by a validator (see [ARCHITECTURE.md](ARCHITECTURE.md#free-exploration)). `--config`, `--mode assist\|full`, `--max-calls`, `--model` (default `sonnet`; or a custom provider `openai:<model>`, `ollama:<model>`, `anthropic-api:<model>`), `--model-base-url` (https, or http to localhost; never a scan target), `--model-api-key-env` (the NAME of the variable holding the key, never the key), `--effort`, `--llm-script` (replay a recorded run, no model), `--state`, `--json`. Needs the `claude` CLI, a custom provider, or `--llm-script`. |
 | `crenel generate-tests` | One regression test per finding. |
 | `crenel triage` | Experimental: ask the local Claude CLI for advice on leads. Advice only, never proof. |
 | `crenel list` · `crenel init` | List checks · write a starter config. |

@@ -30,7 +30,8 @@ async function suggestionsAt(url: string, ctx: CheckContext): Promise<Finding | 
   const probe = async (q: string) => safeFetch(url, ctx.scope, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ query: q }) });
   for (let i = 0; i < SUGGESTION_PROBES.length; i++) {
     let res;
-    try { res = await probe(SUGGESTION_PROBES[i]!); } catch { return null; }
+    // One failed or timed-out probe does not end the search: the next one may still answer.
+    try { res = await probe(SUGGESTION_PROBES[i]!); } catch { continue; }
     const v = graphqlSuggestionsOracle({ status: res.status, body: res.body });
     if (v.verdict === "proven") {
       const p = (() => { try { return new URL(url).pathname; } catch { return url; } })();
@@ -49,8 +50,9 @@ async function suggestionsAt(url: string, ctx: CheckContext): Promise<Finding | 
   return null;
 }
 
-// Query batching with no rate limit (DoS amplification / rate-limit bypass). An
-// array of N queries that runs as N results proves it. The array body is not a
+// Query batching (operations multiply per request: amplification, and a way
+// around per-request rate limits). An array of N queries that runs as N
+// successful results proves it; per-operation rate limiting is not tested. The array body is not a
 // read, so this needs active mode; only probed on a path that speaks GraphQL.
 async function batchingAt(url: string, ctx: CheckContext): Promise<Finding | null> {
   if (!ctx.scope.allowActiveTesting) return null;
@@ -70,11 +72,11 @@ async function batchingAt(url: string, ctx: CheckContext): Promise<Finding | nul
   const p = (() => { try { return new URL(url).pathname; } catch { return url; } })();
   return {
     id: `graphql:batching:${p}`, check: "graphql",
-    title: `GraphQL query batching with no rate limit on ${p}`,
+    title: `GraphQL query batching accepted on ${p}`,
     severity: "medium", state: "proven", location: url,
-    description: `A single request with a batch of ${n} queries ran all ${n} and returned ${n} results: batching with no per-operation rate limit amplifies brute-force and DoS.`,
+    description: `A single request with a batch of ${n} queries ran all ${n} and returned ${n} results with data: batching multiplies operations per request, which amplifies brute-force and DoS unless rate limits count operations (not tested here).`,
     remediation: "Disable query batching in production, or rate-limit per operation (not per request).",
-    proof: { method: `active: a JSON array of ${n} queries in one request`, replay: `curl -s -X POST -H 'content-type: application/json' --data '[{"query":"{ __typename }"}, …×${n}]' '${url}'`, evidence: `HTTP ${res.status}, an array of ${n} results` },
+    proof: { method: `active: a JSON array of ${n} queries in one request`, replay: `curl -s -X POST -H 'content-type: application/json' --data '${JSON.stringify(Array.from({ length: n }, () => ({ query: "{ __typename }" })))}' '${url}'`, evidence: `HTTP ${res.status}, an array of ${n} results` },
     regressionHint: `After deploy, a batched array of queries on ${p} must not run every operation.`,
   };
 }

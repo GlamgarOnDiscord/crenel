@@ -9,10 +9,21 @@
 
 export interface Observed { status: number; body: string }
 
+/** The messages of a GraphQL error response ({"errors":[{"message":…}]}), or null when the body is not one. */
+export function graphqlErrors(body: string): string[] | null {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return null; }
+  const errs = j && typeof j === "object" && !Array.isArray(j) ? (j as { errors?: unknown }).errors : undefined;
+  if (!Array.isArray(errs)) return null;
+  return errs.map((e) => (e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : "")).filter(Boolean);
+}
+
 export function graphqlSuggestionsOracle(input: Observed): { verdict: "proven" | "lead" | "denied"; reason: string } {
   const b = input.body.toLowerCase();
-  if (/did you mean/.test(b)) return { verdict: "proven", reason: 'the GraphQL server returns field-name suggestions ("Did you mean"): schema names leak with suggestions enabled' };
-  if (b.includes('"errors"') || b.includes("cannot query field") || b.includes("graphql")) return { verdict: "lead", reason: "the endpoint speaks GraphQL but returned no field suggestion: suggestions may be off" };
+  // Only a parsed GraphQL field-validation error counts: "Did you mean" on an HTML page or a REST error proves nothing.
+  const msgs = graphqlErrors(input.body);
+  if (msgs?.some((m) => /did you mean/i.test(m) && /field|argument|type/i.test(m))) return { verdict: "proven", reason: 'the GraphQL server returns field-name suggestions ("Did you mean"): schema names leak with suggestions enabled' };
+  if (msgs !== null || /^\s*\{\s*"data"\s*:/.test(input.body) || b.includes("cannot query field")) return { verdict: "lead", reason: "the endpoint speaks GraphQL but returned no field suggestion: suggestions may be off" };
   return { verdict: "denied", reason: "no GraphQL field suggestion in the response" };
 }
 
@@ -27,16 +38,18 @@ export const SUGGESTION_PROBES = [
 ];
 
 // Query batching: a JSON ARRAY of queries that the server runs in one request,
-// with no per-operation rate limit — DoS amplification / rate-limit bypass. The
-// proof is a differential the validator replays: a batch of N identical queries
-// comes back as an array of N results. Generic protocol behaviour, no signature.
+// which lets a client multiply operations per request (amplification, and a way
+// around per-request rate limits). The proof is that a batch of N identical
+// queries comes back as N results that each carry data and no error. Whether a
+// rate limit applies per operation is NOT tested. Generic protocol behaviour.
 export function graphqlBatchOracle(input: { status: number; body: string; sent: number }): { verdict: "proven" | "lead" | "denied"; reason: string } {
   const { sent } = input;
   let j: unknown;
   try { j = JSON.parse(input.body); } catch { return { verdict: "denied", reason: "the batch response is not JSON" }; }
-  if (Array.isArray(j) && j.length >= sent && sent >= 2) {
-    return { verdict: "proven", reason: `query batching is accepted with no rate limit: a batch of ${sent} queries ran and returned ${j.length} results in one request (DoS amplification)` };
+  const okEntry = (e: unknown) => !!e && typeof e === "object" && (e as { data?: unknown }).data != null && !(e as { errors?: unknown }).errors;
+  if (input.status >= 200 && input.status < 300 && Array.isArray(j) && j.length === sent && sent >= 2 && j.every(okEntry)) {
+    return { verdict: "proven", reason: `query batching is accepted: a batch of ${sent} queries ran in one request and each returned data without error (operations multiply per request; per-operation rate limiting was not tested)` };
   }
-  if (Array.isArray(j)) return { verdict: "lead", reason: `the server returned an array of ${j.length} for a batch of ${sent}: review by hand` };
+  if (Array.isArray(j)) return { verdict: "lead", reason: `the server returned an array of ${j.length} for a batch of ${sent}, not all with data and without error (throttled or partial): review by hand` };
   return { verdict: "denied", reason: "the server did not execute the batched array (batching off)" };
 }

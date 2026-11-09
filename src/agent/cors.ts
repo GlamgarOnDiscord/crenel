@@ -10,8 +10,8 @@
 
 export interface CorsResp { acao: string | null; acac: string | null }
 
-/** Canonicalize ACAC: "true" (any case) is the only credential-enabling value. */
-const credsOn = (acac: string | null) => (acac ?? "").trim().toLowerCase() === "true";
+/** Browsers enable credentials only for the exact, case-sensitive literal "true". */
+const credsOn = (acac: string | null) => (acac ?? "").trim() === "true";
 
 export function corsOracle(input: { o1: string; r1: CorsResp; o2: string; r2: CorsResp }): { verdict: "proven" | "lead" | "denied"; reason: string; ceiling: "high" | "medium" } {
   const { o1, r1, o2, r2 } = input;
@@ -21,5 +21,6 @@ export function corsOracle(input: { o1: string; r1: CorsResp; o2: string; r2: Co
   if (r1.acao === "null" && r2.acao === "null" && creds) return { verdict: "proven", reason: "Access-Control-Allow-Origin: null with Allow-Credentials: true: a sandboxed iframe can read authenticated responses", ceiling: "high" };
   if (reflectsBoth) return { verdict: "lead", reason: "the origin is reflected into Access-Control-Allow-Origin but credentials are not allowed: a cross-site read without cookies, review by hand", ceiling: "medium" };
   if ((r1.acao === "*" || r2.acao === "*") && creds) return { verdict: "lead", reason: "Access-Control-Allow-Origin: * with Allow-Credentials set, which browsers reject for credentialed requests: review by hand", ceiling: "medium" };
-  return { verdict: "denied", reason: "the server did not reflect the attacker origin into Access-Control-Allow-Origin", ceiling: "medium" };
+  if (r1.acao === o1 || r2.acao === o2) return { verdict: "lead", reason: "only one of the two attacker origins was reflected: an allowlist or a pattern that happened to match, review by hand", ceiling: "medium" };
+  return { verdict: "denied", reason: "the server did not reflect the attacker origins into Access-Control-Allow-Origin", ceiling: "medium" };
 }

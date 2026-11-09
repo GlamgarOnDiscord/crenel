@@ -25,10 +25,16 @@ const ok2xx = (s: number) => s >= 200 && s < 300;
  * string ("true", "42", "admin"), or undefined when absent or non-scalar.
  * First occurrence in a depth-first walk wins. Pure. */
 export function fieldValue(body: string, field: string): string | undefined {
+  const v = fieldRaw(body, field);
+  return v === undefined ? undefined : String(v);
+}
+
+/** The scalar itself (typed: true stays a boolean), for restoring it. Pure. */
+export function fieldRaw(body: string, field: string): string | number | boolean | null | undefined {
   let root: unknown;
   try { root = JSON.parse(body); } catch { return undefined; }
   const seen = new Set<unknown>();
-  const walk = (node: unknown): string | undefined => {
+  const walk = (node: unknown): string | number | boolean | null | undefined => {
     if (node === null || typeof node !== "object") return undefined;
     if (seen.has(node)) return undefined;
     seen.add(node);
@@ -36,7 +42,7 @@ export function fieldValue(body: string, field: string): string | undefined {
       const obj = node as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(obj, field)) {
         const v = obj[field];
-        if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
+        if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
       }
       for (const k of Object.keys(obj)) { const r = walk(obj[k]); if (r !== undefined) return r; }
     } else {
@@ -67,8 +73,10 @@ export function massAssignOracle(input: {
   const v0 = fieldValue(baseline.body, field);
   if (v0 === undefined) return { verdict: "lead", reason: `field "${field}" is not in the actor's own read: cannot prove persistence, review by hand` };
   if (injected === v0) return { verdict: "lead", reason: `the injected value equals the current value of "${field}": pick a value that differs` };
+  if (!ok2xx(control.status)) return { verdict: "lead", reason: `the re-read after the control update failed (HTTP ${control.status}): inconclusive` };
   const vC = fieldValue(control.body, field);
-  if (vC !== undefined && vC !== v0) return { verdict: "lead", reason: `"${field}" changed (${v0} -> ${vC}) on an update that did NOT include it: the field is not isolated, review by hand` };
+  if (vC !== v0) return { verdict: "lead", reason: `"${field}" changed (${v0} -> ${vC ?? "absent"}) on an update that did NOT include it: the field is not isolated, review by hand` };
+  if (!ok2xx(injectedRead.status)) return { verdict: "lead", reason: `the re-read after the injected update failed (HTTP ${injectedRead.status}): inconclusive` };
   const vI = fieldValue(injectedRead.body, field);
   if (vI === undefined) return { verdict: "lead", reason: `"${field}" vanished from the read after the injected update: inconclusive` };
   if (vI === injected) return { verdict: "set", reason: `"${field}" was ${v0}, the request body set it to ${injected} and the actor's own re-read confirms ${vI}; the control update without the field left it at ${v0}` };

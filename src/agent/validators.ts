@@ -26,9 +26,10 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
-import { massAssignOracle, buildBody } from "./massassign.js";
+import { massAssignOracle, buildBody, fieldRaw, fieldValue } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
+import { redirectOracle, type RedirectResp } from "./redirect.js";
 import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
 
@@ -126,6 +127,57 @@ export function authzOracle(input: {
     return { verdict: "lead", reason: `HTTP ${attacker.status} but the body differs from the owner's: review by hand` };
   }
   return { verdict: "lead", reason: `HTTP ${attacker.status} with no owner marker to compare: declare accounts.b.marker or accounts.b.token` };
+}
+
+/** Pull a top-level owner-id field (e.g. UserId, user_id, owner_id) from a JSON
+ * body, looking at the root and under a one-level {data|result|basket|...}
+ * wrapper. Returns the value as a string, or undefined. No target specifics:
+ * the field name is configured, the extraction is generic JSON. */
+export function ownerValue(body: string, field: string): string | undefined {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return undefined; }
+  const pick = (o: unknown): string | undefined => {
+    if (!o || typeof o !== "object") return undefined;
+    const rec = o as Record<string, unknown>;
+    const v = rec[field];
+    if (v != null && (typeof v === "string" || typeof v === "number")) return String(v);
+    return undefined;
+  };
+  const root = pick(j);
+  if (root !== undefined) return root;
+  if (j && typeof j === "object") {
+    for (const w of Object.values(j as Record<string, unknown>)) {
+      const v = pick(w);
+      if (v !== undefined) return v;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Owner-id differential: prove a cross-tenant read without the owner's token or
+ * a marker. The attacker reads a target object and its OWN object on the same
+ * route; if the target's owner-id field differs from the attacker's own, a
+ * negative control does not answer the same way, and the ids are real, the
+ * attacker is reading an object it does not own. Pure, tested without a network.
+ */
+export function ownerFieldOracle(input: {
+  field: string;
+  target: Observed;
+  self: Observed;
+  control: Observed;
+}): { verdict: "leak" | "lead" | "denied"; reason: string } {
+  const { field, target, self, control } = input;
+  if (DENY.has(target.status) || !ok2xx(target.status)) return { verdict: "denied", reason: `HTTP ${target.status}` };
+  const vt = ownerValue(target.body, field);
+  if (vt === undefined) return { verdict: "lead", reason: `no ${field} in the target body: cannot establish its owner` };
+  if (!ok2xx(self.status)) return { verdict: "lead", reason: `the attacker's own object -> HTTP ${self.status}: no baseline for the attacker's id` };
+  const vs = ownerValue(self.body, field);
+  if (vs === undefined) return { verdict: "lead", reason: `no ${field} in the attacker's own object: cannot establish the attacker's id` };
+  if (String(vt) === String(vs)) return { verdict: "lead", reason: `the target's ${field} (${vt}) equals the attacker's own: same owner, not a cross-tenant read` };
+  const cv = ok2xx(control.status) ? ownerValue(control.body, field) : undefined;
+  if (cv !== undefined && String(cv) === String(vt)) return { verdict: "lead", reason: `a non-existent id returns the same ${field} (${vt}): the route is not object-scoped` };
+  return { verdict: "leak", reason: `the attacker reads an object whose ${field}=${vt} while its own carries ${field}=${vs}: object-level authorization is broken` };
 }
 
 // Drop values that change between two reads of the same object (timestamps,
@@ -526,6 +578,10 @@ const exploreCrossActorValidator: Validator = {
     const ownerRes = await sendAs(req, owner, env, url);
     if (!ok2xx(ownerRes.status)) return no(`the owner (${owner.toUpperCase()}) gets HTTP ${ownerRes.status}: no object to compare`);
     const marker = actorMarker(env.options, owner);
+    // The URL is the model's: a marker it carries would come back as an echo, not as the owner's data.
+    let decoded = url;
+    try { decoded = decodeURIComponent(url); } catch { /* keep */ }
+    if (marker && (url.includes(marker) || decoded.includes(marker))) return no(`the URL itself carries ${owner.toUpperCase()}'s marker: a reflection would look like a leak, so it proves nothing`);
     if (marker && !ownerRes.body.includes(marker)) return no(`the owner's response does not carry ${owner.toUpperCase()}'s marker: not shown to be ${owner.toUpperCase()}'s object`);
     const id = typeof claim.detail.id === "string" ? claim.detail.id : undefined;
     const ctl = controlUrl(url, id);
@@ -652,8 +708,15 @@ const pathOnly = (url: string) => { try { const u = new URL(url); return u.pathn
 // decide. A static page that ignores the param can never be proven (the SQLi
 // oracle needs a clean TRUE/FALSE differential). See inject.test.ts.
 
-/** Put `value` into `param` of a request, in the query string or the form body. Pure, tested. */
-export function injectParam(base: ExploreRequest, param: string, value: string, where: "query" | "body"): ExploreRequest {
+/** Put `value` into `param` of a request, in the query string, the form body, or a
+ * JSON body (so JSON REST endpoints receive the candidate too). Pure, tested. */
+export function injectParam(base: ExploreRequest, param: string, value: string, where: "query" | "body" | "json"): ExploreRequest {
+  if (where === "json") {
+    let obj: Record<string, unknown> = {};
+    if (base.body) { try { const p = JSON.parse(base.body); if (p && typeof p === "object" && !Array.isArray(p)) obj = p as Record<string, unknown>; } catch { /* non-JSON base body: start fresh */ } }
+    obj[param] = value;
+    return { ...base, method: base.method ?? "POST", body: JSON.stringify(obj), headers: { "content-type": "application/json", ...(base.headers ?? {}) } };
+  }
   if (where === "body") {
     const body = new URLSearchParams(base.body ?? "");
     body.set(param, value);
@@ -680,18 +743,21 @@ const exploreInjectionValidator: Validator = {
   class: "explore.injection",
   name: "injection (generic oracle: differential, reflection, computation)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown };
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown; body?: unknown };
     const no = (reason: string, ev?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence: ev });
     const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
+    const hasParam = typeof d.param === "string" && d.param.length > 0;
+    const template = typeof d.bodyTemplate === "string" && d.bodyTemplate.includes('"__INJECT__"') ? d.bodyTemplate : null;
     if (typeof d.url !== "string") return no("need detail.url");
-    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
+    if (!gql && !hasParam && !template) return no("need detail.param (REST), detail.gql with __INJECT__ (GraphQL) or detail.bodyTemplate with \"__INJECT__\" (JSON)");
     const url0 = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url0) return no("not an http(s) URL");
-    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const where: "query" | "body" | "json" = d.where === "body" ? "body" : d.where === "json" ? "json" : "query";
     const baseVal = typeof d.value === "string" && d.value ? d.value : "1";
-    const pname = typeof d.param === "string" ? d.param : "gql-arg";
+    const pname = hasParam ? d.param as string : gql ? "gql-arg" : "__INJECT__";
     const actor = parseActor(d.as);
-    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "query" ? "GET" : "POST"), as: actor, body: where !== "query" && typeof d.body === "string" ? d.body : undefined };
+    const imp0 = `crenel-${nonce(pname)}`;
     const fetchWith = async (value: string) => {
       const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
       const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
@@ -699,6 +765,21 @@ const exploreInjectionValidator: Validator = {
     };
     const ev = (what: string): Evidence => ({ request: `${(base.method ?? "GET")} ${pathOnly(url0)} (${pname}=…)`, response: what });
     const leads: string[] = [];
+
+    // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
+    // full body with the quoted marker "__INJECT__" at the injectable field; the
+    // validator substitutes an operator object there. Keeps the other fields intact.
+    if (template) {
+      try {
+        const sub = (v: unknown) => template.replace('"__INJECT__"', JSON.stringify(v));
+        const jtSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: sub(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+        const r = nosqlOracle({ baseline: await jtSend(baseVal), truthy: await jtSend({ $ne: imp0 }), falsy: await jtSend({ $in: [] }) });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body template, {$ne} vs {$in: []}): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
+      } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
+    }
+    // A template-only claim has no parameter for the probes below.
+    if (!gql && !hasParam) return no(leads.length ? `not proven; leads: ${leads.join("; ")}` : "no NoSQL injection proven through the body template", ev(leads.join(" | ")));
 
     // 1. SQL injection — boolean/error differential (strongest, hardest to fake).
     // Try standard breakout contexts (string with different closers, and numeric):
@@ -760,39 +841,32 @@ const exploreInjectionValidator: Validator = {
       } catch (e) { leads.push(`command probe failed: ${(e as Error).message}`); }
     }
 
-    // 5. NoSQL injection — operator injection ($ne always-true vs $eq always-false),
-    // through bracket query keys (param[$ne]=…) and through a JSON body. Generic
-    // document-store technique; the boolean differential or a parse error decides.
-    if (gql === null) {
+    // 5. NoSQL injection — operator injection ($ne always-true vs an always-false
+    // operator), in the same place the parameter lives: bracket keys in the query
+    // or form body (param[$ne]=…, falsy param[$eq]=<fresh nonce>), or an operator
+    // object in a JSON body (falsy {$in: []}, which matches nothing). Generic
+    // document-store technique; the boolean differential or a new parse error decides.
+    if (gql === null && hasParam) {
       const imp = `crenel-${nonce(pname)}`;
-      const qOp = async (op: string) => { const req = injectParam(base, `${d.param as string}[${op}]`, imp, "query"); const res = await sendAs({ ...req, as: actor }, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0); return { status: res.status, body: res.body }; };
-      try {
-        const r = nosqlOracle({ baseline: await fetchWith(baseVal), truthy: await qOp("$ne"), falsy: await qOp("$eq") });
-        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (query operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
-        if (r.verdict === "lead") leads.push(`nosql query: ${r.reason}`);
-      } catch (e) { leads.push(`nosql query probe failed: ${(e as Error).message}`); }
-      try {
-        const jbody = (v: unknown) => JSON.stringify({ [d.param as string]: v });
-        const jSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: jbody(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
-        const r = nosqlOracle({ baseline: await jSend(baseVal), truthy: await jSend({ $ne: imp }), falsy: await jSend({ $eq: imp }) });
-        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
-        if (r.verdict === "lead") leads.push(`nosql body: ${r.reason}`);
-      } catch (e) { leads.push(`nosql body probe failed: ${(e as Error).message}`); }
-      // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
-      // full body with the quoted marker "__INJECT__" at the injectable field; the
-      // validator substitutes an operator object there. Keeps the other fields intact.
-      if (typeof d.bodyTemplate === "string" && d.bodyTemplate.includes('"__INJECT__"')) {
+      if (where !== "json") {
+        const opSend = async (op: string) => { const req = injectParam(base, `${d.param as string}[${op}]`, imp, where); const res = await sendAs({ ...req, as: actor }, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0); return { status: res.status, body: res.body }; };
         try {
-          const tpl = d.bodyTemplate;
-          const sub = (v: unknown) => tpl.replace('"__INJECT__"', JSON.stringify(v));
-          const jtSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: sub(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
-          const r = nosqlOracle({ baseline: await jtSend(baseVal), truthy: await jtSend({ $ne: imp }), falsy: await jtSend({ $eq: imp }) });
-          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body template): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
-          if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
-        } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
+          const r = nosqlOracle({ baseline: await fetchWith(baseVal), truthy: await opSend("$ne"), falsy: await opSend("$eq") });
+          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (${where} operators ${pname}[$ne] vs ${pname}[$eq]=<fresh nonce>): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+          if (r.verdict === "lead") leads.push(`nosql ${where}: ${r.reason}`);
+        } catch (e) { leads.push(`nosql ${where} probe failed: ${(e as Error).message}`); }
+      } else {
+        // Keep the other fields of the model's body; only the parameter becomes an operator object.
+        let obj: Record<string, unknown> = {};
+        if (typeof d.body === "string") { try { const p = JSON.parse(d.body); if (p && typeof p === "object" && !Array.isArray(p)) obj = p as Record<string, unknown>; } catch { /* fresh */ } }
+        const jSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: base.method, headers: { "content-type": "application/json" }, body: JSON.stringify({ ...obj, [d.param as string]: v }), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+        try {
+          const r = nosqlOracle({ baseline: await jSend(baseVal), truthy: await jSend({ $ne: imp }), falsy: await jSend({ $in: [] }) });
+          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON operators {$ne} vs {$in: []}): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+          if (r.verdict === "lead") leads.push(`nosql json: ${r.reason}`);
+        } catch (e) { leads.push(`nosql json probe failed: ${(e as Error).message}`); }
       }
     }
-
     return no(leads.length ? `not proven; leads: ${leads.slice(0, 3).join("; ")}` : "no injection proven (no differential, reflection or computation)", ev(leads.slice(0, 2).join(" | ")));
   },
 };
@@ -861,6 +935,7 @@ const exploreStoredXssValidator: Validator = {
     if (typeof d.retrieveUrl !== "string") return no("need detail.retrieveUrl (where the stored value is served)");
     const sUrl = resolveExploreUrl(d.storeUrl, env.stagingUrl), rUrl = resolveExploreUrl(d.retrieveUrl, env.stagingUrl);
     if (!sUrl || !rUrl) return no("not http(s) URLs");
+    if (!env.scope.allowActiveTesting) return no("stored XSS writes a record: needs allowActiveTesting");
     const actor = parseActor(d.as);
     const where: "query" | "body" = d.storeWhere === "query" ? "query" : "body";
     const t = nonce(String(d.storeParam ?? "stored"));
@@ -877,8 +952,10 @@ const exploreStoredXssValidator: Validator = {
       body = res.body;
     } catch (e) { return no(`retrieve request failed: ${(e as Error).message}`); }
     const r = xssOracle({ token: t, body, status: 200 });
-    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
-    return no(r.verdict === "lead" ? `${r.reason} (stored but check escaping/context)` : "the stored marker is not served unescaped");
+    // The probe stays stored: it is inert (onload=1 runs no code), and the result says where to delete it.
+    const left = `; the inert probe "${payload}" stays in the record stored via ${pathOnly(sUrl)}: delete it, or point storeUrl at a disposable record`;
+    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}${left}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
+    return no((r.verdict === "lead" ? `${r.reason} (stored but check escaping/context)` : "the stored marker is not served unescaped") + left);
   },
 };
 
@@ -981,7 +1058,10 @@ const exploreJwtNoneValidator: Validator = {
     const read = async (headers: Record<string, string>) => { const r = await safeFetch(url, env.scope, { method: "GET", headers, maxBytes: 512 * 1024 }); return { status: r.status, body: r.body }; };
     const forgedRes = await read({ authorization: `Bearer ${forged}` });
     const anonRes = await read({});
-    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes });
+    // Garbage-signature control: the original token with its signature corrupted.
+    // If the server accepts that too, it verifies nothing — alg:none is not the bypass.
+    const controlRes = await read({ authorization: `Bearer ${corruptSig(token)}` });
+    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes, control: controlRes });
     if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT verification broken at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a forged alg:none token`, response: r.reason }, ceiling: "critical" };
     return no(r.reason);
   },
@@ -1010,26 +1090,48 @@ const exploreMassAssignValidator: Validator = {
     const readUrl = resolveExploreUrl(typeof d.readUrl === "string" ? d.readUrl : d.url, env.stagingUrl);
     if (!upUrl || !readUrl) return no("not http(s) URLs");
     if (!env.scope.isHostAllowed(upUrl) || !env.scope.isHostAllowed(readUrl)) return no("off-scope host");
+    // Writes go to the declared staging origin only, and the read-back to the same origin (the token goes to both).
+    const origin = (u: string) => new URL(u).origin;
+    if (!env.stagingUrl || origin(upUrl) !== origin(env.stagingUrl)) return no("mass-assignment writes only to the declared stagingUrl's origin");
+    if (origin(readUrl) !== origin(upUrl)) return no("detail.readUrl must be on the same origin as the update endpoint");
     const actor = parseActor(d.as);
-    const method = typeof d.method === "string" ? d.method : "PUT";
+    if (!actor || actor === "anon") return no("need detail.as: a configured account whose own object is updated");
+    if (!actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : "PUT";
+    if (!["POST", "PUT", "PATCH"].includes(method)) return no(`method ${method}: an update is POST, PUT or PATCH`);
     const bodyType: "json" | "form" = d.bodyType === "form" ? "form" : "json";
     const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
-    const readBack = async () => { const r = await sendAs({ url: d.url as string, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
+    const readBack = async () => { const r = await sendAs({ url: readUrl, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
     const writeThen = async (extra: Record<string, unknown> | null) => {
       const { body, contentType } = buildBody(base, extra, bodyType);
-      await sendAs({ url: d.url as string, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
+      await sendAs({ url: upUrl, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
     };
     let baseline, control, injectedRead;
+    let restore = "";
     try {
       baseline = await readBack();
+      // Nothing is written unless the actor can read the object and it is shown to be the actor's own.
+      if (!ok2xx(baseline.status)) return no(`cannot read the object as ${actor.toUpperCase()} (HTTP ${baseline.status}): nothing written`);
+      const marker = actorMarker(env.options, actor);
+      if (marker && !baseline.body.includes(marker)) return no(`the read does not carry ${actor.toUpperCase()}'s marker: not shown to be ${actor.toUpperCase()}'s own object, nothing written`);
+      const anon = await sendAs({ url: readUrl, method: "GET" }, "anon", env, readUrl);
+      if (ok2xx(anon.status) && anon.body === baseline.body) return no("an anonymous read returns the same object: not shown to be the actor's own, nothing written");
+      const v0 = fieldRaw(baseline.body, d.field);
+      if (v0 === undefined) return no(`field "${d.field}" is not in the actor's own read: cannot prove persistence, nothing written`);
       await writeThen(null);
       control = await readBack();
       await writeThen({ [d.field]: d.value });
       injectedRead = await readBack();
+      // Put the field back as it was (best effort; the result says if it did not stick).
+      try {
+        await writeThen({ [d.field]: v0 });
+        const after = await readBack();
+        restore = fieldValue(after.body, d.field) === String(v0) ? `; "${d.field}" restored to ${String(v0)}` : `; WARNING: "${d.field}" could not be restored to ${String(v0)}, reset it by hand`;
+      } catch (e) { restore = `; WARNING: restoring "${d.field}" failed (${(e as Error).message}), reset it to ${String(v0)} by hand`; }
     } catch (e) { return no(`request failed: ${(e as Error).message}`); }
     const r = massAssignOracle({ field: d.field, injected: d.value, baseline, control, injectedRead });
-    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor ? actor.toUpperCase() : "anon"}`, response: r.reason }, ceiling: "medium" };
-    return no(r.reason);
+    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)${restore}`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor.toUpperCase()}`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason + restore);
   },
 };
 
@@ -1089,18 +1191,60 @@ const exploreReuseValidator: Validator = {
     try { first = await send(d.body); second = await send(d.body); control = await send(d.controlBody); }
     catch (e) { return no(`request failed: ${(e as Error).message}`); }
     const r = reuseOracle({ first, second, control, successMarkers: markers });
-    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)} applied twice; invalid control rejected`, response: r.reason }, ceiling: "medium" };
+    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)}\n${d.body.slice(0, 300)}\n(sent twice as ${actor ? actor.toUpperCase() : "anon"})`, response: `HTTP ${second.status}\n${excerpt(second.body)}`, sha256: sha(second.body), control: `first: HTTP ${first.status}, sha256 ${sha(first.body).slice(0, 12)}; invalid artifact: HTTP ${control.status}, sha256 ${sha(control.body).slice(0, 12)}` }, ceiling: "medium" };
     return no(r.reason);
+  },
+};
+
+/* ---------------- explore.redirect ---------------- */
+// Open redirect: a parameter whose value becomes the redirect target. The
+// validator injects two distinct, unguessable sentinel hosts under .invalid and
+// redirectOracle proves it only when BOTH come back as the Location (3xx) or a
+// meta-refresh, so a route that always redirects to one fixed place, or an
+// allowlist that happens to permit one guess, cannot pass. Read-only: GETs on
+// the declared host, the redirect is read, never followed. Generic — no target
+// signature. See redirect.test.ts.
+const exploreRedirectValidator: Validator = {
+  class: "explore.redirect",
+  name: "open redirect (parameter becomes the redirect target)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const tmpl = d.url.includes("__INJECT__");
+    if (!tmpl && typeof d.param !== "string") return no("need detail.param (the redirect parameter) or __INJECT__ in detail.url");
+    const url0 = resolveExploreUrl(tmpl ? d.url.replace(/__INJECT__/g, "x") : d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url0)) return no("off-scope host");
+    const s1 = `crenel-redirect-${nonce("r1")}.invalid`, s2 = `crenel-redirect-${nonce("r2")}.invalid`;
+    const inject = (host: string): string | null => {
+      const sentinel = `https://${host}/landing`;
+      if (tmpl) return resolveExploreUrl((d.url as string).replace(/__INJECT__/g, encodeURIComponent(sentinel)), env.stagingUrl);
+      try { const u = new URL(url0); u.searchParams.set(d.param as string, sentinel); return u.toString(); } catch { return null; }
+    };
+    const u1 = inject(s1), u2 = inject(s2);
+    if (!u1 || !u2) return no("could not build the probe URL");
+    const probe = async (u: string): Promise<RedirectResp> => {
+      const r = await safeFetch(u, env.scope, { method: "GET", followRedirects: false, maxBytes: 64 * 1024 });
+      return { status: r.status, location: r.headers.get("location"), body: r.body };
+    };
+    let r1, r2;
+    try { r1 = await probe(u1); r2 = await probe(u2); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const v = redirectOracle({ reqUrl: u1, s1, r1, s2, r2 });
+    if (v.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Open redirect at ${pathOnly(url0)}: ${v.reason}`, evidence: { request: `GET ${pathOnly(u1)} (redirect read, not followed)`, response: v.reason }, ceiling: v.ceiling };
+    return no(v.reason);
   },
 };
 
 /* ---------------- explore.graphql ---------------- */
 // GraphQL field suggestions enabled (schema disclosure even with introspection
-// off). Universal near-miss probes of __typename; a "Did you mean" answer proves
-// it. Read-only (a query-only POST). Generic protocol behaviour. See graphql.test.ts.
+// off). Universal near-miss probes of __typename; a "Did you mean" in a parsed
+// GraphQL error proves it. Read-only (a query-only POST); the probes stop at the
+// first response that is not GraphQL. In active mode, query batching too.
+// Generic protocol behaviour. See graphql.test.ts.
 const exploreGraphqlValidator: Validator = {
   class: "explore.graphql",
-  name: "GraphQL field suggestions enabled (schema disclosure)",
+  name: "GraphQL disclosure (field suggestions, query batching)",
   async validate(claim, env) {
     const d = claim.detail as { url?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
@@ -1115,10 +1259,12 @@ const exploreGraphqlValidator: Validator = {
         const o = graphqlSuggestionsOracle({ status: r.status, body: r.body });
         if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL field suggestions at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} ${probe}`, response: o.reason }, ceiling: "low" };
         if (o.verdict === "lead") lead = o.reason;
+        // Not a GraphQL answer: the endpoint does not speak GraphQL, the other probes would only hit a REST route.
+        else return no(`${pathOnly(url)} did not answer as GraphQL (HTTP ${r.status}): no more probes sent`);
       } catch (e) { lead = `probe failed: ${(e as Error).message}`; }
     }
     // Query batching (needs active mode: a JSON array body is not a read). A batch
-    // of N identical queries that runs as N results proves batching with no rate limit.
+    // of N identical queries that runs as N successful results proves batching is accepted.
     if (env.scope.allowActiveTesting) {
       try {
         const n = 5;
@@ -1200,7 +1346,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
