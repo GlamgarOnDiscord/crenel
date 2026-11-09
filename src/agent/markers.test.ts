@@ -23,3 +23,13 @@ test("deriveMarkers: short ids, shared values, identical reads and failed reads 
   const pub = { status: 200, body: JSON.stringify({ username: "public-demo" }) };
   assert.deepEqual(deriveMarkers({ a: pub }, pub), {}, "what anonymous gets is not the account's own");
 });
+
+test("tokenIdentity and ownerFieldValues: who a token is, and whose an object is", async () => {
+  const { tokenIdentity, ownerFieldValues } = await import("./markers.js");
+  const jwt = (p: unknown) => `h.${Buffer.from(JSON.stringify(p)).toString("base64url")}.s`;
+  assert.deepEqual(tokenIdentity(jwt({ status: "ok", data: { id: 27, email: "bob@x.test" } })), ["27", "bob@x.test"]);
+  assert.deepEqual(tokenIdentity(jwt({ sub: "u_1" })), ["u_1"]);
+  assert.deepEqual(tokenIdentity("opaque-token"), []);
+  assert.deepEqual(ownerFieldValues(JSON.stringify({ data: { id: 7, UserId: 27, coupon: null } })), ["27"]);
+  assert.deepEqual(ownerFieldValues(JSON.stringify({ id: 1, name: "catalog item" })), []);
+});

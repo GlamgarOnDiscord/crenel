@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { ConfigSchema } from "../core/config.js";
 import { AgentRun } from "./run.js";
 import { StateStore } from "./state.js";
-import { scriptedLlm } from "./llm.js";
+import { estimateTokens, scriptedLlm } from "./llm.js";
 import { claimWriteMethod, parseTurn, resolveExploreMode } from "./explore.js";
 import type { Backend } from "../toolbox/backend.js";
 
@@ -193,10 +193,14 @@ test("explore: the model-call and token budgets are enforced in code", async () 
     await t.run.start();
     assert.equal(t.llm.prompts.length, 2);
   } finally { t.close(); }
-  const k = await setup({ options: { explore: { maxTokens: 2300 } }, script: [turn([]), turn([]), turn([])] });
+  // The budget is derived from the real first prompt (it grows with the tool list): room for one prompt, not two.
+  const m = await setup({ options: { explore: { maxCalls: 1 } }, script: [turn([])] });
+  let first = 0;
+  try { await m.run.start(); first = estimateTokens(m.llm.prompts[0]!); } finally { m.close(); }
+  const k = await setup({ options: { explore: { maxTokens: first + 200 } }, script: [turn([]), turn([]), turn([])] });
   try {
     await k.run.start();
-    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past 2300 tokens: not sent");
+    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past the token budget: not sent");
     assert.ok(events(k.run, "explore.stop").some((e) => String(e.reason).includes("token")));
   } finally { k.close(); }
 });

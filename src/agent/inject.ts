@@ -59,6 +59,8 @@ export function sqliOracle(input: {
   baseline: { status: number; body: string };
   truthy: { status: number; body: string };
   falsy: { status: number; body: string };
+  /** Optional: a second, differently written TRUE condition (2=2 for 1=1). */
+  truthy2?: { status: number; body: string };
 }): InjVerdict {
   const { baseline, truthy, falsy } = input;
   const base = baseline.body.toLowerCase();
@@ -80,7 +82,16 @@ export function sqliOracle(input: {
   // differential as the NoSQL bypass, no target signature.
   const ok = (r: { status: number; body: string }) => r.status >= 200 && r.status < 300;
   if (ok(truthy) && !ok(baseline) && !ok(falsy) && !same(truthy, falsy)) {
+    // As for NoSQL: a 2xx whose body is empty or reads as an error is not a success.
+    if (!truthy.body.trim() || /\b(error|invalid|denied|forbidden|unauthori[sz]ed|fail(ed|ure)?|captcha|challenge|not allowed)\b/i.test(truthy.body.slice(0, 2000))) return { verdict: "lead", kind: "sqli-bypass", reason: `the TRUE tautology gets HTTP ${truthy.status} where the literal value and FALSE are denied, but the body is empty or reads as an error: review by hand` };
     return { verdict: "proven", kind: "sqli-bypass", reason: "a TRUE tautology (' OR '1'='1) is accepted where the literal value and a FALSE tautology are both denied (auth/filter bypass)" };
+  }
+  // Two differently written TRUE conditions answer identically while FALSE answers differently: the server
+  // evaluated the condition (a literal or reflected value would differ between 1=1 and 2=2). This holds even when
+  // TRUE does not match the baseline (the payload also cut a trailing clause of the query).
+  const t2 = input.truthy2;
+  if (t2 && ok(truthy) && truthy.body.length > 0 && same(truthy, t2) && !same(falsy, truthy)) {
+    return { verdict: "proven", kind: "sqli-boolean", reason: "two differently written TRUE conditions (1=1, 2=2) give the same response while FALSE (1=2) differs (boolean-based)" };
   }
   if (!same(truthy, falsy)) {
     return { verdict: "lead", kind: "sqli", reason: "TRUE and FALSE responses differ but not cleanly against the baseline: review by hand" };

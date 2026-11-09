@@ -43,3 +43,43 @@ test("runAutoProbe proves a public object leak deterministically (no model)", as
     assert.ok(r.proven.some((v) => /no token at all reads/i.test(v.reason)), `anon leak proven deterministically: ${JSON.stringify(r.proven.map((p) => p.reason))}`);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("graphqlArgClaims: every String argument of a root field becomes an injection claim; mutations only when asked", async () => {
+  const { graphqlArgClaims } = await import("./autoprobe.js");
+  const t = (kind: string, name: string | null, ofType: unknown = null) => ({ kind, name, ofType });
+  const schema = JSON.stringify({ data: { __schema: {
+    queryType: { name: "Q" }, mutationType: { name: "M" },
+    types: [
+      { name: "Q", kind: "OBJECT", fields: [
+        { name: "items", type: t("LIST", null, t("OBJECT", "Item")), args: [{ name: "filter", type: t("SCALAR", "String") }, { name: "limit", type: t("SCALAR", "Int") }] },
+        { name: "ping", type: t("SCALAR", "String"), args: [{ name: "msg", type: t("NON_NULL", null, t("SCALAR", "String")) }] },
+      ] },
+      { name: "M", kind: "OBJECT", fields: [{ name: "add", type: t("OBJECT", "Item"), args: [{ name: "title", type: t("SCALAR", "String") }] }] },
+      { name: "Item", kind: "OBJECT", fields: [{ name: "id", type: t("SCALAR", "Int") }, { name: "owner", type: t("OBJECT", "User") }] },
+    ],
+  } } });
+  const q = graphqlArgClaims(schema, "http://x/graphql", { mutations: false }).map((c) => c.detail.gql);
+  assert.deepEqual(q, ['query { items(filter: "__INJECT__") { __typename id } }', 'query { ping(msg: "__INJECT__") }']);
+  assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).length, 3);
+  assert.deepEqual(graphqlArgClaims("not json", "http://x/graphql", { mutations: true }), []);
+});
+
+test("graphqlArgClaims: a URL argument, or a host and port taken apart, becomes an out-of-band SSRF claim", async () => {
+  const { graphqlArgClaims } = await import("./autoprobe.js");
+  const t = (kind: string, name: string | null, ofType: unknown = null) => ({ kind, name, ofType });
+  const S = t("SCALAR", "String"), I = t("SCALAR", "Int");
+  const schema = JSON.stringify({ data: { __schema: { queryType: { name: "Q" }, mutationType: { name: "M" }, types: [
+    { name: "Q", kind: "OBJECT", fields: [{ name: "preview", type: S, args: [{ name: "url", type: S }] }] },
+    { name: "M", kind: "OBJECT", fields: [{ name: "importFrom", type: S, args: [{ name: "host", type: S }, { name: "port", type: I }, { name: "path", type: S }] }] },
+  ] } } });
+  const ssrf = graphqlArgClaims(schema, "http://x/graphql", { mutations: true, ssrf: true }).filter((c) => c.class === "explore.ssrf").map((c) => c.detail.gql);
+  assert.deepEqual(ssrf, ['query { preview(url: "__CALLBACK_URL__") }', 'mutation { importFrom(host: "__CALLBACK_HOST__", port: __CALLBACK_PORT__, path: "/__INJECT__") }']);
+  assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).filter((c) => c.class === "explore.ssrf").length, 0);
+});
+
+test("autoClaims: an object route is also tried with the owner's own ids", () => {
+  const c = autoClaims({ endpoints: [{ url: "http://x/api/users/1", template: "/api/users/:id" }], accounts: ["a", "b"], ownerIds: ["27", "bob@x.test"] });
+  const urls = c.filter((x) => x.class === "explore.cross-actor").map((x) => x.detail.url);
+  assert.ok(urls.includes("http://x/api/users/27"));
+  assert.ok(!urls.some((u) => String(u).includes("bob")), "an e-mail is not an id segment");
+});

@@ -26,7 +26,8 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
-import { massAssignOracle, buildBody, fieldRaw, fieldValue } from "./massassign.js";
+import { ownerFieldValues, tokenIdentity } from "./markers.js";
+import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
 import { redirectOracle, type RedirectResp } from "./redirect.js";
@@ -470,6 +471,16 @@ export function controlUrl(url: string, id?: string): string {
   return u.toString();
 }
 
+/** True when the URL carries an object identifier: the claim's id, or a path segment or query value shaped like
+ * one (digits, a UUID, or a token mixing letters and digits). A collection ("/api/Addresses") or a "my …" route does not. */
+export function namesObject(url: string, id?: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (id && id.length >= 1 && (u.pathname.split("/").includes(id) || [...u.searchParams.values()].includes(id))) return true;
+  const idLike = (v: string) => /^\d+$/.test(v) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || (/[a-z]/i.test(v) && /\d/.test(v) && /^[\w-]{3,64}$/.test(v) && !/^v\d+$/i.test(v));
+  return u.pathname.split("/").filter(Boolean).some(idLike) || [...u.searchParams.values()].some(idLike);
+}
+
 const reqLine = (method: string, url: string, actor?: Actor) => `${method} ${url}\nauthorization: ${!actor || actor === "anon" ? "(none)" : `Bearer <${actor.toUpperCase()}_TOKEN>`}`;
 const parseActor = (x: unknown): Actor | undefined => (ACTORS as readonly unknown[]).includes(x) ? (x as Actor) : undefined;
 
@@ -595,6 +606,21 @@ const exploreCrossActorValidator: Validator = {
       control: `GET ${ctl} -> HTTP ${controlRes.status}; owner (${owner.toUpperCase()}) -> HTTP ${ownerRes.status}, sha256 ${sha(ownerRes.body).slice(0, 12)}`,
     };
     if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
+    // Without a marker the leak rests on "same body as the owner". That holds only for a URL that names one object:
+    // on a collection or a "my …" route every caller gets their own scope, and two empty or default scopes are equal.
+    if (!(marker && attackerRes.body.includes(marker))) {
+      if (!namesObject(url, id)) return no(`the attacker gets the same body as ${owner.toUpperCase()}, but ${path} names no object: each account may simply get its own (empty or default) scope. Declare or derive ${owner.toUpperCase()}'s marker, or claim a URL with ${owner.toUpperCase()}'s object id`, evidence);
+      // Same body as the owner proves a cross-account read only if the object is the owner's: an object every
+      // account may read (a catalog behind login) also gives the same body. Without a marker, the object's own
+      // owner field (UserId, owner_id, …) must hold the owner's identity from its token, and not the attacker's.
+      const owners = ownerFieldValues(ownerRes.body);
+      const ownerIds = tokenIdentity(ownerToken), attackerIds = attacker === "anon" ? [] : tokenIdentity(actorToken(env.options, attacker));
+      // The owner's own account record also counts: the URL names an id that is the owner's id in its token.
+      const selfRecord = ownerIds.some((v) => namesObject(url, v) && new URL(url).pathname.split("/").includes(v)) && createdId(ownerRes.body) !== undefined && ownerIds.includes(createdId(ownerRes.body)!);
+      if (!selfRecord && (!owners.some((v) => ownerIds.includes(v)) || owners.some((v) => attackerIds.includes(v)))) {
+        return no(`the attacker gets the same body as ${owner.toUpperCase()}, but nothing shows the object is ${owner.toUpperCase()}'s (no marker, and no owner field holding ${owner.toUpperCase()}'s id from its token): an object every account may read looks the same. Claim one of ${owner.toUpperCase()}'s own objects, or declare its marker`, evidence);
+      }
+    }
     // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out —
     // UNLESS that anonymous read carries the owner's own marker, which makes it a broken-authentication leak (worse
     // than cross-tenant). A generic catalog served identically to everyone has no per-owner marker, so it stays public.
@@ -754,16 +780,21 @@ const exploreInjectionValidator: Validator = {
     if (!url0) return no("not an http(s) URL");
     const where: "query" | "body" | "json" = d.where === "body" ? "body" : d.where === "json" ? "json" : "query";
     const baseVal = typeof d.value === "string" && d.value ? d.value : "1";
-    const pname = hasParam ? d.param as string : gql ? "gql-arg" : "__INJECT__";
+    const pname = hasParam ? d.param as string : gql ? "gql-arg" : (/"([^"]{1,60})"\s*:\s*"__INJECT__"/.exec(template ?? "")?.[1] ?? "__INJECT__");
     const actor = parseActor(d.as);
     const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "query" ? "GET" : "POST"), as: actor, body: where !== "query" && typeof d.body === "string" ? d.body : undefined };
     const imp0 = `crenel-${nonce(pname)}`;
+    // A template-only claim: the value goes where "__INJECT__" is in the JSON body, as a string (SQL, XSS, template
+    // and command probes) or as an operator object (NoSQL, below).
+    const tplOnly = !gql && !hasParam && !!template;
     const fetchWith = async (value: string) => {
-      const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
+      const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor }
+        : tplOnly ? { url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: template!.replace('"__INJECT__"', JSON.stringify(value)), as: actor }
+        : injectParam(base, d.param as string, value, where);
       const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
       return { status: res.status, body: res.body, contentType: res.headers.get("content-type") ?? "" };
     };
-    const ev = (what: string): Evidence => ({ request: `${(base.method ?? "GET")} ${pathOnly(url0)} (${pname}=…)`, response: what });
+    const ev = (what: string): Evidence => ({ request: `${tplOnly ? (typeof d.method === "string" ? d.method : "POST") : (base.method ?? "GET")} ${pathOnly(url0)} (${tplOnly ? template : `${pname}=…`})`, response: what });
     const leads: string[] = [];
 
     // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
@@ -778,8 +809,6 @@ const exploreInjectionValidator: Validator = {
         if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
       } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
     }
-    // A template-only claim has no parameter for the probes below.
-    if (!gql && !hasParam) return no(leads.length ? `not proven; leads: ${leads.join("; ")}` : "no NoSQL injection proven through the body template", ev(leads.join(" | ")));
 
     // 1. SQL injection — boolean/error differential (strongest, hardest to fake).
     // Try standard breakout contexts (string with different closers, and numeric):
@@ -793,12 +822,25 @@ const exploreInjectionValidator: Validator = {
         { t: `${baseVal}')) OR (('1'='1`, f: `${baseVal}')) AND (('1'='2` },   // two parens
         { t: `${baseVal}" OR "1"="1`, f: `${baseVal}" AND "1"="2` },           // double quote
         { t: `${baseVal} OR 1=1`, f: `${baseVal} AND 1=2` },                   // numeric, no quote
+        // AND-TRUE keeps the baseline's rows where OR-TRUE returns everything (a search, a list): the same
+        // closers with AND, and with a LIKE wildcard before the quote (a value inside '%…%').
+        { t: `${baseVal}' AND '1'='1`, f: `${baseVal}' AND '1'='2` },
+        { t: `${baseVal}') AND 1=1-- `, f: `${baseVal}') AND 1=2-- ` },
+        { t: `${baseVal}')) AND 1=1-- `, f: `${baseVal}')) AND 1=2-- ` },
+        { t: `${baseVal}%' AND '1'='1`, f: `${baseVal}%' AND '1'='2` },
+        { t: `${baseVal}%') AND 1=1-- `, f: `${baseVal}%') AND 1=2-- ` },
+        { t: `${baseVal}%')) AND 1=1-- `, f: `${baseVal}%')) AND 1=2-- ` },
       ];
       let decided = false;
       for (const c of contexts) {
         const truthy = await fetchWith(c.t);
         const falsy = await fetchWith(c.f);
-        const r = sqliOracle({ baseline, truthy, falsy });
+        let r = sqliOracle({ baseline, truthy, falsy });
+        // TRUE and FALSE differ but TRUE is not the baseline: ask the same TRUE written differently.
+        if (r.verdict === "lead") {
+          const t2 = c.t.replace("1=1", "2=2").replace("'1'='1", "'2'='2").replace('"1"="1', '"2"="2');
+          if (t2 !== c.t) r = sqliOracle({ baseline, truthy, falsy, truthy2: await fetchWith(t2) });
+        }
         if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `SQL injection in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
         if (r.verdict === "lead" && !decided) { leads.push(r.reason); decided = true; }
       }
@@ -882,9 +924,9 @@ const exploreSsrfValidator: Validator = {
   async validate(claim, env) {
     const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; gql?: unknown; as?: unknown; callbackHost?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
-    const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
+    const gql = typeof d.gql === "string" && /__INJECT__|__CALLBACK_URL__/.test(d.gql) ? d.gql : null;
     if (typeof d.url !== "string") return no("need detail.url");
-    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
+    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ or __CALLBACK_URL__ (GraphQL)");
     const url0 = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url0) return no("not an http(s) URL");
     const opts = (env.options.explore as { ssrfCallbackHost?: string; ssrfCallbackPort?: number } | undefined) ?? {};
@@ -899,9 +941,13 @@ const exploreSsrfValidator: Validator = {
       // Single URL parameter: inject the whole callback URL (validator composes it).
       // Structured/GraphQL (host/port/path split): the model built the callback from
       // the advertised host:port and left __INJECT__ as the nonce slot, so inject the nonce.
+      // A GraphQL template may name the listener's parts: __CALLBACK_URL__ (the whole URL), or __CALLBACK_HOST__ and
+      // __CALLBACK_PORT__ for an API that takes them apart; the validator fills them, the claim never chooses a host.
+      const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+      const filled = gql ? gql.replace(/__CALLBACK_URL__/g, cb.url(n)).replace(/__CALLBACK_HOST__/g, authority).replace(/__CALLBACK_PORT__/g, String(cb.port)) : null;
       const payload = gql ? n : cb.url(n);
       const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
-      const req = gql ? { ...injectGraphql(d.url, gql, payload), as: actor } : injectParam(base, d.param as string, payload, where);
+      const req = filled ? { ...injectGraphql(d.url, filled, payload), as: actor } : injectParam(base, d.param as string, payload, where);
       // The server often BLOCKS on the outbound SSRF request, so sendAs may time
       // out or error — the callback can still have fired. Fire-and-forget, then
       // poll the listener regardless of the request's own outcome.
@@ -944,14 +990,19 @@ const exploreStoredXssValidator: Validator = {
     const sReq = storeGql ? { ...injectGraphql(d.storeUrl, storeGql, payload), as: actor } : injectParam(sBase, d.storeParam as string, payload, where);
     try { await sendAs(sReq, actor, env, resolveExploreUrl(sReq.url, env.stagingUrl) ?? sUrl); } catch (e) { return no(`store request failed: ${(e as Error).message}`); }
     let body: string;
+    let ctype = "";
     try {
       const rReq: ExploreRequest = typeof d.retrieveGql === "string"
         ? { url: d.retrieveUrl, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: d.retrieveGql }), as: actor }
         : { url: d.retrieveUrl, method: "GET", as: actor };
       const res = await sendAs(rReq, actor, env, rUrl);
       body = res.body;
+      ctype = res.headers.get("content-type") ?? "";
     } catch (e) { return no(`retrieve request failed: ${(e as Error).message}`); }
-    const r = xssOracle({ token: t, body, status: 200 });
+    let r = xssOracle({ token: t, body, status: 200 });
+    // As for reflected XSS: only an HTML context runs markup. Stored markup served inside JSON is what a page may
+    // later render unescaped, which this validator cannot see: a lead.
+    if (r.verdict === "proven" && ctype && !/html|xhtml|\bxml\b|xml;/i.test(ctype)) r = { ...r, verdict: "lead", reason: `the stored markup comes back unescaped but served as ${ctype.split(";")[0]} (not an HTML page): whether a page renders it unescaped needs a browser` };
     // The probe stays stored: it is inert (onload=1 runs no code), and the result says where to delete it.
     const left = `; the inert probe "${payload}" stays in the record stored via ${pathOnly(sUrl)}: delete it, or point storeUrl at a disposable record`;
     if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}${left}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
@@ -1080,9 +1131,10 @@ const exploreMassAssignValidator: Validator = {
   class: "explore.mass-assignment",
   name: "mass-assignment (body field accepted and persisted)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown };
+    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown; mode?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
     if (!env.scope.allowActiveTesting) return no("mass-assignment mutates the object: needs allowActiveTesting");
+    if (d.mode === "create") return createAssignment(claim, env, this.name);
     if (typeof d.url !== "string") return no("need detail.url (the update endpoint)");
     if (typeof d.field !== "string" || !d.field) return no("need detail.field (the field the client should not control)");
     if (d.value === undefined) return no("need detail.value (the value to inject)");
@@ -1134,6 +1186,39 @@ const exploreMassAssignValidator: Validator = {
     return no(r.reason + restore);
   },
 };
+
+/* Create mode: {mode:"create", url (the create endpoint), update (the body; "__UNIQUE__" in a string becomes a fresh
+ * value, e.g. an e-mail), field, value, readUrl (with ":id" for the new object's id), as?}. Two objects are created on
+ * the staging origin (control without the field, then with it) and read back as the same actor. They are not deleted:
+ * the result says so. */
+async function createAssignment(claim: Claim, env: ValidatorEnv, name: string): Promise<ClaimVerdict> {
+  const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; as?: unknown };
+  const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: name, reason });
+  if (typeof d.url !== "string" || typeof d.field !== "string" || !d.field || d.value === undefined) return no("create mode needs detail.url, field and value");
+  if (typeof d.readUrl !== "string" || !d.readUrl.includes(":id")) return no('create mode needs detail.readUrl with ":id" where the new object\'s id goes');
+  const url = resolveExploreUrl(d.url, env.stagingUrl);
+  if (!url || !env.stagingUrl || new URL(url).origin !== new URL(env.stagingUrl).origin) return no("create mode writes only to the declared stagingUrl's origin");
+  const actor = parseActor(d.as);
+  if (actor && actor !== "anon" && !actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+  const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
+  const fresh = () => JSON.parse(JSON.stringify(base).replace(/__UNIQUE__/g, () => nonce("u"))) as Record<string, unknown>;
+  const create = async (extra: Record<string, unknown> | null) => {
+    const r = await sendAs({ url, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fresh(), ...(extra ?? {}) }), as: actor }, actor, env, url);
+    const id = ok2xx(r.status) ? createdId(r.body) : undefined;
+    if (!id) return { status: r.status, body: r.body, id };
+    const readUrl = resolveExploreUrl((d.readUrl as string).replace(":id", encodeURIComponent(id)), env.stagingUrl);
+    if (!readUrl || new URL(readUrl).origin !== new URL(url).origin) return { status: 0, body: "", id };
+    const rr = await sendAs({ url: readUrl, method: "GET", as: actor }, actor, env, readUrl);
+    return { status: rr.status, body: rr.body, id };
+  };
+  let control, injected;
+  try { control = await create(null); injected = await create({ [d.field]: d.value }); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+  if (!control.id || !injected.id) return no(`the create endpoint did not return a new object's id (HTTP ${control.status}): nothing to read back`);
+  const r = createAssignOracle({ field: d.field, injected: d.value, controlRead: control, injectedRead: injected });
+  const left = `; two objects were created (ids ${control.id} and ${injected.id}) and left in place: delete them`;
+  if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: name, reason: `Mass-assignment on create at ${pathOnly(url)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)${left}`, evidence: { request: `POST ${pathOnly(url)} with {"${d.field}": ${JSON.stringify(d.value)}}, read back at ${String(d.readUrl).replace(":id", injected.id)}`, response: `HTTP ${injected.status}\n${excerpt(injected.body)}`, sha256: sha(injected.body), control: `created without the field: id ${control.id}, read back HTTP ${control.status}` }, ceiling: "high" };
+  return no(r.reason + left);
+}
 
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two

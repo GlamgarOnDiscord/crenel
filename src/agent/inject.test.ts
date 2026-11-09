@@ -132,3 +132,15 @@ test("sqli: a NEW error caused by the quote is proven", () => {
   const r = sqliOracle({ baseline: { status: 200, body: "home" }, truthy: { status: 500, body: "you have an error in your sql syntax" }, falsy: { status: 200, body: "home" } });
   assert.equal(r.verdict, "proven");
 });
+
+test("sqli: two TRUE spellings agree and FALSE differs -> proven, even when TRUE is not the baseline", () => {
+  const all = { status: 200, body: '{"data":[1,2,3]}' };
+  const r = sqliOracle({ baseline: { status: 200, body: '{"data":[1]}' }, truthy: all, truthy2: all, falsy: { status: 200, body: '{"data":[]}' } });
+  assert.equal(r.verdict, "proven");
+});
+
+test("sqli: a search that reflects the term is never proven by the two TRUE spellings", () => {
+  const echo = (q: string) => ({ status: 200, body: `{"q":"${q}","data":[]}` });
+  const r = sqliOracle({ baseline: echo("1"), truthy: echo("1' AND '1'='1"), truthy2: echo("1' AND '2'='2"), falsy: echo("1' AND '1'='2") });
+  assert.notEqual(r.verdict, "proven");
+});

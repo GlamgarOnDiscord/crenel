@@ -22,6 +22,22 @@ const SENSITIVE = /\/(admin|internal|debug|_?private|backoffice|staff|impersonat
 
 interface Spec { openapi?: string; swagger?: string; paths?: Record<string, Record<string, unknown>> }
 
+/** The JSON object after "swaggerDoc": in a Swagger UI init script (balanced braces, strings skipped), or null. */
+export function embeddedSwaggerDoc(js: string): string | null {
+  const i = js.search(/"swaggerDoc"\s*:\s*\{/);
+  if (i < 0) return null;
+  const start = js.indexOf("{", i);
+  let depth = 0, inStr = false, esc = false;
+  for (let k = start; k < js.length; k++) {
+    const ch = js[k];
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return js.slice(start, k + 1);
+  }
+  return null;
+}
+
 /** The body as an OpenAPI/Swagger document, or null when it is anything else. */
 export function parseSpec(body: string): Spec | null {
   const t = body.trimStart();
@@ -51,7 +67,17 @@ export const apiDocs: Check = {
         let res;
         try { res = await safeFetch(base + path, ctx.scope, { maxBytes: 4 * 1024 * 1024 }); } catch { break; }
         if (res.status !== 200) continue;
-        const spec = parseSpec(res.body);
+        let spec = parseSpec(res.body);
+        let served = path;
+        // A Swagger UI page (swagger-ui-express and similar) carries the definition in its init script.
+        if (!spec && /<title>\s*Swagger UI/i.test(res.body)) {
+          const init = `${path.replace(/\/+$/, "")}/swagger-ui-init.js`;
+          try {
+            const r2 = await safeFetch(base + init, ctx.scope, { maxBytes: 4 * 1024 * 1024 });
+            const doc = r2.status === 200 ? embeddedSwaggerDoc(r2.body) : null;
+            if (doc) { spec = parseSpec(doc); served = init; }
+          } catch { /* no init script */ }
+        }
         if (!spec) continue;
         const routes = Object.keys(spec.paths!);
         const ops = routes.reduce((n, r) => n + Object.keys(spec.paths![r] ?? {}).filter((m) => METHODS.has(m)).length, 0);
@@ -66,7 +92,7 @@ export const apiDocs: Check = {
           remediation: sensitive.length
             ? "Serve the definition only to authenticated developers, or publish a public spec without admin and internal routes. Check each admin route refuses a normal account."
             : "If the API is not public, stop serving the definition in production (or put it behind auth). If it is public, keep it, and make sure every object route is in the authorization matrix.",
-          proof: { method: "GET on the declared host; the body parses as an OpenAPI/Swagger document with a version and a paths object", replay: `curl -s '${base}${path}' | head -c 300`, evidence: `HTTP 200, ${spec.openapi ? "openapi" : "swagger"} ${spec.openapi ?? spec.swagger}, ${routes.length} routes` },
+          proof: { method: "GET on the declared host; the body parses as an OpenAPI/Swagger document with a version and a paths object", replay: `curl -s '${base}${served}' | head -c 300`, evidence: `HTTP 200, ${spec.openapi ? "openapi" : "swagger"} ${spec.openapi ?? spec.swagger}, ${routes.length} routes` },
           regressionHint: `If the API is private, ${path} must return 401, 403 or 404 in production.`,
         });
         break; // one definition per base: the same spec is often served at several paths

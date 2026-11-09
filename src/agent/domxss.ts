@@ -19,7 +19,11 @@ export async function proveDomXss(url: string, nonce: string, opts?: { playwrigh
   const pwPath = opts?.playwrightPath ?? process.env.CRENEL_PLAYWRIGHT ?? "playwright";
   let chromium: { launch: (o?: unknown) => Promise<unknown> };
   try {
-    ({ chromium } = (await import(pwPath)) as { chromium: { launch: (o?: unknown) => Promise<unknown> } });
+    // An ESM entry exports chromium; a CommonJS one (index.js) puts it under default.
+    const mod = (await import(pwPath)) as { chromium?: typeof chromium; default?: { chromium?: typeof chromium } };
+    const c = mod.chromium ?? mod.default?.chromium;
+    if (!c) throw new Error("no chromium export");
+    chromium = c;
   } catch {
     return { available: false, executed: false, reason: "no browser: install playwright (or set CRENEL_PLAYWRIGHT) to prove DOM XSS" };
   }

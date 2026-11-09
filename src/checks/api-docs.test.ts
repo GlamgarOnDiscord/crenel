@@ -36,3 +36,11 @@ test("api-docs: an SPA shell, a JSON that is not a spec, and a 401 are nothing",
   assert.equal(parseSpec('{"swagger":"2.0"}'), null);
   assert.equal(parseSpec("openapi: 3.1.0\npaths: []\n"), null);
 });
+
+test("a Swagger UI page: the definition in its init script is the proof", async () => {
+  const { embeddedSwaggerDoc, parseSpec } = await import("./api-docs.js");
+  const js = 'window.onload = function() { var options = {\n "swaggerDoc": {"openapi": "3.0.0", "info": {"title": "a } b"}, "paths": {"/orders": {"get": {}}}},\n "customOptions": {} }; }';
+  const doc = embeddedSwaggerDoc(js);
+  assert.ok(doc && parseSpec(doc)?.paths?.["/orders"]);
+  assert.equal(embeddedSwaggerDoc("var x = 1;"), null);
+});

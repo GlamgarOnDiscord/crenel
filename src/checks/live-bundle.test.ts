@@ -90,3 +90,10 @@ test("crawl stops when the target rate-limits almost every request; 404s on gues
     assert.equal(hits, 81, "every chunk is still tried when they are only missing");
   } finally { srv.close(); }
 });
+
+test("routes after a template expression, and the query parameters scripts put on them", async () => {
+  const { extractEndpoints, extractQueryParams } = await import("./live-bundle.js");
+  const js = "get(`${this.host}/rest/items/search?q=${t}`); put(`${this.host}/rest/cart/${id}`); x(\"/api/users?email=\" + e + \"&page=1\")";
+  assert.deepEqual(extractEndpoints(js), ["/api/users", "/rest/cart/:id", "/rest/items/search"]);
+  assert.deepEqual(extractQueryParams(js), { "/api/users": ["email"], "/rest/items/search": ["q"] });
+});

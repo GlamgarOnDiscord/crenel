@@ -329,7 +329,10 @@ host (or `options.graphql.paths`). A response carrying `__schema` proves
 introspection is open: the whole API map, admin mutations included, is public.
 When GET gives nothing, the same query goes out as a JSON POST: the HTTP
 client lets that POST through only because its body is a single query with no
-mutation or subscription (see "What goes out" below).
+mutation or subscription (see "What goes out" below). It also reports field
+suggestions (a "Did you mean" in a parsed GraphQL error), query batching (active
+mode: every operation of an array answers with data) and a GraphQL IDE page
+(GraphiQL, Playground) served on `/graphiql`, `/graphql` or `/playground`.
 
 ## open-redirect
 
@@ -476,7 +479,9 @@ Requests the frameworks' default definition paths (`/openapi.json`,
 `/v2/api-docs`, `/swagger/v1/swagger.json`, `/docs/openapi.json`; override with
 `options.api-docs.paths`) on the staging URL and `options.api-docs.urls`. A hit
 needs a 200 whose body parses as JSON or YAML with an `openapi`/`swagger`
-version and a `paths` object, so an SPA shell or a status JSON never counts. One
+version and a `paths` object, so an SPA shell or a status JSON never counts. A
+Swagger UI page counts through the definition embedded in its
+`swagger-ui-init.js` (swagger-ui-express and similar). One
 finding per base: low, medium when the spec lists admin, internal or debug
 routes. A public API may publish its spec on purpose; the finding then mainly
 says which object routes belong in the authorization matrix

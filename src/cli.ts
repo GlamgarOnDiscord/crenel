@@ -21,7 +21,7 @@ import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
 import { checkModelEndpoint, claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
-import { crawlLiveBundle, extractEndpoints } from "./checks/live-bundle.js";
+import { crawlLiveBundle, extractEndpoints, extractQueryParams } from "./checks/live-bundle.js";
 import { runAutoProbe, type Endpoint } from "./agent/autoprobe.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
@@ -520,13 +520,19 @@ async function main(): Promise<number> {
     const base = config.scope.stagingUrl.replace(/\/+$/, "");
     const { files } = await crawlLiveBundle({ scope, log }, config.scope.stagingUrl);
     const paths = new Set<string>();
-    for (const f of files) if (f.kind !== "map") for (const e of extractEndpoints(f.body)) paths.add(e);
+    const qp: Record<string, Set<string>> = {};
+    for (const f of files) if (f.kind !== "map") {
+      for (const e of extractEndpoints(f.body)) paths.add(e);
+      for (const [p, ks] of Object.entries(extractQueryParams(f.body))) for (const k of ks) (qp[p] ??= new Set()).add(k);
+    }
     const authz = (config.options["authz-matrix"] ?? {}) as { resources?: { path?: string }[] };
     for (const r of authz.resources ?? []) if (typeof r.path === "string") paths.add(r.path);
+    // The usual GraphQL paths, as the graphql floor check probes them: the validators confirm they speak GraphQL.
+    for (const p of ["/graphql", "/api/graphql"]) paths.add(p);
     const endpoints: Endpoint[] = [...paths].map((p) => {
       const u = new URL(p.replace(/:id|\{[^}]+\}/g, "1"), base + "/").toString();
-      const ps = [...new URL(u).searchParams.keys()];
-      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p) };
+      const ps = [...new Set([...new URL(u).searchParams.keys(), ...(qp[p.split("?")[0]!] ?? [])])];
+      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p), template: /:id|\{[^}]+\}/.test(p) ? new URL(p.split("?")[0]!.replace(/\{[^}]+\}/g, ":id"), base + "/").pathname : undefined };
     });
     log(`autoprobe: ${endpoints.length} endpoint(s) discovered; probing...`);
     const env = { scope, projectDir: config.projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };

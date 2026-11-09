@@ -64,16 +64,31 @@ export function extractAssetUrls(body: string, base: string, kind: "html" | "js"
  * placeholder or an id-shaped segment becomes ":id", so the route can go
  * straight into the authorization matrix. Routes with one placeholder only.
  */
+// A route literal: after a quote, or after a template expression (`${host}/api/x`), up to the closing quote.
+const ROUTE_LIT = /(?:["'`]|\})(\/(?:api|v\d|rest|graphql|trpc|internal|admin)\/[A-Za-z0-9_\-./${}:?=&]{1,160})["'`]/g;
+
 export function extractEndpoints(js: string): string[] {
   const out = new Set<string>();
-  const lit = /["'`](\/(?:api|v\d|rest|graphql|trpc|internal|admin)\/[A-Za-z0-9_\-./${}:?=&]{1,160})["'`]/g;
-  for (const m of js.matchAll(lit)) {
+  for (const m of js.matchAll(ROUTE_LIT)) {
     let p = m[1]!.split("?")[0]!.replace(/\/+$/, "");
     p = p.replace(/\$\{[^}]*\}/g, ":id").replace(/\/(?:[0-9]+|[0-9a-f]{8}-[0-9a-f-]{27})(?=\/|$)/gi, "/:id").replace(/:\w+/g, ":id");
     if (/[{}$]/.test(p) || (p.match(/:id/g) ?? []).length > 1) continue;
     out.add(p);
   }
   return [...out].sort();
+}
+
+/** Query parameter names the scripts put on each route ("/search?q=" + x -> {"/search": ["q"]}). Names only, from the code. */
+export function extractQueryParams(js: string): Record<string, string[]> {
+  const out: Record<string, Set<string>> = {};
+  for (const m of js.matchAll(ROUTE_LIT)) {
+    const [path, query] = m[1]!.split("?", 2) as [string, string | undefined];
+    if (!query) continue;
+    const p = path.replace(/\/+$/, "").replace(/\$\{[^}]*\}/g, ":id").replace(/\/(?:[0-9]+|[0-9a-f]{8}-[0-9a-f-]{27})(?=\/|$)/gi, "/:id").replace(/:\w+/g, ":id");
+    if (/[{}$]/.test(p)) continue;
+    for (const kv of query.split("&")) { const k = kv.split("=")[0]!; if (/^[A-Za-z_][\w-]{0,40}$/.test(k)) (out[p] ??= new Set()).add(k); }
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
 }
 
 /**
