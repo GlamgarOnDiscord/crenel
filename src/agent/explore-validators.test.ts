@@ -833,3 +833,27 @@ test("priv-escalation: A's access to an admin gate flips from 403 to 200 after A
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
 });
+
+test("data-exposure: a list returning two tenants' markers to A is proven; a single shared object or one marker is not", async () => {
+  const srv = createServer((req, res) => {
+    const who = req.headers.authorization === "Bearer tok-a" ? "a" : null;
+    const json = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (!who) return json(401, {});
+    if (req.url === "/api/all-users") return json(200, { users: [{ id: 1, m: "mk_a" }, { id: 2, m: "mk_b" }, { id: 3, m: "mk_c" }] }); // leaks everyone
+    if (req.url === "/api/my-profile") return json(200, { id: 1, m: "mk_a" }); // only A
+    if (req.url === "/api/one-foreign") return json(200, { id: 2, m: "mk_b" }); // one other object (cross-actor's job)
+    return json(404, {});
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-dx2-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a", marker: "mk_a" }, b: { token: "tok-b", marker: "mk_b" }, c: { token: "tok-c", marker: "mk_c" } } } } };
+    const leak = await validateClaim(claim("explore.data-exposure", { url: "/api/all-users", as: "a" }), env);
+    assert.equal(leak.state, "proven", leak.reason);
+    assert.match(leak.reason, /markers of 2 other accounts|other accounts/);
+    assert.equal((await validateClaim(claim("explore.data-exposure", { url: "/api/my-profile", as: "a" }), env)).state, "unproven");
+    assert.equal((await validateClaim(claim("explore.data-exposure", { url: "/api/one-foreign", as: "a" }), env)).state, "unproven", "a single foreign object is cross-actor, not aggregate exposure");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
