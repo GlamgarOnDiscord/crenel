@@ -101,7 +101,7 @@ export function useLiveAgent(s: Setters) {
       // never sent, only the NAME of its env var (modelApiKeyEnv). See llm.ts.
       const m = { model: opts.model, modelBaseUrl: opts.modelBaseUrl, modelApiKeyEnv: opts.modelApiKeyEnv, modelTemperature: opts.modelTemperature, effort: opts.effort };
       const r = opts.goal
-        ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, ...m } })
+        ? await apiFetch<{ id: string }>("api/goals", { method: "POST", body: { text: opts.goal, mode: opts.mode, ...m, explore: opts.explore } })
         : await apiFetch<{ id: string }>("api/runs", { method: "POST", body: { prompt, mode: opts.mode, ...m, explore: opts.explore } });
       if (!opts.goal) setGoal(null);
       attach(r.id);

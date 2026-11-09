@@ -16,6 +16,8 @@ export interface Finding {
   proof?: { method: string; replay: string; evidence?: string };
   regression?: string;
   guarded?: boolean;
+  /** Ignored in the console by the user (accepted risk, false positive): shown apart, never deleted. */
+  ignored?: { at: string; reason: string };
 }
 
 export interface Target {
