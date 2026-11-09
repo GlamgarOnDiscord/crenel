@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm } from "./llm.js";
+import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm, endpointUrl, displayBase, checkModelEndpoint, claudeCli } from "./llm.js";
 
 // A throwaway http server: `handler` sees the parsed JSON body and the headers, and
 // returns [status, bodyString]. Resolves to the base URL and a close().
@@ -141,4 +141,57 @@ test("selectLlm: malformed options.llm -> clear error, no llm", () => {
   assert.match(r.error ?? "", /options\.llm:/);
   const r2 = selectLlm({ config: { provider: "openai" } }); // provider without model
   assert.match(r2.error ?? "", /requires a model/);
+});
+
+test("endpointUrl: a bare host gets /v1, a base that already has a path only gets the resource", () => {
+  const chat = (b: string) => endpointUrl(b, "/v1", "/chat/completions");
+  assert.equal(chat("https://api.deepseek.com"), "https://api.deepseek.com/v1/chat/completions");
+  assert.equal(chat("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions");
+  assert.equal(chat("https://api.openai.com/v1/"), "https://api.openai.com/v1/chat/completions");
+  assert.equal(chat("https://openrouter.ai/api/v1"), "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(chat("https://api.groq.com/openai/v1"), "https://api.groq.com/openai/v1/chat/completions");
+  assert.equal(chat("https://generativelanguage.googleapis.com/v1beta/openai"), "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  assert.equal(chat("http://127.0.0.1:11434"), "http://127.0.0.1:11434/v1/chat/completions");
+  assert.equal(endpointUrl("https://api.anthropic.com", "/v1", "/messages"), "https://api.anthropic.com/v1/messages");
+  assert.equal(endpointUrl("https://api.anthropic.com/v1", "/v1", "/messages"), "https://api.anthropic.com/v1/messages");
+});
+
+test("displayBase: credentials in a base URL never reach a label", () => {
+  assert.equal(displayBase("https://user:pass@models.example.com/v1/"), "https://models.example.com/v1");
+  const llm = openAiCompatibleLlm("m", { baseUrl: "https://user:pass@models.example.com/v1" });
+  assert.ok(!llm.label.includes("pass"), llm.label);
+});
+
+test("checkModelEndpoint: only model-key env vars, https or loopback, no URL credentials, no remote scan target", () => {
+  assert.equal(checkModelEndpoint({ apiKeyEnv: "OPENAI_API_KEY", baseUrl: "https://api.openai.com/v1" }), null);
+  assert.equal(checkModelEndpoint({ apiKeyEnv: "CRENEL_LLM_KEY" }), null);
+  assert.equal(checkModelEndpoint({ apiKeyEnv: "MY_GATEWAY_KEY", configKeyEnv: "MY_GATEWAY_KEY" }), null);
+  assert.match(checkModelEndpoint({ apiKeyEnv: "GITHUB_TOKEN" }) ?? "", /not a model key/);
+  assert.match(checkModelEndpoint({ apiKeyEnv: "AWS_SECRET_ACCESS_KEY" }) ?? "", /not a model key/);
+  assert.match(checkModelEndpoint({ apiKeyEnv: "sk-live-123" }) ?? "", /NAME/);
+  assert.equal(checkModelEndpoint({ baseUrl: "http://127.0.0.1:1234/v1" }), null);
+  assert.equal(checkModelEndpoint({ baseUrl: "http://localhost:11434" }), null);
+  assert.match(checkModelEndpoint({ baseUrl: "http://models.example.com" }) ?? "", /https/);
+  assert.match(checkModelEndpoint({ baseUrl: "https://a:b@models.example.com" }) ?? "", /credentials/);
+  assert.match(checkModelEndpoint({ baseUrl: "https://app.example.com/v1", scanHosts: ["app.example.com"] }) ?? "", /scan target/);
+  assert.equal(checkModelEndpoint({ baseUrl: "http://127.0.0.1:11434", scanHosts: ["127.0.0.1"] }), null, "a local model next to a local target");
+});
+
+test("claudeCli: inherited object keys are not models", () => {
+  assert.equal(claudeCli("constructor"), null);
+  assert.equal(claudeCli("__proto__"), null);
+  assert.equal(claudeCli("toString"), null);
+  assert.ok(claudeCli("opus-4-8"));
+});
+
+test("selectLlm: a request temperature wins over the config's", async () => {
+  let got: number | undefined;
+  const srv = createServer((req, res) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { got = JSON.parse(b).temperature; res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: { content: "ok" } }] })); }); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  try {
+    const port = (srv.address() as AddressInfo).port;
+    const { llm } = selectLlm({ spec: "openai:m", baseUrl: `http://127.0.0.1:${port}`, temperature: 0.7, config: { temperature: 0.1 } });
+    await llm!.ask("hi");
+    assert.equal(got, 0.7);
+  } finally { await new Promise<void>((r) => srv.close(() => r())); }
 });

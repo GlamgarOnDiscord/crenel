@@ -823,26 +823,41 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .msel-add .msel-n { color: var(--fg-muted); }
 
 /* Config card for a custom model. Compact, same tokens as the rest of the pop. */
-.cmf { display: grid; gap: 10px; padding: 12px; width: 344px; max-width: calc(100vw - 32px); max-height: min(74vh, 520px); overflow-y: auto; }
-.cmf-head { display: flex; align-items: center; gap: 8px; }
-.cmf-title { font-size: 13.5px; font-weight: 600; color: var(--fg); }
-.cmf-spec { margin-left: auto; font-size: 11.5px; color: var(--fg-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-conns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
-.cmf-conn { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
-.cmf-conn:hover { background: var(--hover); }
+/* Custom model card. The menu widens while it is open so the connectors sit in
+   three even columns; every track is minmax(0, 1fr) so nothing pushes past it. */
+.msel:has(.cmf) { width: 404px; }
+.cmf { display: grid; gap: 10px; padding: 8px 8px 10px; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  /* Never taller than the room Radix measured on the side the menu opened to, so the sticky actions stay on screen. */
+  max-height: min(600px, calc(var(--radix-popover-content-available-height, 78vh) - 20px)); }
+.cmf-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cmf-title { font-size: 13.5px; font-weight: 600; color: var(--fg); white-space: nowrap; }
+.cmf-spec { margin-left: auto; min-width: 0; font-size: 11px; color: var(--fg-faint); background: var(--well); border-radius: 7px; padding: 3px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-sec { display: grid; gap: 6px; }
+.cmf-sec-l { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-ghost); padding: 2px 2px 0; }
+.cmf-conns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.cmf-conn { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 0; border-radius: 9px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-muted); font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; transition: background .12s var(--ease), box-shadow .12s var(--ease), color .12s var(--ease); }
+.cmf-conn > svg, .cmf-conn > img { flex: none; }
+.cmf-conn:hover { background: var(--hover); color: var(--fg); }
+.cmf-conn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--line), 0 0 0 2px var(--brand-ring); }
 .cmf-conn.on { color: var(--fg); background: var(--active); box-shadow: inset 0 0 0 1.5px var(--brand-line); }
-.cmf-conn-l { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmf-tag { font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-faint); background: var(--well); border-radius: 5px; padding: 1px 5px; }
-.cmf-field { display: grid; gap: 4px; }
+.cmf-conn-l { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-picked { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 11px; border-radius: 11px; background: color-mix(in srgb, var(--brand) 5%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.cmf-picked-t { display: grid; min-width: 0; }
+.cmf-picked-t b { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+.cmf-picked-t span { font-size: 11px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmf-field { display: grid; gap: 4px; min-width: 0; }
+.cmf-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; }
 .cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
 .cmf-opt { font-size: 10.5px; font-weight: 400; color: var(--fg-ghost); }
-.cmf-in { width: 100%; background: var(--well); border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-strong); padding: 8px 10px; font-size: 13px; color: var(--fg); outline: none; transition: box-shadow .12s var(--ease); }
+.cmf-in { width: 100%; min-width: 0; box-sizing: border-box; background: var(--well); border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-strong); padding: 8px 10px; font-size: 12.5px; color: var(--fg); outline: none; transition: box-shadow .12s var(--ease); }
 .cmf-in::placeholder { color: var(--fg-ghost); }
 .cmf-in:focus { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--brand-ring); }
 .cmf-in[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger-line); }
-.cmf-hint { font-size: 11px; color: var(--fg-faint); }
-.cmf-err { font-size: 11px; color: var(--danger-ink); }
-.cmf-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.cmf-hint { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; line-height: 1.4; color: var(--fg-faint); }
+.cmf-hint svg { flex: none; margin-top: 2px; }
+.cmf-err { font-size: 11px; line-height: 1.4; color: var(--danger-ink); }
+.cmf-warn { font-size: 11px; line-height: 1.4; color: var(--brand-ink); }
+.cmf-actions { position: sticky; bottom: -10px; z-index: 1; display: flex; justify-content: flex-end; gap: 8px; margin: 2px -8px -10px; padding: 10px 8px; border-top: 1px solid var(--line); background: var(--panel-raised); }
 
 .ctxbtn { gap: 6px; padding: 0 8px; color: var(--fg-faint); }
 .ctx-card { z-index: 70; width: 240px; background: var(--panel-raised); border-radius: 14px; box-shadow: var(--shadow-pop); overflow: hidden; }
