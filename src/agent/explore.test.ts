@@ -9,7 +9,7 @@ import { ConfigSchema } from "../core/config.js";
 import { AgentRun } from "./run.js";
 import { StateStore } from "./state.js";
 import { scriptedLlm } from "./llm.js";
-import { parseTurn, resolveExploreMode } from "./explore.js";
+import { claimWriteMethod, parseTurn, resolveExploreMode } from "./explore.js";
 import type { Backend } from "../toolbox/backend.js";
 
 // A small multi-tenant API whose flaw no check's schema describes: an export
@@ -267,4 +267,16 @@ test("explore: toolbox.run with free arguments keeps the proxy and the budget; u
 test("explore: a model answer that is not JSON runs nothing", () => {
   assert.equal(parseTurn("I think we should curl evil.example"), null);
   assert.deepEqual(parseTurn('```json\n{"calls":[],"done":true}\n```')?.done, true);
+});
+
+test("claimWriteMethod: a proof that writes is gated as a write with its real method", () => {
+  assert.equal(claimWriteMethod("mass-assignment", { url: "/me" }), "PUT");
+  assert.equal(claimWriteMethod("mass-assignment", { url: "/me", method: "patch" }), "PATCH");
+  assert.equal(claimWriteMethod("reuse", { url: "/coupon" }), "POST");
+  assert.equal(claimWriteMethod("stored-xss", { storeUrl: "/c", storeMethod: "PUT" }), "PUT");
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q" }), null);
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q", where: "json" }), "POST");
+  assert.equal(claimWriteMethod("injection", { url: "/s", param: "q", method: "DELETE" }), "DELETE");
+  assert.equal(claimWriteMethod("replay", { request: { url: "/x", method: "DELETE" } }), null);
+  assert.equal(claimWriteMethod("cross-actor", { url: "/x" }), null);
 });

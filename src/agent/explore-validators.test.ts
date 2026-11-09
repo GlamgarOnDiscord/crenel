@@ -497,7 +497,7 @@ test("cross-actor: an endpoint public to anon that carries the owner's marker es
 
 test("injection: NoSQL operator injection on a single-param endpoint is proven via the boolean differential", async () => {
   // POST /coupon {code}: a valid literal and an always-true operator ($ne) both validate;
-  // an always-false operator ($eq impossible) does not. GET probes (sqli/xss) stay neutral.
+  // an always-false operator ($in: []) does not. GET probes (sqli/xss) stay neutral.
   const srv = createServer((req, res) => {
     const u = new URL(req.url!, "http://x");
     const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
@@ -507,8 +507,9 @@ test("injection: NoSQL operator injection on a single-param endpoint is proven v
       let body: any = {}; try { body = JSON.parse(chunks || "{}"); } catch { return json(400, { error: "unexpected token in json" }); }
       const code = body.code;
       if (code && typeof code === "object") {
-        if ("$eq" in code) return json(404, { valid: false });      // always-false
-        return json(200, { valid: true, discount: 10 });            // $ne / any operator -> always-true
+        // A document store evaluating the operator against the one stored code.
+        const hit = "$ne" in code ? code.$ne !== "SAVE10" : "$in" in code ? Array.isArray(code.$in) && code.$in.includes("SAVE10") : "$eq" in code ? code.$eq === "SAVE10" : false;
+        return hit ? json(200, { valid: true, discount: 10 }) : json(404, { valid: false });
       }
       return code === "SAVE10" ? json(200, { valid: true, discount: 10 }) : json(404, { valid: false });
     });
@@ -522,7 +523,7 @@ test("injection: NoSQL operator injection on a single-param endpoint is proven v
       scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
       projectDir: dir, stagingUrl: base, checks: [], options: {},
     };
-    const v = await validateClaim(claim("explore.injection", { url: "/coupon", param: "code", where: "body", method: "POST", value: "SAVE10" }), env);
+    const v = await validateClaim(claim("explore.injection", { url: "/coupon", param: "code", where: "json", method: "POST", value: "SAVE10" }), env);
     assert.equal(v.state, "proven", v.reason);
     assert.match(v.reason, /NoSQL/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -561,8 +562,10 @@ test("injection: NoSQL auth bypass via a multi-field JSON body template is prove
     if (u.pathname !== "/login" || req.method !== "POST") return json(404, {});
     let chunks = ""; req.on("data", (c) => (chunks += c)); req.on("end", () => {
       let body: any = {}; try { body = JSON.parse(chunks || "{}"); } catch { return json(400, {}); }
+      // The other template field is required: a probe that drops it is refused.
+      if (body.user !== "admin") return json(400, { error: "user required" });
       const p = body.pass;
-      if (p && typeof p === "object") return "$ne" in p ? json(200, { token: "t" }) : json(401, {}); // $ne bypasses, $eq denied
+      if (p && typeof p === "object") return "$ne" in p ? json(200, { token: "t" }) : json(401, {}); // $ne bypasses, $in: [] matches nothing
       return json(401, {}); // any literal password is wrong
     });
     return undefined;
@@ -575,7 +578,7 @@ test("injection: NoSQL auth bypass via a multi-field JSON body template is prove
       scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }),
       projectDir: dir, stagingUrl: base, checks: [], options: {},
     };
-    const v = await validateClaim(claim("explore.injection", { url: "/login", param: "pass", method: "POST", bodyTemplate: '{"user":"admin","pass":"__INJECT__"}' }), env);
+    const v = await validateClaim(claim("explore.injection", { url: "/login", method: "POST", bodyTemplate: '{"user":"admin","pass":"__INJECT__"}' }), env);
     assert.equal(v.state, "proven", v.reason);
     assert.match(v.reason, /NoSQL/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }

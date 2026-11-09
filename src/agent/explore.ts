@@ -551,13 +551,17 @@ export class Explorer {
     // Only the detail goes to the validator; any "state" or "proven" the model writes is ignored.
     const claim: Claim = { id: `claim:${key}`, class: cls, source: "llm", detail: a.detail };
     const urls = claimUrls(a.class, a.detail, this.d.config.scope.stagingUrl);
+    const writes = claimWriteMethod(a.class, a.detail);
     let env: ValidatorEnv = { scope: this.scope, projectDir: this.d.projectDir, options: this.d.config.options, stagingUrl: this.d.config.scope.stagingUrl, checks: this.d.checks };
     let verdict: ClaimVerdict;
     const offline = new Scope({ allowedHosts: [], signal: this.ac.signal });
     if (urls === null) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "no request or file to replay in the detail" };
     else if (urls.some((u) => !this.scope.isHostAllowed(u))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "a URL of the claim is not on a declared host: nothing was sent" };
     else if (urls.length && this.requests + 6 > this.d.budget.maxRequests) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "request budget too low to replay it" };
-    else if (urls.length && !(await this.gateFor("explore.http", urls.map((url) => ({ method: "GET", url }))))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "the gate refused the replay: nothing was sent" };
+    else if (writes && this.d.mode !== "full") verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state: only in "full" exploration` };
+    else if (writes && !this.scope.allowActiveTesting) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state, and allowActiveTesting is off in the config` };
+    // A proof that writes is approved as a write, with its real method, every time (never on a read's approval).
+    else if (urls.length && !(await this.gateFor(writes ? "explore.write" : "explore.http", urls.map((url, i) => ({ method: i === 0 && writes ? writes : "GET", url }))))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "the gate refused the replay: nothing was sent" };
     else {
       if (!urls.length) env = { ...env, scope: offline };
       verdict = await validateClaim(claim, env);
@@ -583,6 +587,23 @@ export class Explorer {
   }
 }
 
+/** The state-changing method a claim's validator sends to its first URL, or null when it only reads. */
+export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>): string | null {
+  const m = (x: unknown) => (typeof x === "string" && x ? x.toUpperCase() : null);
+  const isWrite = (x: string) => x !== "GET" && x !== "HEAD";
+  let method: string;
+  switch (cls) {
+    case "mass-assignment": method = m(d.method) ?? "PUT"; break;
+    case "reuse": method = m(d.method) ?? "POST"; break;
+    case "stored-xss": method = m(d.storeMethod) ?? "POST"; break;
+    case "injection": case "ssrf": case "lfi":
+      method = m(d.method) ?? (typeof d.gql === "string" || typeof d.bodyTemplate === "string" || d.where === "body" || d.where === "json" ? "POST" : "GET"); break;
+    // GET reads; the replay validator refuses any write but a read-only POST, and the GraphQL probes are read-only queries.
+    default: return null;
+  }
+  return isWrite(method) ? method : null;
+}
+
 /** The URLs a claim's validator will request (null: nothing to replay; [] for a file). */
 function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, base?: string): string[] | null {
   if (cls === "file-match") return typeof d.file === "string" ? [] : null;
@@ -596,7 +617,10 @@ function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, 
   const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "redirect" || cls === "graphql") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (typeof raw !== "string") return null;
   const u = resolveExploreUrl(raw, base);
-  return u ? [u] : null;
+  if (!u) return null;
+  // Mass-assignment reads the object back (with the actor's token): that URL is checked too.
+  const read = cls === "mass-assignment" && typeof d.readUrl === "string" ? resolveExploreUrl(d.readUrl, base) : null;
+  return read && read !== u ? [u, read] : [u];
 }
 
 function canonical(x: unknown): unknown {

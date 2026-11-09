@@ -7,13 +7,16 @@
 // a fresh nonce and these oracles decide. A guess, an error page or the model's
 // confidence never counts.
 //
-// Three classes, each a pure function so it is tested without a network:
+// Four classes, each a pure function so it is tested without a network:
 //   - reflected XSS: a nonce wrapped in an HTML-breaking payload comes back
 //     verbatim and UNESCAPED in the body (escaped reflection is only a lead).
 //   - SQL injection: boolean-based (a TRUE condition matches the baseline while
 //     a FALSE one differs materially) or error-based (a database error surfaces).
 //   - template/command injection: a unique arithmetic the server computed
 //     (nonce + 7*7 -> nonce + "49") appears, so it cannot be a coincidence.
+//   - NoSQL operator injection: an always-true operator behaves like the
+//     baseline while an always-false one diverges, or a document-store error
+//     appears only when an operator is sent.
 
 import { createHash } from "node:crypto";
 
@@ -93,7 +96,7 @@ export function sqliOracle(input: {
 // Generic operator technique, no target signature.
 const NOSQL_ERRORS = [
   "mongoerror", "bson", "unknown operator", "$where", "casterror",
-  "failed to parse", "e11000", "unterminated object", "unexpected token in json",
+  "failed to parse", "e11000", "unterminated object",
 ];
 export function nosqlOracle(input: {
   baseline: { status: number; body: string };
@@ -101,20 +104,27 @@ export function nosqlOracle(input: {
   falsy: { status: number; body: string };
 }): InjVerdict {
   const { baseline, truthy, falsy } = input;
-  const errored = [truthy, falsy].find((r) => NOSQL_ERRORS.some((e) => r.body.toLowerCase().includes(e)));
-  if (errored) return { verdict: "proven", kind: "nosqli-error", reason: "a document-store parse error surfaced when an operator was injected" };
+  // A document-store error counts only when the operator brought it: the same text on the baseline is the page, not a signal.
+  const errs = (r: { body: string }) => NOSQL_ERRORS.filter((e) => r.body.toLowerCase().includes(e));
+  const baseErrs = errs(baseline);
+  const errored = [truthy, falsy].map(errs).flat().find((e) => !baseErrs.includes(e));
+  if (errored) return { verdict: "proven", kind: "nosqli-error", reason: `a document-store error ("${errored}") surfaced only when an operator was injected, not on the baseline` };
   const same = (a: { status: number; body: string }, b: { status: number; body: string }) =>
     a.status === b.status && (a.body === b.body || sha(a.body) === sha(b.body));
   const truthyLikeBase = same(truthy, baseline);
   const falsyDiffers = !same(falsy, baseline) && !same(falsy, truthy);
   if (truthyLikeBase && falsyDiffers) {
-    return { verdict: "proven", kind: "nosqli-boolean", reason: "an always-true operator ($ne) matches the baseline while an always-false one ($eq) diverges (boolean-based)" };
+    return { verdict: "proven", kind: "nosqli-boolean", reason: "an always-true operator ($ne) matches the baseline while an always-false one diverges (boolean-based)" };
   }
   // Auth/filter bypass: the always-true operator SUCCEEDS where the literal value
-  // and the always-false operator are both denied -> the operator was interpreted.
+  // and the always-false operator are both denied the same way -> the operator was
+  // interpreted. A 2xx alone is not success: a body that reads as an error, a
+  // validation message or a challenge keeps it a lead.
   const ok = (r: { status: number; body: string }) => r.status >= 200 && r.status < 300;
-  if (ok(truthy) && !ok(baseline) && !ok(falsy) && !same(truthy, falsy)) {
-    return { verdict: "proven", kind: "nosqli-bypass", reason: "an always-true operator ($ne) is accepted where the literal value and an always-false operator ($eq) are both denied (auth/filter bypass)" };
+  const errorish = /\b(error|invalid|denied|forbidden|unauthori[sz]ed|fail(ed|ure)?|captcha|challenge|not allowed)\b/i;
+  if (ok(truthy) && !ok(baseline) && baseline.status >= 400 && baseline.status === falsy.status && !same(truthy, falsy)) {
+    if (!truthy.body.trim() || errorish.test(truthy.body.slice(0, 2000))) return { verdict: "lead", kind: "nosqli-bypass", reason: `the always-true operator gets HTTP ${truthy.status} where the literal value and the always-false operator get ${baseline.status}, but the body is empty or reads as an error: review by hand` };
+    return { verdict: "proven", kind: "nosqli-bypass", reason: `an always-true operator ($ne) is accepted (HTTP ${truthy.status}) where the literal value and an always-false operator are both denied with HTTP ${baseline.status} (auth/filter bypass)` };
   }
   if (!same(truthy, falsy)) {
     return { verdict: "lead", kind: "nosqli", reason: "operator-injected responses differ but not cleanly against the baseline: review by hand" };
