@@ -29,13 +29,21 @@ export const reflectedXss: Check = {
         const t = nonce(param);
         const payload = `<svg/onload=1>${t}`;
         const res = await get(`${path}?${param}=${encodeURIComponent(payload)}`);
-        // Only an HTML response can carry reflected markup that executes.
-        if (!/html|xhtml|\bxml\b/.test(res.ct)) continue;
+        // Only an HTML response can carry reflected markup that executes. XSS runs
+        // in an HTML document; a generic XML response is not a browsing context, so
+        // it is excluded to avoid a false "executable XSS" on an XML endpoint.
+        if (!/html|xhtml/.test(res.ct)) continue;
         const r = xssOracle({ token: t, body: res.body, status: res.status });
-        if (r.verdict !== "proven") continue;
+        // The oracle's generic raw forms include token-less shapes (a bare
+        // `<svg/onload=1>`), so a page that already contains such markup could pass
+        // while only an escaped nonce is reflected. Require OUR exact, nonce-bearing
+        // payload to come back verbatim and unescaped: that string cannot pre-exist.
+        if (r.verdict !== "proven" || !res.body.includes(payload)) continue;
         // Control: a benign value must NOT bring the raw markup back (so the page
-        // does not simply always contain it).
+        // does not simply always contain it). A failed control proves nothing, so
+        // fail closed: only trust a control request that actually answered.
         const clean = await get(`${path}?${param}=crenelbenign`);
+        if (!(clean.status >= 200 && clean.status < 300)) continue;
         if (clean.body.includes("<svg/onload=1>")) continue;
         findings.push({
           id: `reflected-xss:${path}:${param}`,

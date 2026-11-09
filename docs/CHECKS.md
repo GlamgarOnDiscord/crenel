@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 42 checks. Each is deterministic and read-only by default (the
+Crenel runs 54 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -30,14 +30,12 @@ empty list runs every read-only check.
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
-| null-byte-exposure | A sensitive file blocked by its extension (401/403 for *.bak, *.sql …) but served through a poison-null-byte suffix (`.bak%00.md`) | yes (blocked direct vs null-byte served, with a non-existent control) | GETs on the declared host |
 | error-disclosure | A malformed request returns a server stack trace (file paths, framework, versions) that a benign request does not | yes (benign vs malformed differential) | **malformed POST probes**: allowActiveTesting + `options.error-disclosure.enabled` |
 | cors-reflection | The server echoes an arbitrary request Origin into Access-Control-Allow-Origin with Allow-Credentials: true (confirmed on two distinct origins) | yes (two reflected origins + credentials) | GETs with an Origin header on the declared host |
 | header-injection | A request parameter flows into a response header without CR/LF stripping (CRLF / response splitting) | yes (injected header appears with our nonce; benign control does not) | GETs on the declared host |
-| dependency-exposure | A dependency manifest (package.json, or a .bak reachable via a listing / null-byte) served with a library pinned below a known-advisory version | yes (manifest served + documented-vulnerable range) | GETs on the declared host |
-| graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
-| graphql-ssrf | A schema-discovered GraphQL field (URL/host-like argument) fetches an attacker URL, proven out-of-band | yes (OOB callback with a nonce) | **outbound-triggering**: allowActiveTesting + `options.graphql-ssrf.enabled` + a callbackHost the target can reach |
-| reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (raw HTML reflection vs a benign control; escaped reflection is only a lead) | GETs on the declared host |
+| dependency-exposure | A dependency manifest (package.json) or lockfile (package-lock.json) served with a library at an EXACT version below a known advisory bound (a version range is not provable and is skipped) | yes (manifest/lockfile served + an exactly-pinned version below the bound) | GETs on the declared host |
+| graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (error-based or boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control; boolean SQL requires all three responses error-free) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
+| reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (our exact nonce-bearing markup reflected unescaped in an HTML response vs a benign control; an escaped reflection is not flagged) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
@@ -64,7 +62,7 @@ empty list runs every read-only check.
 | auth-injection | SQL/NoSQL authentication bypass on a declared login field (a tautology accepted where a benign value and a false tautology are denied) | yes (live differential with a control, opt-in) | **crafted logins**: allowActiveTesting + `options.auth-injection.enabled` + declared endpoints |
 | directory-listing | Open server directory index (autoindex) on a conventional folder path, exposing its files; confirms a sensitive file is actually served | yes (live, the listing + a fetched file) | yes (stagingUrl) |
 | live-ssrf | Server-side request forgery proven out-of-band: a unique nonce injected into a declared sink arrives at an ephemeral listener the target reached | yes (OOB callback, opt-in) | **outbound-triggering requests**: allowActiveTesting + `options.live-ssrf.enabled` + a callbackHost the target can reach |
-| command-injection | OS-command / template injection on a declared sink, proven by a computation (nonce next to 7*7 comes back as nonce49); optional `impactSample` adds a bounded output sample (impact evidence) through the proven channel | yes (computed differential, opt-in) | **payloads that run server-side**: allowActiveTesting + `options.command-injection.enabled` |
+| command-injection | OS-command / template injection on a declared sink, proven by a computation (nonce next to 7*7 comes back as nonce49) | yes (computed differential, opt-in) | **payloads that run server-side**: allowActiveTesting + `options.command-injection.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
 
 ## exposed-secrets

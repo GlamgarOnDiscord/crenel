@@ -38,30 +38,17 @@ const SQL_PAIRS: [string, string][] = [
   ['" OR "1"="1', '" AND "1"="2'],
 ];
 
-// Conventional login / lookup shapes, probed when the operator declares none.
-// Common paths and field names, not a single target's route.
-const DEFAULT_AUTH_ENDPOINTS: AuthInjectEndpoint[] = [
-  { url: "/rest/user/login", field: "email", template: { password: "crenel" } },
-  { url: "/api/login", field: "username", template: { password: "crenel" } },
-  { url: "/api/login", field: "email", template: { password: "crenel" } },
-  { url: "/login", field: "username", template: { password: "crenel" } },
-  { url: "/auth/login", field: "username", template: { password: "crenel" } },
-  { url: "/api/auth/login", field: "email", template: { password: "crenel" } },
-  { url: "/signin", field: "email", template: { password: "crenel" } },
-  { url: "/session", field: "username", template: { password: "crenel" } },
-];
-
 export const authInjection: Check = {
   name: "auth-injection",
   title: "Authentication bypass by SQL / NoSQL injection on a login field",
   readOnly: false, // sends crafted auth attempts: gated by active mode
   async run(ctx: CheckContext): Promise<Finding[]> {
     const cfg = (ctx.options["auth-injection"] ?? {}) as { endpoints?: AuthInjectEndpoint[] };
-    // When no endpoint is declared, probe a conventional set of login/lookup
-    // shapes so the check works out of the box once active testing is enabled;
-    // these are common paths and field names, not one target's answer.
-    const endpoints = cfg.endpoints ?? DEFAULT_AUTH_ENDPOINTS;
-    if (!ctx.stagingUrl || endpoints.length === 0) return [];
+    const endpoints = cfg.endpoints ?? [];
+    if (!ctx.stagingUrl || endpoints.length === 0) {
+      if (endpoints.length) ctx.log("auth-injection: no staging URL");
+      return [];
+    }
     const base = ctx.stagingUrl.replace(/\/+$/, "");
     ctx.scope.assertActiveAllowed("auth-injection (crafted login attempts)");
     const findings: Finding[] = [];

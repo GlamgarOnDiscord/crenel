@@ -41,3 +41,14 @@ test("graphql-injection: proves schema-discovered SQL (boolean) and OS command i
   assert.ok(proven.some((x) => /runCmd/.test(x.title!)), "command injection proven");
   assert.ok(!proven.some((x) => /safeSearch/.test(x.title!)), "safe field not flagged");
 });
+test("graphql-injection: does nothing when not opted in, and refuses without active mode", async () => {
+  const base = "http://127.0.0.1:1"; // never contacted: both guards fire before any request
+  // enabled unset -> returns [] before touching the network
+  const off = await graphqlInjection.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
+  assert.equal(off.length, 0);
+  // enabled but active testing disabled -> the active gate must reject
+  await assert.rejects(
+    () => graphqlInjection.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: false }), projectDir: ".", stagingUrl: base, options: { "graphql-injection": { enabled: true, endpoint: "/" } }, log: () => {} }),
+    /active/i,
+  );
+});

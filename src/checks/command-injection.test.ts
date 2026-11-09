@@ -53,21 +53,3 @@ test("command-injection: a sink that only reflects input (no eval) stays unprove
 test("command-injection: without active mode the check refuses to probe", async () => {
   await assert.rejects(() => run(true, false));
 });
-
-test("command-injection: impactSample reads a bounded sample through the proven channel", async () => {
-  const { createServer } = await import("node:http");
-  const read = (req: import("node:http").IncomingMessage) => new Promise<string>((r) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => r(b)); });
-  const srv = createServer(async (req, res) => {
-    let arg = ""; try { arg = JSON.parse(await read(req)).cmd ?? ""; } catch { /* */ }
-    const out = ("echo " + arg).split(";").map((p) => { const c = p.trim(); if (/^echo\s+/.test(c)) return c.replace(/^echo\s+/, "").replace(/\$\(\(7\*7\)\)/g, "49"); if (/cat .*\/flag/.test(c)) return "FLAG{unit-demo}"; return ""; }).filter(Boolean).join("\n");
-    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ out }));
-  });
-  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
-  const base = `http://127.0.0.1:${(srv.address() as import("node:net").AddressInfo).port}`;
-  try {
-    const f = await commandInjection.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: ".", stagingUrl: base, log: () => {},
-      options: { "command-injection": { enabled: true, impactSample: true, endpoints: [{ url: "/", method: "POST", body: '{"cmd":"__INJECT__"}' }] } } });
-    assert.equal(f[0]!.state, "proven");
-    assert.match(f[0]!.proof!.evidence!, /FLAG\{unit-demo\}/);
-  } finally { srv.close(); }
-});

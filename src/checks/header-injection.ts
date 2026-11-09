@@ -33,11 +33,13 @@ export const headerInjection: Check = {
         let res;
         try { res = await safeFetch(url, ctx.scope, { followRedirects: false, maxBytes: 4096 }); } catch { continue; }
         if ((res.headers.get(marker) ?? "").trim() !== nonce) continue; // the injected header did not appear
-        // Control: a benign value must NOT produce the injected header.
-        try {
-          const clean = await safeFetch(`${base}${path}?${param}=crenel`, ctx.scope, { followRedirects: false, maxBytes: 4096 });
-          if ((clean.headers.get(marker) ?? "").trim() === nonce) continue; // header present even without us: not injected
-        } catch { /* control failed: fall through, the positive still stands */ }
+        // Control: the same request with a benign value must NOT carry the marker
+        // header at all. If the server emits `x-crenel-ci` even without our CRLF,
+        // it is a static header, not our injection, so the differential fails. A
+        // control request that errors is inconclusive: fail closed and skip.
+        let clean;
+        try { clean = await safeFetch(`${base}${path}?${param}=crenel`, ctx.scope, { followRedirects: false, maxBytes: 4096 }); } catch { continue; }
+        if (clean.headers.get(marker) != null) continue; // present without our payload: not an injection
         findings.push({
           id: `header-injection:${path}:${param}`,
           check: "header-injection",

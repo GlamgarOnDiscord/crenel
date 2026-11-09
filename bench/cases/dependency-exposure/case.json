@@ -1,11 +1,33 @@
 {
   "title": "A served package.json pins a vulnerable library, next to one that pins patched versions",
   "type": "live",
-  "config": { "options": { "dependency-exposure": { "paths": ["/package.json.bak", "/safe/package.json"] } } },
+  "config": {
+    "options": {
+      "dependency-exposure": {
+        "paths": [
+          "/safe/package.json",
+          "/package.json.bak"
+        ]
+      }
+    }
+  },
   "mustFind": [
-    { "id": "vuln-dep-served", "check": "dependency-exposure", "where": "package.json.bak", "state": "proven", "minSeverity": "high", "why": "The served manifest pins lodash below the patched version." }
+    {
+      "id": "vuln-dep-served",
+      "check": "dependency-exposure",
+      "where": "package.json.bak",
+      "state": "proven",
+      "minSeverity": "high",
+      "why": "The served manifest pins lodash below the patched version."
+    }
   ],
   "mustNotFlag": [
-    { "id": "patched-manifest", "check": "dependency-exposure", "text": "safe", "forbid": "proven", "why": "This manifest only pins patched versions." }
+    {
+      "id": "patched-manifest",
+      "check": "dependency-exposure",
+      "text": "safe",
+      "forbid": "proven",
+      "why": "This manifest only pins patched versions."
+    }
   ]
 }

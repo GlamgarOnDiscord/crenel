@@ -24,18 +24,24 @@ export const corsReflection: Check = {
     const paths = opts.paths ?? ["/", "/api", "/rest", "/api/user", "/rest/user/whoami", "/account", "/me"];
     const probe = async (p: string, origin: string) => {
       try {
-        const r = await safeFetch(base + p, ctx.scope, { headers: { origin, accept: "*/*" }, maxBytes: 4096 });
+        // Do not follow redirects: the CORS headers we read must belong to the
+        // endpoint itself, so the stored curl replay (which does not follow
+        // redirects) reproduces the same response.
+        const r = await safeFetch(base + p, ctx.scope, { headers: { origin, accept: "*/*" }, followRedirects: false, maxBytes: 4096 });
         return { status: r.status, acao: (r.headers.get("access-control-allow-origin") ?? "").trim(), acac: (r.headers.get("access-control-allow-credentials") ?? "").toLowerCase().trim() };
-      } catch { return { status: 0, acao: "", acac: "" }; }
+      } catch (err) { ctx.log(`cors-reflection: probe ${p} failed: ${(err as Error).message}`); return { status: 0, acao: "", acac: "" }; }
     };
     const findings: Finding[] = [];
     for (const p of paths) {
+      // Two origins on INDEPENDENT registrable domains (distinct reserved TLDs), so
+      // reflecting both proves the server echoes an arbitrary origin, not merely
+      // any name under one shared parent domain.
       const o1 = `https://crenel-${randomBytes(5).toString("hex")}.example`;
       const r1 = await probe(p, o1);
       if (r1.acao !== o1 || r1.acac !== "true") continue; // not the reflected-with-credentials shape
       // Control: a second, different origin must ALSO be reflected — otherwise the
       // first echo was a coincidence or an allowlisted value, not "any origin".
-      const o2 = `https://crenel-${randomBytes(5).toString("hex")}.example`;
+      const o2 = `https://${randomBytes(5).toString("hex")}-crenel.test`;
       const r2 = await probe(p, o2);
       if (r2.acao !== o2 || r2.acac !== "true") continue;
       findings.push({
@@ -50,6 +56,7 @@ export const corsReflection: Check = {
         proof: { method: "live differential on staging: two distinct random origins, both echoed back with credentials:true", replay: `curl -i -H 'Origin: ${o1}' '${base}${p}'  # ACAO echoes the origin, ACAC: true`, evidence: `Origin ${o1} -> ACAO ${r1.acao}, ACAC ${r1.acac}; Origin ${o2} -> ACAO ${r2.acao}, ACAC ${r2.acac}` },
         regressionHint: `After deploy, an arbitrary Origin at ${p} must not be echoed into Access-Control-Allow-Origin with credentials.`,
       });
+      break; // a reflecting CORS policy is global: one finding per server, not per path
     }
     if (findings.length === 0) ctx.log("cors-reflection: no origin-reflecting CORS with credentials");
     return findings;

@@ -3,7 +3,9 @@
 import { createServer } from "node:http";
 export default () => createServer((req, res) => {
   const u = new URL(req.url ?? "/", "http://x");
-  const path = u.pathname, raw = decodeURIComponent(u.searchParams.get("next") ?? "");
+  // searchParams.get already percent-decodes; decoding again would double-decode
+  // and throw a URIError on a stray `%` in the value.
+  const path = u.pathname, raw = u.searchParams.get("next") ?? "";
   if (path === "/vuln") {
     // vulnerable: build the raw header block including the attacker's CRLF content
     const extra = raw.includes("\r\n") ? raw.split("\r\n").slice(1).join("\r\n") + "\r\n" : "";

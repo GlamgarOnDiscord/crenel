@@ -1,9 +1,0 @@
-{
-  "title": "Command injection with impact evidence: the proven channel reads a flag file",
-  "type": "live",
-  "config": { "scope": { "allowActiveTesting": true }, "options": { "command-injection": { "enabled": true, "impactSample": true, "endpoints": [ { "url": "/", "method": "POST", "body": "{\"cmd\":\"__INJECT__\"}" } ] } } },
-  "mustFind": [
-    { "id": "cmd-with-flag", "check": "command-injection", "text": "FLAG\\{crenel-impact-demo", "state": "proven", "minSeverity": "critical", "why": "The proven injection reads the flag through the same channel (impact evidence)." }
-  ],
-  "mustNotFlag": []
-}

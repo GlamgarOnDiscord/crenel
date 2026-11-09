@@ -1,19 +1,23 @@
 // dependency-exposure: the deployed site hands out a dependency manifest (a
-// package.json served directly, or a *.bak reachable through a directory listing
-// / a null-byte suffix), and it pins a library at a version with a known, public
-// advisory. Two facts, both objective and checked live: the manifest is served,
-// and a listed version falls in a documented-vulnerable range. No model, no target
-// signature — the advisory list is a generic, well-known set (the same idea as the
-// committed-lockfile dependency-risk check, but for a manifest the site exposes).
+// package.json served directly, or a package-lock.json / a *.bak), and a library
+// it pins at an EXACT version has a known, public advisory. Two facts, both
+// objective and checked live: the manifest is served, and an exactly-pinned
+// version falls below a documented-vulnerable bound. No model, no target
+// signature — the advisory list is a generic, well-known set.
+//
+// Soundness note: a package.json `dependencies` map holds version *ranges*
+// (`^4.17.4`, `~1.2`, `>=3`), and the resolved/installed version of a range may
+// well be patched. A range therefore proves nothing and is skipped. Only an
+// EXACT pin (`4.17.4`), or an exact `version` read from a lockfile (the real
+// installed version), can make a vulnerability `proven`.
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
 
-// Where a manifest is commonly reachable on a deployed site. The null-byte / .bak
-// variants cover a backup left in a served folder (e.g. an /ftp drop).
+// Where a manifest or lockfile is commonly reachable on a deployed site. Generic
+// conventional names only (no target-specific backup path).
 const MANIFEST_PATHS = [
-  "/package.json", "/package.json.bak", "/package.json.bak%2500.md", "/package.json.bak%00.md",
-  "/ftp/package.json.bak%2500.md", "/ftp/package.json.bak%00.md", "/ftp/package.json",
+  "/package.json", "/package-lock.json", "/package.json.bak",
   "/static/package.json", "/assets/package.json",
 ];
 
@@ -35,34 +39,75 @@ const ADVISORIES: Record<string, Adv> = {
   "node-forge": { below: [1, 3, 0], why: "CVE-2022-24771/24772: signature verification" },
 };
 
-/** Parse a loose npm version range (~8, ^4.16.1, >=1.2, 1.4.2) to a [major,minor,patch]
- * lower bound. Returns undefined when no numeric version is present (a git/url dep). */
-export function lowerBound(range: string): [number, number, number] | undefined {
-  const m = /(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(range);
-  if (!m) return undefined;
-  return [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)];
+/** An EXACT semver, or undefined. Rejects ranges (`^ ~ > < = x *`), partial
+ * versions, and non-registry specs (git/url/file/workspace/npm: aliases): those
+ * do not name a single installed version, so they cannot prove anything. A plain
+ * `=`/`v` prefix is tolerated and stripped. Pure, tested. */
+export function exactVersion(spec: string): [number, number, number] | undefined {
+  const s = spec.trim().replace(/^[v=]+/, "");
+  if (!/^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(s)) return undefined;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(s)!;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 const lt = (a: [number, number, number], b: [number, number, number]) =>
   a[0] !== b[0] ? a[0] < b[0] : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2];
 
-/** Vulnerable deps found in a manifest's dependency maps. Pure, tested. */
+/** Map of package name -> its EXACT installed/pinned version, drawn from either a
+ * package.json (its dependency maps, exact pins only) or a package-lock.json (the
+ * `packages` / `dependencies` trees, whose `version` fields are exact). */
+function installedVersions(j: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  // package.json dependency maps: keep only exact pins (a range is not provable).
+  for (const k of ["dependencies", "devDependencies", "optionalDependencies"]) {
+    const d = j[k];
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      for (const [n, v] of Object.entries(d as Record<string, unknown>)) {
+        if (typeof v === "string" && exactVersion(v)) out[n] = v;
+        // package-lock v1 shape: dependencies[name] = { version, ... }
+        else if (v && typeof v === "object" && typeof (v as { version?: unknown }).version === "string") out[n] = (v as { version: string }).version;
+      }
+    }
+  }
+  // package-lock v2/v3 shape: packages["node_modules/<name>"] = { version }
+  const pkgs = j["packages"];
+  if (pkgs && typeof pkgs === "object" && !Array.isArray(pkgs)) {
+    for (const [path, meta] of Object.entries(pkgs as Record<string, unknown>)) {
+      const name = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(path)?.[1];
+      const ver = meta && typeof meta === "object" ? (meta as { version?: unknown }).version : undefined;
+      if (name && typeof ver === "string") out[name] = ver;
+    }
+  }
+  return out;
+}
+
+/** Vulnerable deps found in a served manifest or lockfile, each at an EXACT
+ * version below its advisory bound. Pure, tested. */
 export function vulnerableDeps(manifest: string): { name: string; version: string; why: string }[] {
   let j: unknown;
   try { j = JSON.parse(manifest); } catch { return []; }
   if (!j || typeof j !== "object") return [];
-  const deps: Record<string, string> = {};
-  for (const k of ["dependencies", "devDependencies", "optionalDependencies"]) {
-    const d = (j as Record<string, unknown>)[k];
-    if (d && typeof d === "object") for (const [n, v] of Object.entries(d as Record<string, string>)) if (typeof v === "string") deps[n] = v;
-  }
+  const installed = installedVersions(j as Record<string, unknown>);
   const hits: { name: string; version: string; why: string }[] = [];
   for (const [name, adv] of Object.entries(ADVISORIES)) {
-    const v = deps[name];
+    const v = installed[name];
     if (!v) continue;
-    const lb = lowerBound(v);
-    if (lb && lt(lb, adv.below)) hits.push({ name, version: v, why: adv.why });
+    const ev = exactVersion(v);
+    if (ev && lt(ev, adv.below)) hits.push({ name, version: v, why: adv.why });
   }
   return hits;
+}
+
+/** A body is a dependency manifest/lockfile only if it parses as JSON and carries
+ * a recognized dependency structure as an object (not merely the substring). This
+ * keeps an SPA page or a JSON soft-404 from being read as a manifest. */
+function isManifest(body: string): boolean {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return false; }
+  if (!j || typeof j !== "object") return false;
+  const o = j as Record<string, unknown>;
+  return ["dependencies", "devDependencies", "optionalDependencies", "packages"].some(
+    (k) => o[k] && typeof o[k] === "object",
+  );
 }
 
 export const dependencyExposure: Check = {
@@ -77,9 +122,9 @@ export const dependencyExposure: Check = {
     for (const path of opts.paths ?? MANIFEST_PATHS) {
       let res;
       try { res = await safeFetch(base + path, ctx.scope, { headers: { accept: "*/*" }, maxBytes: 256 * 1024 }); } catch { continue; }
-      if (res.status !== 200 || !/"dependencies"\s*:/.test(res.body)) continue; // a real manifest, not an SPA page
+      if (res.status !== 200 || !isManifest(res.body)) continue; // a real manifest, not an SPA page or soft-404
       const hits = vulnerableDeps(res.body);
-      if (hits.length === 0) { ctx.log(`dependency-exposure: ${path} served but no advisory match`); continue; }
+      if (hits.length === 0) { ctx.log(`dependency-exposure: ${path} served but no exactly-pinned advisory match`); continue; }
       const list = hits.slice(0, 8).map((h) => `${h.name}@${h.version}`).join(", ");
       return [{
         id: `dependency-exposure:${path}`,
@@ -88,9 +133,9 @@ export const dependencyExposure: Check = {
         severity: "high",
         state: "proven",
         location: base + path,
-        description: `${path} is served and declares library versions with public advisories: ${list}. For example ${hits[0]!.name}@${hits[0]!.version} — ${hits[0]!.why}.`,
+        description: `${path} is served and pins library versions with public advisories: ${list}. For example ${hits[0]!.name}@${hits[0]!.version} — ${hits[0]!.why}.`,
         remediation: "Do not serve dependency manifests or their backups from the web root, and upgrade the flagged libraries to a patched version.",
-        proof: { method: "live read of the served manifest + a documented-vulnerable version range (no model)", replay: `curl -s '${base}${path}'  # dependencies with known advisories`, evidence: `served HTTP 200; vulnerable: ${list}` },
+        proof: { method: "live read of the served manifest + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -s '${base}${path}'  # exactly-pinned deps with known advisories`, evidence: `served HTTP ${res.status}; vulnerable: ${list}` },
         regressionHint: `After deploy, ${path} must not be served, and these libraries must be upgraded.`,
       }];
     }

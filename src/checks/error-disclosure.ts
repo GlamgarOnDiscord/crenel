@@ -13,16 +13,18 @@ import { safeFetch } from "../core/net.js";
 
 interface Ep { url: string; method?: string }
 
+// Generic, non-mutating endpoints only: a benign JSON probe to any of these fails
+// auth or validation without creating or changing anything (no /signup, /register
+// or /api/users, which a benign body could affect), and none is one target's route.
 export const ERR_ENDPOINTS: Ep[] = [
-  { url: "/rest/user/login" }, { url: "/api/login" }, { url: "/login" },
-  { url: "/api/users" }, { url: "/api/auth/login" }, { url: "/graphql" },
-  { url: "/api" }, { url: "/rest" }, { url: "/signup" }, { url: "/register" },
+  { url: "/api/login" }, { url: "/login" }, { url: "/auth/login" },
+  { url: "/api/auth/login" }, { url: "/graphql" }, { url: "/api" }, { url: "/rest" },
 ];
 
 // Stack-trace signals across runtimes. Several must co-occur (or a Python/Java
 // traceback header appear) so a page that merely mentions a path is not a hit.
 const SIGNALS = [
-  /\bat\s+[\w.$<>[\] ]+\s*\(?\/?[\w./\\-]+:\d+:\d+\)?/, // Node: at fn (/path:line:col)
+  /\bat\s+[^\n]{1,200}:\d+:\d+/, // Node: at fn (/path:line:col) — single bounded class, linear (no backtracking)
   /node_modules[/\\]/i,
   /\.(js|ts|mjs|cjs|py|rb|php|go):\d+/i,
   /\bat [\w.$]+\([\w.$/]+\.java:\d+\)/, // Java frame
@@ -51,6 +53,10 @@ export const errorDisclosure: Check = {
     };
     const findings: Finding[] = [];
     for (const ep of endpoints) {
+      // The error handler is global, so one proof is the finding, not one per
+      // endpoint. But keep probing the remaining endpoints (a benign body cannot
+      // mutate these routes): that is what exercises a configured no-leak decoy and
+      // lets the bench's no-false-positive claim actually be tested.
       const method = ep.method ?? "POST";
       // Benign body: valid JSON. The control must NOT carry a stack trace.
       const benign = await post(ep.url, "{}", method);
@@ -58,6 +64,7 @@ export const errorDisclosure: Check = {
       // Malformed body: truncated JSON triggers the parser error path.
       const malformed = await post(ep.url, '{"x":', method);
       if (!hasStackTrace(malformed.body)) continue;
+      if (findings.length > 0) continue; // already proven once (global handler): decoy probed, not re-reported
       const paths = [...new Set([...malformed.body.matchAll(/(?:\/[\w.-]+){2,}\.(?:js|ts|mjs|cjs|py|rb|php|go):\d+/g)].map((m) => m[0]))].slice(0, 5);
       findings.push({
         id: `error-disclosure:${ep.url}`,
@@ -71,7 +78,6 @@ export const errorDisclosure: Check = {
         proof: { method: "live differential on staging: benign body (no stack) vs malformed body (stack trace)", replay: `curl -i -X ${method} -H 'content-type: application/json' --data '{"x":' '${base}${ep.url}'`, evidence: `malformed HTTP ${malformed.status} carried a stack trace; benign HTTP ${benign.status} did not` },
         regressionHint: `After deploy, a malformed body to ${ep.url} must not return a stack trace.`,
       });
-      break; // the error handler is global: one proof is the finding, not one per endpoint
     }
     if (findings.length === 0) ctx.log("error-disclosure: no stack trace leaked on a malformed request");
     return findings;
