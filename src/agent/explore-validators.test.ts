@@ -1028,3 +1028,43 @@ test("secret: a Google/Firebase AIza key is a lead (public by design) unless liv
     assert.match(v.reason, /public by design|Firebase|review/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("jwt-forge: a correctly-implemented HS256 server (strong secret) yields no forgery", async () => {
+  const crypto = await import("node:crypto");
+  const secret = crypto.randomBytes(32).toString("hex");
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const sign = (p: unknown) => { const h = b64({ alg: "HS256", typ: "JWT" }), bod = b64(p); return `${h}.${bod}.${crypto.createHmac("sha256", secret).update(`${h}.${bod}`).digest("base64url")}`; };
+  const tok = sign({ sub: "a" });
+  const srv = createServer((req, res) => {
+    const a = (req.headers.authorization || "").replace("Bearer ", "").split(".");
+    const J = (st: number) => { res.writeHead(st, { "content-type": "application/json" }); res.end("{}"); };
+    if (a.length !== 3) return J(401);
+    try { if (JSON.parse(Buffer.from(a[0]!, "base64url").toString()).alg !== "HS256") return J(401);
+      return crypto.createHmac("sha256", secret).update(`${a[0]}.${a[1]}`).digest("base64url") === a[2] ? J(200) : J(401);
+    } catch { return J(401); }
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp8-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: { "authz-matrix": { accounts: { a: { token: tok } } } } };
+    assert.equal((await validateClaim(claim("explore.jwt-forge", { url: "/api/x", as: "a" }), env)).state, "unproven");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("graphql: a REST endpoint that echoes an array body is not query batching", async () => {
+  const srv = createServer((req, res) => {
+    let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      try { const j = JSON.parse(c); if (Array.isArray(j)) return res.end(JSON.stringify(j.map(() => ({ received: true })))); } catch { /* */ }
+      res.end(JSON.stringify({ hello: "a REST api, not graphql" }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp9-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    assert.equal((await validateClaim(claim("explore.graphql", { url: "/api/items" }), env)).state, "unproven");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
