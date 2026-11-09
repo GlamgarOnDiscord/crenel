@@ -1,0 +1,7 @@
+/* Console styles added with the "no fake success" pass (kept out of base.css). */
+
+/* Overview, live: the posture row has no demo chart beside the funnel. */
+.posture-row.solo { grid-template-columns: minmax(0, 1fr); }
+
+/* Agent: the context gauge is an estimate, said in its card. */
+.ctx-note { margin: 0; padding: 0 12px 10px; font-size: 11.5px; color: var(--fg-faint); line-height: 1.4; }

@@ -27,10 +27,10 @@ export const removeTarget = (host: string) =>
   then(apiFetch<{ allowedHosts: string[] }>(`api/targets/${encodeURIComponent(host)}`, { method: "DELETE" }));
 
 /** The global switch: stops every running run. */
-export const killAll = () => then(apiFetch<{ stopped: number }>("api/kill", { method: "POST" }));
+export const killAll = () => then(apiFetch<{ stopped: number }>("api/kill", { method: "POST", body: {} }));
 
 /** Accept the current findings as the baseline for `crenel scan --baseline` (new ones are regressions). */
-export const saveBaseline = () => then(apiFetch<{ saved: boolean }>("api/baseline", { method: "POST" }));
+export const saveBaseline = () => then(apiFetch<{ saved: boolean }>("api/baseline", { method: "POST", body: {} }));
 
 function download(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));

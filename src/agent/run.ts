@@ -141,6 +141,13 @@ export interface RunOptions {
   id?: string;
   /** Free exploration for this run (off | assist | full); the config's choice when omitted. */
   explore?: ExploreMode;
+  /**
+   * Text files the user joined in the console. Kept apart from the prompt on
+   * purpose: the intent, the title and the gate's user request come from the
+   * user's own words only, so a file that says "secret" or "test" cannot
+   * change what the run does. The model gets them fenced as untrusted.
+   */
+  attachments?: { name: string; text: string }[];
 }
 
 const ms = (t: number) => (t < 1000 ? `${t} ms` : `${(t / 1000).toFixed(1).replace(".", ",")} s`);
@@ -245,8 +252,9 @@ export class AgentRun {
   /* ---------- the run ---------- */
 
   async start(): Promise<void> {
-    this.journal.append("run.start", { prompt: this.opts.prompt, title: this.title, mode: this.opts.mode, intent: this.intent, model: this.opts.model ?? null, llm: this.deps.llm?.label ?? null, explore: this.explore });
-    this.ui({ kind: "user", text: this.opts.prompt });
+    const files = (this.opts.attachments ?? []).map((a) => ({ name: a.name, chars: a.text.length }));
+    this.journal.append("run.start", { prompt: this.opts.prompt, title: this.title, mode: this.opts.mode, intent: this.intent, model: this.opts.model ?? null, llm: this.deps.llm?.label ?? null, explore: this.explore, ...(files.length ? { attachments: files } : {}) });
+    this.ui({ kind: "user", text: files.length ? `${this.opts.prompt}\n\n(${files.length} fichier${files.length > 1 ? "s" : ""} joint${files.length > 1 ? "s" : ""} : ${files.map((f) => f.name).join(", ")})` : this.opts.prompt });
     this.phase("running");
     let outcome = "done";
     try {
@@ -894,7 +902,8 @@ export class AgentRun {
       text = "Crenel ne modifie pas votre code. Pour chaque faille prouvée, la remédiation est dans sa fiche, et le test de régression est généré dans .crenel/regression.test.ts.";
     } else if (this.deps.llm) {
       const data = store.slice(0, 40).map((f) => `${f.uid} | ${f.state} | ${f.severity} | ${f.title} | ${f.location} | ${f.remediation}`).join("\n");
-      const prompt = `${UNTRUSTED_PREAMBLE}\nTu es l'assistant de l'outil défensif Crenel, sur un système que l'utilisateur possède. Réponds en français, court. Tu ne peux rien marquer comme prouvé. Question de l'utilisateur: ${q}\n${fence(untrusted("findings", data))}`;
+      const joined = (this.opts.attachments ?? []).map((a) => fence(untrusted(`fichier joint par l'utilisateur: ${a.name}`, a.text, 40_000))).join("\n");
+      const prompt = `${UNTRUSTED_PREAMBLE}\nTu es l'assistant de l'outil défensif Crenel, sur un système que l'utilisateur possède. Réponds en français, court. Tu ne peux rien marquer comme prouvé. Question de l'utilisateur: ${q}\n${fence(untrusted("findings", data))}${joined ? `\n${joined}` : ""}`;
       try {
         text = await this.deps.llm.ask(prompt, { signal: this.ac.signal, timeoutMs: 90_000 });
         this.tokens += estimateTokens(prompt) + estimateTokens(text);

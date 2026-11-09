@@ -8,17 +8,23 @@ import { Progress } from "../components/arc/progress/progress.tsx";
 import { Checklist } from "../components/bencho/Checklist.tsx";
 import "../components/bencho/Checklist.css";
 import { cn } from "../lib/cn.ts";
-import { apiFetch, isLive, refresh } from "../data/api.ts";
+import "../styles/console-a.css";
+import { apiFetch, isLive, refresh, useData } from "../data/api.ts";
 
+// A checklist for the user, not configuration: only the first item gates the
+// submit, and none is sent to the server.
 const CHECKS = ["Je possède cette cible", "C'est un staging, pas la production", "J'ai deux comptes de test"] as const;
 const URL_RE = /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i;
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
 export function Onboarding() {
   const navigate = useNavigate();
+  const { live, project } = useData();
   const [mode, setMode] = useState<"url" | "repo">("url");
-  const [url, setUrl] = useState("staging.acme.app");
-  const [repo, setRepo] = useState("acme/acme-app");
+  const [url, setUrl] = useState(live ? "" : "staging.acme.app");
+  const [repo, setRepo] = useState(live ? "" : "acme/acme-app");
+  // The data turns live after the first render: clear the demo values then.
+  useEffect(() => { if (live) { setUrl((u) => (u === "staging.acme.app" ? "" : u)); setRepo((r) => (r === "acme/acme-app" ? "" : r)); setMode("url"); } }, [live]);
   const [checks, setChecks] = useState<boolean[]>([false, false, false]);
   const [error, setError] = useState<string | undefined>();
   const [shake, setShake] = useState(false);
@@ -53,7 +59,9 @@ export function Onboarding() {
           <p className="muted">Un premier scan, lecture seule, en moins de deux minutes.</p>
         </div>
 
-        <Segmented items={[{ id: "url", label: "Site" }, { id: "repo", label: "Dépôt GitHub" }]} value={mode} onChange={(m) => { setMode(m); setError(undefined); }} label="Type de cible" />
+        {live
+          ? <p className="muted small onb-repo">Le dépôt scanné est le dossier donné à crenel serve ({project}). Ajoutez ici un site à sonder.</p>
+          : <Segmented items={[{ id: "url", label: "Site" }, { id: "repo", label: "Dépôt GitHub" }]} value={mode} onChange={(m) => { setMode(m); setError(undefined); }} label="Type de cible" />}
 
         <form className="card onb-card" onSubmit={submit} noValidate>
           <div className="onb-progress"><Progress value={done} max={4} label="Prêt à scanner" showValue /></div>
@@ -65,13 +73,14 @@ export function Onboarding() {
                 placeholder={mode === "url" ? "staging.acme.app" : "acme/acme-app"} />
             </div>
           </div>
+          <p className="muted small onb-note">À vérifier de votre côté avant de scanner. Seule la première case est exigée, rien n'est envoyé au serveur.</p>
           <div className="bencho onb-checks">
             <Checklist tasks={CHECKS} corner={14} box={18} onChange={(d) => { setChecks(d); if (d[0]) setError(undefined); }} />
           </div>
           <button type="submit" className="btn btn-block" aria-disabled={!(valid && owner)}>Lancer le premier scan <ArrowRight size={15} /></button>
         </form>
 
-        <Link to="/app/overview" className="muted small">Passer, voir une démo</Link>
+        <Link to="/app/overview" className="muted small">{live ? "Passer" : "Passer, voir une démo"}</Link>
       </div>
     </div>
   );

@@ -1,0 +1,27 @@
+/* Console controls wired to crenel serve: ignore form, ignored tag, model
+   advice, YAML snippets, declared hosts. Tokens from tokens.css. */
+
+.ignore-form { display: grid; gap: 8px; padding: 12px; margin: 4px 0 8px; background: var(--well); border: 1px solid var(--line); border-radius: var(--r-inner); }
+.ignore-note { margin: 0; font-size: var(--t-label); color: var(--fg-faint); }
+.ignore-act { display: flex; gap: 8px; }
+li.ignore-li { list-style: none; padding: 0 12px; }
+
+.frow.is-ignored .frow-t { color: var(--fg-muted); }
+.ignored-tag { display: inline-flex; align-items: center; gap: 4px; }
+.ignored-reason { font-style: italic; overflow: hidden; text-overflow: ellipsis; }
+
+.fd-ignored { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--t-label); color: var(--fg-muted); }
+.advice { white-space: pre-wrap; }
+.advice-note { font-size: var(--t-label); color: var(--fg-faint); margin-top: 8px; }
+
+.yaml-wrap { padding: 4px 20px 16px; display: grid; gap: 8px; }
+.yaml-note { font-size: var(--t-label); color: var(--fg-faint); margin: 0; }
+.srow.is-off .srow-t { color: var(--fg-muted); }
+
+.host-row { flex-wrap: wrap; }
+.kill-n { font-variant-numeric: tabular-nums; }
+.secret-help { font-size: var(--t-label); color: var(--fg-faint); }
+.ignored-intro { margin: 0; padding: 12px 12px 4px; font-size: var(--t-label); color: var(--fg-faint); }
+.hosts-block { margin-top: 24px; scroll-margin-top: 72px; }
+.onb-repo { margin: 0; text-align: center; }
+.onb-note { margin: 0; }

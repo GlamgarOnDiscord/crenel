@@ -102,6 +102,7 @@ interface ServerFinding {
   location: string; description: string; remediation: string; firstSeen: string; lastSeen: string;
   proof?: { method: string; replay: string; evidence?: string }; regressionHint?: string; validator?: string | null; verdict?: string;
   ignored?: { at: string; reason: string };
+  advice?: string;
 }
 interface ServerRun { id: string; title: string; startedAt: string; endedAt?: string; status: string; outcome?: string; proven: number; leads: number; fixed: number; goal?: { text: string; status: string }; archived?: boolean }
 export interface ServerState {
@@ -149,6 +150,7 @@ export function toData(s: ServerState): Data {
     // "Gardé" means a test runs in CI; Crenel cannot see your CI, so it never claims it.
     guarded: false,
     ...(f.ignored ? { ignored: f.ignored } : {}),
+    ...(f.advice ? { advice: f.advice } : {}),
   }));
   const project = s.project ?? "projet";
   const host = s.scope?.stagingUrl ? new URL(s.scope.stagingUrl).host : s.scope?.allowedHosts[0] ?? "local";

@@ -16,6 +16,8 @@ export interface Finding {
   proof?: { method: string; replay: string; evidence?: string };
   regression?: string;
   guarded?: boolean;
+  /** The model's advice (POST /api/findings/:uid/triage), kept by the server. Advice only. */
+  advice?: string;
   /** Ignored in the console by the user (accepted risk, false positive): shown apart, never deleted. */
   ignored?: { at: string; reason: string };
 }

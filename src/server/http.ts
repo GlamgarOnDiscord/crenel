@@ -103,6 +103,23 @@ const MAX_BODY = 256 * 1024;
 // the provider prefixes the engine understands (reported by /api/state).
 const CUSTOM_PROVIDERS = ["openai", "ollama", "anthropic-api"];
 
+/** At most 5 text files, 100 000 characters in all, names kept short; anything else is a 400. */
+function parseAttachments(v: unknown): { name: string; text: string }[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.length > 5) throw new HttpError(400, "attachments: 5 text files at most");
+  let total = 0;
+  const out = v.map((a) => {
+    const name = typeof a?.name === "string" ? a.name.slice(0, 200) : "";
+    const text = typeof a?.text === "string" ? a.text : null;
+    if (!name || text === null) throw new HttpError(400, "attachments: each file needs a name and its text");
+    if (text.includes("\u0000")) throw new HttpError(400, `attachments: ${name} is not a text file`);
+    total += text.length;
+    return { name, text };
+  });
+  if (total > 100_000) throw new HttpError(400, "attachments: 100 000 characters at most");
+  return out.length ? out : undefined;
+}
+
 class HttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -221,6 +238,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
 
   function startRun(body: Record<string, unknown>): AgentRun {
     const prompt = String(body.prompt ?? "").trim().slice(0, 4000);
+    // Files joined in the console travel apart from the prompt (see RunOptions.attachments).
+    const attachments = parseAttachments(body.attachments);
     if (!prompt) throw new HttpError(400, "prompt required");
     const mode = (MODES.has(body.mode as Mode) ? body.mode : "ask") as Mode;
     const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL;
@@ -247,7 +266,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
       for (const rec of r.records) store.appendAudit({ ...rec });
       return { records: r.records as unknown as Record<string, unknown>[], skipped: r.skipped };
     };
-    const run = new AgentRun({ config: cfg, configPath, store, grants, llm, checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore });
+    const run = new AgentRun({ config: cfg, configPath, store, grants, llm, checks: opts.checks, notify }, { prompt: goal ? `/goal ${goal.text}` : prompt, mode, model, goal, explore, attachments });
     runs.set(run.id, run);
     void run.start();
     return run;

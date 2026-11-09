@@ -878,6 +878,9 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .cmf-change:hover { color: var(--fg); background: var(--hover); }
 .cmf-field { display: grid; gap: 5px; min-width: 0; }
 .cmf-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; }
+.cmf-row.solo { grid-template-columns: minmax(0, 1fr); }
+.cmf-note { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.45; color: var(--fg-muted); background: color-mix(in srgb, var(--brand) 6%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.cmf-note svg { flex: none; margin-top: 2px; color: var(--brand); }
 .cmf-lbl { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); }
 .cmf-in { width: 100%; min-width: 0; box-sizing: border-box; background: var(--well); border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-strong); padding: 8px 10px; font-size: 12.5px; color: var(--fg); outline: none; transition: box-shadow .12s var(--ease); }
 .cmf-in.big { padding: 11px 12px; font-size: 14px; border-radius: 11px; }
