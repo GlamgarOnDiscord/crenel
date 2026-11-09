@@ -1015,3 +1015,16 @@ test("data-exposure: A's own team roster (entitled teammates) is a lead, never p
     assert.match(v.reason, /entitled|review/i);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("secret: a Google/Firebase AIza key is a lead (public by design) unless liveness is enabled", async () => {
+  const srv = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ apiKey: "AIzaSyA1234567890abcdefghijklmnopqrstuv" })); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp7-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const v = await validateClaim(claim("explore.secret", { request: { url: "/firebase.json" } }), env);
+    assert.equal(v.state, "unproven", v.reason);
+    assert.match(v.reason, /public by design|Firebase|review/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
