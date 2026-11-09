@@ -1415,9 +1415,16 @@ const exploreePrivEscValidator: Validator = {
 // object), none of them echoed from the request, and an anonymous read is a
 // boundary (denied, or it does not carry those markers — otherwise it is public,
 // reported as the worse flaw). No target string. See explore-validators.test.ts.
+// Excessive data exposure SURFACES a candidate but never proves: an endpoint whose
+// response carries several accounts' markers may be an unfiltered leak OR a legitimate
+// collaborative view (a team roster, a shared thread, a comment list). A validator
+// cannot tell an entitled multi-account view from an unauthorized one without knowing
+// the reader's entitlements, so this stays a lead for human review — never "proven",
+// never a false positive, never a build gate. The strong single-object case is
+// cross-actor's job. See explore-validators.test.ts.
 const exploreDataExposureValidator: Validator = {
   class: "explore.data-exposure",
-  name: "excessive data exposure (several accounts' markers in one response)",
+  name: "excessive data exposure (lead only: several accounts' markers in one response)",
   async validate(claim, env) {
     const d = claim.detail as { url?: unknown; as?: unknown };
     const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
@@ -1448,7 +1455,9 @@ const exploreDataExposureValidator: Validator = {
     } else {
       return no("the reader is anonymous: use a configured account, so the exposure is shown to cross an auth boundary");
     }
-    return { claimId: claim.id, state: "proven", validator: this.name, reason: `Excessive data exposure at ${pathOnly(url)}: account ${actor.toUpperCase()} receives the markers of ${seen.length} other accounts (${seen.map(([k]) => k.toUpperCase()).join(", ")}) in one response`, evidence, ceiling: "high" };
+    // Surfaced as a LEAD: the markers of several accounts are in one response, but whether the reader is
+    // entitled to them (a team roster) or not (an unfiltered leak) cannot be decided from the response alone.
+    return no(`${pathOnly(url)} returns the markers of ${seen.length} other accounts (${seen.map(([k]) => k.toUpperCase()).join(", ")}) to ${actor.toUpperCase()}; anonymous is denied. Review whether ${actor.toUpperCase()} is entitled to them (a team/shared view) or this is an unfiltered cross-tenant leak — not decidable from the response alone`, evidence);
   },
 };
 
