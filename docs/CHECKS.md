@@ -37,6 +37,7 @@ empty list runs every read-only check.
 | dependency-exposure | A dependency manifest (package.json, or a .bak reachable via a listing / null-byte) served with a library pinned below a known-advisory version | yes (manifest served + documented-vulnerable range) | GETs on the declared host |
 | graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
 | graphql-ssrf | A schema-discovered GraphQL field (URL/host-like argument) fetches an attacker URL, proven out-of-band | yes (OOB callback with a nonce) | **outbound-triggering**: allowActiveTesting + `options.graphql-ssrf.enabled` + a callbackHost the target can reach |
+| reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (raw HTML reflection vs a benign control; escaped reflection is only a lead) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
