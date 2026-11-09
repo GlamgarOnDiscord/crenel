@@ -9,6 +9,33 @@ On neutral targets (DVGA + Juice Shop + crAPI, ground truth /32, proven findings
 | **Crenel + exploration** | **6/32 (19%)** |
 | Crenel floor only | 2/32 (6%) |
 
+## Measured again, 2026-11-09 (Juice Shop + DVGA, /24)
+
+A second, smaller neutral set, run locally in Docker. The ground truth was written
+before measuring, from each project's own vulnerability list, keeping only flaws an
+API request can prove: Juice Shop 13 (SQLi search and login, unsigned JWT, basket
+IDOR, metrics, /ftp, admin registration, DOM XSS, API docs, NoSQL reviews, feedback
+deletion, open redirect, basket manipulation), DVGA 11 (introspection, suggestions,
+batching, GraphiQL, command injection, SSRF, SQLi, stored XSS, path traversal,
+authorization bypass, stack traces). Proven findings only, union of `scan`,
+`autoprobe` and one `explore --mode full` run (Opus 4.8, 25 min wall time):
+
+| Pipeline | Juice Shop | DVGA | Total |
+| --- | --- | --- | --- |
+| Before (main at ed7eee5) | 3/13 | 3/11 | 6/24, plus 2 false cross-account proofs |
+| After | 6/13 | 7/11 | **13/24**, 0 false proofs found |
+
+Caveats: both apps are famous, so a model may know their flaws (the deterministic
+`scan` + `autoprobe` alone reach the same 13/24 here: the model added nothing new);
+the set is small; the changes were developed while looking at these two targets, so
+a held-out target (VAmPI, crAPI) is the next honest check. Misses: the basket IDOR
+(no proof that the read object is B's), admin registration (proven by the new
+create-mode mass assignment when claimed, not claimed in the run), DOM XSS (proven
+with a browser configured, not in the run), NoSQL reviews, feedback deletion and
+basket manipulation (no cross-account write validator yet), open redirect via an
+allowlist bypass, stored XSS (served as JSON: a lead by design), path traversal,
+authorization bypass, stack traces.
+
 ## Why the gap is structural, not just missing checks
 
 The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee: false positives are kept out by the validators and none has been observed on the bench, which is not a claim that there can be none. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
