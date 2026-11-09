@@ -776,3 +776,27 @@ test("cross-actor-write: A deleting the object B just created is proven; an owne
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
 });
+
+test("user-enum: a login that says 'no such user' vs 'wrong password' is proven; a uniform one is not", async () => {
+  for (const leaky of [true, false]) {
+    const srv = createServer((req, res) => {
+      let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+        let b: any = {}; try { b = JSON.parse(c); } catch { /* */ }
+        const exists = b.email === "real@corp.test";
+        const json = (st: number, o: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
+        if (req.url !== "/login") return json(404, {});
+        if (!leaky) return json(401, { error: "invalid credentials" }); // uniform
+        return exists ? json(401, { error: "wrong password" }) : json(404, { error: "account not found" });
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-ue-"));
+    try {
+      const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+      const v = await validateClaim(claim("explore.user-enum", { url: "/login", existing: "real@corp.test", field: "email" }), env);
+      assert.equal(v.state, leaky ? "proven" : "unproven", v.reason);
+      if (leaky) assert.match(v.reason, /enumeration/i);
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});

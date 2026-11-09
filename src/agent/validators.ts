@@ -28,6 +28,7 @@ import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
 import { ownerFieldValues, tokenIdentity } from "./markers.js";
 import { crossWriteOracle } from "./xwrite.js";
+import { userEnumOracle } from "./userenum.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -1278,6 +1279,53 @@ const exploreCrossWriteValidator: Validator = {
   },
 };
 
+/* ---------------- explore.user-enum ---------------- */
+// An endpoint that reveals whether an account exists. The model gives a username
+// it saw exist; the validator sends the request three times — with that username
+// and with TWO fresh random ones that cannot exist — and userEnumOracle decides
+// (a stable "absent" answer that the existing one differs from). The username goes
+// in a JSON/form field, a query param, or a bodyTemplate with "__USER__". Read-only
+// by nature (a failed login changes nothing); a reset that emails is NOT sent (the
+// model must point at login/sign-up probing, not a mailer). See userenum.test.ts.
+const exploreUserEnumValidator: Validator = {
+  class: "explore.user-enum",
+  name: "user enumeration (existing vs non-existing username, two-absent control)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; existing?: unknown; field?: unknown; password?: unknown; method?: unknown; where?: unknown; bodyTemplate?: unknown };
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    if (typeof d.url !== "string") return no("need detail.url (the login or sign-up endpoint)");
+    if (typeof d.existing !== "string" || !d.existing) return no("need detail.existing (a username/email the endpoint is known to have)");
+    const url0 = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url0)) return no("off-scope host");
+    const template = typeof d.bodyTemplate === "string" && d.bodyTemplate.includes("__USER__") ? d.bodyTemplate : null;
+    const field = typeof d.field === "string" ? d.field : undefined;
+    if (!template && !field) return no('need detail.field (the username field) or detail.bodyTemplate with "__USER__"');
+    const where: "query" | "body" | "json" = d.where === "query" ? "query" : d.where === "body" ? "body" : "json";
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : (where === "query" ? "GET" : "POST");
+    // A POST login is an auth attempt (it can lock accounts, trip rate limits, log a failure): a write, not a read.
+    if (method !== "GET" && method !== "HEAD" && !env.scope.allowActiveTesting) return no(`a ${method} login probe sends auth attempts: needs allowActiveTesting, or point at a GET availability check`);
+    const existing = d.existing;
+    // Fresh usernames that cannot exist, keeping the existing one's shape (an e-mail stays an e-mail).
+    const mk = () => { const r = `crenel-none-${nonce("ue")}`; const at = existing.indexOf("@"); return at > 0 ? `${r}${existing.slice(at)}` : r; };
+    const a1 = mk(), a2 = mk();
+    const build = (user: string): ExploreRequest => {
+      if (template) return { url: d.url as string, method, headers: { "content-type": "application/json" }, body: template.replace(/__USER__/g, user) };
+      const pass = typeof d.password === "string" ? d.password : `crenel-wrong-${nonce("pw")}`;
+      if (where === "query") { const u = new URL(url0); u.searchParams.set(field!, user); return { url: u.toString(), method }; }
+      if (where === "body") { const b = new URLSearchParams(); b.set(field!, user); if (typeof d.password === "string" || method !== "GET") b.set("password", pass); return { url: d.url as string, method, headers: { "content-type": "application/x-www-form-urlencoded" }, body: b.toString() }; }
+      return { url: d.url as string, method, headers: { "content-type": "application/json" }, body: JSON.stringify({ [field!]: user, password: pass }) };
+    };
+    const send = async (user: string) => { const r = await sendAs(build(user), "anon", env, resolveExploreUrl(build(user).url, env.stagingUrl) ?? url0); return { status: r.status, body: r.body }; };
+    let rE, rA1, rA2;
+    try { rE = await send(existing); rA1 = await send(a1); rA2 = await send(a2); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = userEnumOracle({ existingName: existing, absentName1: a1, absentName2: a2, existing: rE, absent1: rA1, absent2: rA2 });
+    const evidence: Evidence = { request: `${method} ${pathOnly(url0)} with an existing vs two non-existing usernames`, response: r.reason, control: `existing "${existing}" -> HTTP ${rE.status}; non-existing -> HTTP ${rA1.status} and ${rA2.status} (identical)` };
+    if (r.verdict === "enum") return { claimId: claim.id, state: "proven", validator: this.name, reason: `User enumeration at ${pathOnly(url0)}: ${r.reason}`, evidence, ceiling: "low" };
+    return no(r.reason, evidence);
+  },
+};
+
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two
 // distinct attacker origins and the oracle decides; a read-only GET, no active
@@ -1489,7 +1537,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
