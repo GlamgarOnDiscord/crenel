@@ -129,6 +129,57 @@ export function authzOracle(input: {
   return { verdict: "lead", reason: `HTTP ${attacker.status} with no owner marker to compare: declare accounts.b.marker or accounts.b.token` };
 }
 
+/** Pull a top-level owner-id field (e.g. UserId, user_id, owner_id) from a JSON
+ * body, looking at the root and under a one-level {data|result|basket|...}
+ * wrapper. Returns the value as a string, or undefined. No target specifics:
+ * the field name is configured, the extraction is generic JSON. */
+export function ownerValue(body: string, field: string): string | undefined {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return undefined; }
+  const pick = (o: unknown): string | undefined => {
+    if (!o || typeof o !== "object") return undefined;
+    const rec = o as Record<string, unknown>;
+    const v = rec[field];
+    if (v != null && (typeof v === "string" || typeof v === "number")) return String(v);
+    return undefined;
+  };
+  const root = pick(j);
+  if (root !== undefined) return root;
+  if (j && typeof j === "object") {
+    for (const w of Object.values(j as Record<string, unknown>)) {
+      const v = pick(w);
+      if (v !== undefined) return v;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Owner-id differential: prove a cross-tenant read without the owner's token or
+ * a marker. The attacker reads a target object and its OWN object on the same
+ * route; if the target's owner-id field differs from the attacker's own, a
+ * negative control does not answer the same way, and the ids are real, the
+ * attacker is reading an object it does not own. Pure, tested without a network.
+ */
+export function ownerFieldOracle(input: {
+  field: string;
+  target: Observed;
+  self: Observed;
+  control: Observed;
+}): { verdict: "leak" | "lead" | "denied"; reason: string } {
+  const { field, target, self, control } = input;
+  if (DENY.has(target.status) || !ok2xx(target.status)) return { verdict: "denied", reason: `HTTP ${target.status}` };
+  const vt = ownerValue(target.body, field);
+  if (vt === undefined) return { verdict: "lead", reason: `no ${field} in the target body: cannot establish its owner` };
+  if (!ok2xx(self.status)) return { verdict: "lead", reason: `the attacker's own object -> HTTP ${self.status}: no baseline for the attacker's id` };
+  const vs = ownerValue(self.body, field);
+  if (vs === undefined) return { verdict: "lead", reason: `no ${field} in the attacker's own object: cannot establish the attacker's id` };
+  if (String(vt) === String(vs)) return { verdict: "lead", reason: `the target's ${field} (${vt}) equals the attacker's own: same owner, not a cross-tenant read` };
+  const cv = ok2xx(control.status) ? ownerValue(control.body, field) : undefined;
+  if (cv !== undefined && String(cv) === String(vt)) return { verdict: "lead", reason: `a non-existent id returns the same ${field} (${vt}): the route is not object-scoped` };
+  return { verdict: "leak", reason: `the attacker reads an object whose ${field}=${vt} while its own carries ${field}=${vs}: object-level authorization is broken` };
+}
+
 // Drop values that change between two reads of the same object (timestamps,
 // request ids, csrf tokens), so the comparison is on the object itself.
 function normalize(body: string): string {
@@ -982,7 +1033,10 @@ const exploreJwtNoneValidator: Validator = {
     const read = async (headers: Record<string, string>) => { const r = await safeFetch(url, env.scope, { method: "GET", headers, maxBytes: 512 * 1024 }); return { status: r.status, body: r.body }; };
     const forgedRes = await read({ authorization: `Bearer ${forged}` });
     const anonRes = await read({});
-    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes });
+    // Garbage-signature control: the original token with its signature corrupted.
+    // If the server accepts that too, it verifies nothing — alg:none is not the bypass.
+    const controlRes = await read({ authorization: `Bearer ${corruptSig(token)}` });
+    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes, control: controlRes });
     if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT verification broken at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a forged alg:none token`, response: r.reason }, ceiling: "critical" };
     return no(r.reason);
   },
