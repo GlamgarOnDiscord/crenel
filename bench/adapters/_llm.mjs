@@ -4,7 +4,7 @@
 // files as Crenel. The model is asked to emit findings in Crenel's own schema;
 // a finding only counts as a win when it is "proven" with evidence, otherwise
 // the scorer treats it as a lead. Model calls are logged to tmp/model-calls.log.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -25,7 +25,7 @@ export function listSource(dir, max = 40) {
       if (out.length >= max) return;
       const p = join(d, e.name);
       if (e.isDirectory()) { if (!/node_modules|\.git/.test(e.name)) walk(p); }
-      else if (statSync(p).size < 64 * 1024) out.push(p);
+      else { try { if (statSync(p).size < 64 * 1024) out.push(p); } catch { /* a dangling symlink: skip it, keep listing */ } }
     }
   };
   try { walk(dir); } catch {}
@@ -53,18 +53,36 @@ export function buildPrompt({ projectDir, baseUrl }) {
 export const MODEL = process.env.CRENEL_BENCH_MODEL || "claude-opus-4-8";
 const REFUSAL_RE = /\b(I can('|no)t help|I('m| am) not able to help|cannot assist|can't assist|I won'?t|not something I can help|against (my|the) (guidelines|policy)|I must decline|unable to assist with)\b/i;
 
-export function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool }) {
+// What the model may run. By default: read the case and curl, nothing else, so a
+// prompt-injected case cannot run arbitrary commands on the host. A full shell
+// (--dangerously-skip-permissions) only with CRENEL_BENCH_ALLOW_SHELL=1, inside a
+// sandbox (container or VM with egress limited to the bench targets).
+export function permissionArgs(env = process.env) {
+  if (env.CRENEL_BENCH_ALLOW_SHELL === "1") return ["--dangerously-skip-permissions"];
+  return ["--allowedTools", "Read,Grep,Glob,Bash(curl:*)"];
+}
+
+// Asynchronous: the live targets are served by this same process, so a blocking
+// spawn would leave the model's curl probes without an answer.
+function spawnAsync(cmd, args, { cwd, timeout, env, maxBuffer }) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "", timedOut = false, size = 0;
+    const take = (which) => (d) => { size += d.length; if (size > maxBuffer) { child.kill("SIGKILL"); return; } if (which === "out") stdout += d; else stderr += d; };
+    child.stdout.on("data", take("out"));
+    child.stderr.on("data", take("err"));
+    const t = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeout);
+    child.on("error", (e) => { clearTimeout(t); resolve({ stdout, stderr: stderr + String(e.message), status: null, timedOut }); });
+    child.on("close", (status) => { clearTimeout(t); resolve({ stdout, stderr, status, timedOut }); });
+  });
+}
+
+export async function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool }) {
   const started = Date.now();
-  const r = spawnSync(
+  const r = await spawnAsync(
     "claude",
-    ["-p", "--output-format", "json", "--model", MODEL, "--dangerously-skip-permissions", prompt],
-    {
-      cwd,
-      timeout: timeoutMs,
-      maxBuffer: 48 * 1024 * 1024,
-      env: { ...process.env, CLAUDE_CONFIG_DIR: ISO, NO_COLOR: "1" },
-      encoding: "utf8",
-    }
+    ["-p", "--output-format", "json", "--model", MODEL, ...permissionArgs(), prompt],
+    { cwd, timeout: timeoutMs, maxBuffer: 48 * 1024 * 1024, env: { ...process.env, CLAUDE_CONFIG_DIR: ISO, NO_COLOR: "1" } }
   );
   const ms = Date.now() - started;
   let text = r.stdout ?? "", sessionId = "", isError = false, subtype = "";
@@ -82,7 +100,7 @@ export function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool }) {
       `${new Date().toISOString()} tool=${tool} model=${MODEL} ms=${ms} status=${r.status} session=${sessionId} refused=${refused} cwd=${cwd}\n`
     );
   } catch {}
-  return { stdout: text, stderr: r.stderr ?? "", status: r.status, ms, model: MODEL, sessionId, isError, subtype, refused, timedOut: r.error?.code === "ETIMEDOUT" };
+  return { stdout: text, stderr: r.stderr ?? "", status: r.status, ms, model: MODEL, sessionId, isError, subtype, refused, timedOut: r.timedOut };
 }
 
 export function parseFindings(stdout) {
@@ -108,7 +126,8 @@ export function parseFindings(stdout) {
           location: f.location ?? "",
           check: f.check ?? "",
           severity: f.severity ?? "info",
-          state: f.state === "proven" ? "proven" : "lead",
+          // "proven" with no evidence is only a claim: scored as a lead, as the header says.
+          state: f.state === "proven" && String(f.proof?.evidence ?? f.evidence ?? "").trim() ? "proven" : "lead",
           proof: { evidence: f.proof?.evidence ?? f.evidence ?? "" },
         }))
       : [];
