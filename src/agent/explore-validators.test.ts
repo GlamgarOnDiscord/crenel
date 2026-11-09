@@ -891,3 +891,24 @@ test("bfla: without a flagged privileged account it stays a lead", async () => {
     assert.match(v.reason, /flagged accounts\.<x>\.privileged/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("injection timing: a param that sleeps proportionally to the payload is proven time-based; a constant endpoint is not", async () => {
+  for (const vulnerable of [true, false]) {
+    const srv = createServer((req, res) => {
+      const u = new URL(req.url!, "http://x");
+      const q = u.searchParams.get("id") ?? "";
+      const m = /SLEEP\(([\d.]+)\)|pg_sleep\(([\d.]+)\)/i.exec(q);
+      const secs = vulnerable && m ? Number(m[1] ?? m[2]) : 0;
+      setTimeout(() => { res.writeHead(200, { "content-type": "application/json" }); res.end('{"ok":1}'); }, secs * 1000);
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-tm-"));
+    try {
+      const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+      const v = await validateClaim(claim("explore.injection", { url: "/q", param: "id", where: "query", value: "1", timing: true }), env);
+      if (vulnerable) { assert.equal(v.state, "proven", v.reason); assert.match(v.reason, /time-based/i); }
+      else assert.equal(v.state, "unproven", v.reason);
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
