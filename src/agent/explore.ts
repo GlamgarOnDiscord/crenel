@@ -92,7 +92,7 @@ const requestShape = z.object({
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
-const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", redirect: "explore.redirect", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge", "cross-actor-write": "explore.cross-actor-write", "user-enum": "explore.user-enum" } as const;
+const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", redirect: "explore.redirect", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge", "cross-actor-write": "explore.cross-actor-write", "user-enum": "explore.user-enum", "priv-escalation": "explore.priv-escalation" } as const;
 const TOOL_ARGS = {
   "http.request": requestShape,
   "code.search": z.object({ pattern: z.string().min(1).max(200), glob: z.string().max(100).optional(), ignoreCase: z.boolean().optional() }),
@@ -310,6 +310,7 @@ export class Explorer {
         `   mass-assignment: {url, field, value, update?, readUrl?, method?, bodyType?, as?}. Un champ que le client ne devrait pas pouvoir fixer (role, isAdmin, credits, plan, verified…): le validateur lit l'objet de l'acteur, fait un update SANS le champ (contrôle: il ne doit pas bouger) puis AVEC field=value, et prouve si la relecture montre exactement value. Mutant, sur l'objet de l'acteur, donc mode actif requis. Pour un champ fixé à la CRÉATION (inscription avec role:"admin"): {mode:"create", url (POST de création), update (le corps; "__UNIQUE__" dans une chaîne devient une valeur neuve, ex. un e-mail), field, value, readUrl avec ":id", as?}: deux objets sont créés (sans puis avec le champ) et relus par leur id.`,
         `   cross-actor-write: {createUrl, createBody, objectUrl (avec ":id"), method:"DELETE"|"PUT"|"PATCH", field?, value?, body?, owner?:"b", attacker?:"a"}. Écriture entre comptes: le validateur fait CRÉER l'objet par le propriétaire (createBody; "__UNIQUE__" devient une valeur neuve), le relit, tente l'écriture sans identifiants (témoin) puis en tant qu'attaquant, et prouve si seule l'écriture de l'attaquant supprime l'objet (404 pour le propriétaire) ou fixe field=value. Mode actif requis.`,
         `   user-enum: {url, existing (un identifiant que le point d'accès possède), field (le champ identifiant) ou bodyTemplate avec "__USER__", password?, where?, method?}. Énumération d'utilisateurs: le validateur envoie la requête avec cet identifiant puis avec DEUX identifiants aléatoires inexistants, et prouve si la réponse à l'existant diffère de celle, stable, aux deux inexistants (login/inscription; pas de reset qui envoie un e-mail).`,
+        `   priv-escalation: {updateUrl (modif de son propre objet), update (le corps), field, value, gateUrl (un point d'accès que le compte ne peut PAS atteindre), as, method?}. Élévation de privilège: le validateur vérifie que gateUrl refuse le compte (deux fois) et l'anonyme, écrit field=value sur l'objet du compte, et prouve si gateUrl répond ENSUITE au compte (accès gagné). Mode actif requis.`,
         `   cors: {url}. Mauvaise config CORS: le validateur envoie deux origines attaquantes distinctes et prouve si Access-Control-Allow-Origin les reflète toutes deux avec Allow-Credentials: true (lecture seule).`,
         `   reuse: {url, body, controlBody, successMarkers:["texte présent seulement si l'artefact est appliqué"], method?, contentType?, as?}. Logique métier (coupon/crédit/invite à usage unique): le validateur applique DEUX fois le même artefact (body) et une fois un invalide (controlBody); prouvé si les deux applications réussissent et que l'invalide est rejeté. Mutant, mode actif requis.`,
         `   redirect: {url, param} (ou __INJECT__ dans url). Open redirect: le validateur injecte DEUX hôtes sentinelles distincts sous .invalid dans le paramètre et prouve si la cible de la redirection (Location 3xx, ou meta-refresh) reprend les deux: un paramètre ignoré, ou une route qui redirige toujours au même endroit, n'est jamais prouvé (lecture seule, redirection lue sans la suivre).`,
@@ -664,7 +665,7 @@ export function lossStage(v: ClaimVerdict): string {
 }
 
 /** Most requests a claim's validator can send, reserved before it runs so a proof is never cut halfway. */
-const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 44, graphql: 13, "cross-actor-write": 8, "user-enum": 4, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
+const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 44, graphql: 13, "cross-actor-write": 8, "user-enum": 4, "priv-escalation": 8, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
 
 /** The state-changing method a claim's validator sends to its first URL, or null when it only reads. */
 export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>): string | null {
@@ -676,6 +677,7 @@ export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<stri
     case "reuse": method = m(d.method) ?? "POST"; break;
     case "cross-actor-write": method = "POST"; break; // the owner's create first, then the attacker's DELETE/PUT/PATCH
     case "user-enum": method = m(d.method) ?? (d.where === "query" ? "GET" : "POST"); break;
+    case "priv-escalation": method = m(d.method) ?? "PUT"; break;
     case "stored-xss": method = m(d.storeMethod) ?? "POST"; break;
     case "injection": case "ssrf": case "lfi":
       method = m(d.method) ?? (typeof d.gql === "string" || typeof d.bodyTemplate === "string" || d.where === "body" || d.where === "json" ? "POST" : "GET"); break;
@@ -698,6 +700,10 @@ function claimUrls(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>, 
   const raw = (cls === "cross-actor" || cls === "injection" || cls === "ssrf" || cls === "dom-xss" || cls === "lfi" || cls === "mass-assignment" || cls === "cors" || cls === "reuse" || cls === "redirect" || cls === "graphql" || cls === "user-enum") ? d.url : (cls === "jwt-none" || cls === "jwt-forge") ? d.url : (d.request as { url?: unknown } | undefined)?.url;
   if (cls === "cross-actor-write") {
     const urls = [d.createUrl, d.objectUrl].filter((x): x is string => typeof x === "string").map((x) => resolveExploreUrl(x, base)).filter((u): u is string => !!u);
+    return urls.length === 2 ? urls : null;
+  }
+  if (cls === "priv-escalation") {
+    const urls = [d.updateUrl, d.gateUrl].filter((x): x is string => typeof x === "string").map((x) => resolveExploreUrl(x, base)).filter((u): u is string => !!u);
     return urls.length === 2 ? urls : null;
   }
   if (typeof raw !== "string") return null;
