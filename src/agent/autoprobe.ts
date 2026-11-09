@@ -24,7 +24,7 @@ export interface Endpoint { url: string; params?: string[]; graphql?: boolean; /
  * are the configured test-account ids (a/b/c) that have a token. `origin` is the
  * scheme+host for the CORS probe. No target-specific values: only the endpoints the
  * recon already found and the generic techniques. */
-export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; origin?: string; ownerIds?: string[] }): Claim[] {
+export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; origin?: string; ownerIds?: string[]; identities?: string[] }): Claim[] {
   const { endpoints, accounts } = input;
   const has = (a: string) => accounts.includes(a);
   const claims: Claim[] = [];
@@ -50,7 +50,12 @@ export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; o
     for (const p of (ep.params ?? []).slice(0, 8)) add("explore.injection", { url: ep.url, param: p, where: "query" });
     // A login route: the identifier of the usual JSON login body (SQL tautology or NoSQL operator bypass).
     let path = ""; try { path = new URL(ep.url).pathname; } catch { /* keep */ }
-    if (LOGIN_PATH.test(path)) for (const id of ["email", "username"]) add("explore.injection", { url: ep.url, method: "POST", bodyTemplate: JSON.stringify({ [id]: "__INJECT__", password: "crenel-wrong-password" }) });
+    if (LOGIN_PATH.test(path)) {
+      for (const id of ["email", "username"]) add("explore.injection", { url: ep.url, method: "POST", bodyTemplate: JSON.stringify({ [id]: "__INJECT__", password: "crenel-wrong-password" }) });
+      // User enumeration: a real identifier from a configured account's token (an e-mail, or an id).
+      const existing = (input.identities ?? []).find((v) => v.includes("@")) ?? (input.identities ?? [])[0];
+      if (existing) for (const field of (existing.includes("@") ? ["email"] : ["username", "email"])) add("explore.user-enum", { url: ep.url, existing, field });
+    }
   }
   return claims;
 }
@@ -61,7 +66,8 @@ export interface AutoProbeResult { proven: ClaimVerdict[]; tried: number }
  * enforce scope, controls and no-false-positive; this only drives them. */
 export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoint[]; origin?: string }, opts: { maxClaims?: number; idScan?: number } = {}): Promise<AutoProbeResult> {
   const accounts = (["a", "b", "c"] as const).filter((a) => actorToken(env.options, a));
-  const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin, ownerIds: tokenIdentity(actorToken(env.options, "b")) }).slice(0, opts.maxClaims ?? 120);
+  const identities = [...new Set((["a", "b", "c"] as const).flatMap((k) => tokenIdentity(actorToken(env.options, k))))];
+  const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin, ownerIds: tokenIdentity(actorToken(env.options, "b")), identities }).slice(0, opts.maxClaims ?? 120);
   // The owner's own objects behind each object route: small ids read as B, kept when the object's owner field holds
   // B's id from its token (ownerFieldValues), then claimed as A. Finds B's objects without knowing their ids.
   const bTok = actorToken(env.options, "b");

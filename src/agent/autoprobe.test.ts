@@ -104,3 +104,13 @@ test("runAutoProbe: finds B's own object behind an object route by its owner fie
     assert.ok(!r.proven.some((v) => /\/api\/carts\/1\b/.test(v.reason)), "cart 1 is not B's: never proven as B's");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("autoClaims: a login route gets a user-enum claim with a real identifier from a token", () => {
+  const c = autoClaims({ endpoints: [{ url: "http://x/api/login", params: [] }], accounts: ["a"], identities: ["bob@corp.test", "42"] });
+  const ue = c.filter((x) => x.class === "explore.user-enum");
+  assert.equal(ue.length, 1);
+  assert.equal(ue[0]!.detail.existing, "bob@corp.test");
+  assert.equal(ue[0]!.detail.field, "email");
+  // A non-login route gets none.
+  assert.equal(autoClaims({ endpoints: [{ url: "http://x/api/items", params: [] }], accounts: ["a"], identities: ["bob@corp.test"] }).filter((x) => x.class === "explore.user-enum").length, 0);
+});
