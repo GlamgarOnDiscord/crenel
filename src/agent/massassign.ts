@@ -93,3 +93,32 @@ export function buildBody(base: Record<string, unknown>, extra: Record<string, u
   }
   return { body: JSON.stringify(merged), contentType: "application/json" };
 }
+
+/* Create-time mass assignment: the same field set on CREATION (a sign-up that
+ * takes role:"admin"). Two objects are created, one without the field (control)
+ * and one with it; each is read back by its new id. Proven iff the injected one
+ * reads back exactly the injected value while the control reads back something
+ * else (the server's default): the value came from the request body and was
+ * stored. Pure. */
+
+/** The new object's id in a create response: id at the root, or under one wrapper (data, result, user, …). */
+export function createdId(body: string): string | undefined {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return undefined; }
+  const pick = (o: unknown) => { const v = o && typeof o === "object" && !Array.isArray(o) ? (o as Record<string, unknown>).id ?? (o as Record<string, unknown>)._id : undefined; return typeof v === "string" || typeof v === "number" ? String(v) : undefined; };
+  const root = pick(j);
+  if (root !== undefined) return root;
+  if (j && typeof j === "object" && !Array.isArray(j)) for (const w of Object.values(j as Record<string, unknown>)) { const v = pick(w); if (v !== undefined) return v; }
+  return undefined;
+}
+
+export function createAssignOracle(input: { field: string; injected: unknown; controlRead: Observed; injectedRead: Observed }): { verdict: "set" | "lead" | "denied"; reason: string } {
+  const { field, controlRead, injectedRead } = input;
+  const injected = canonical(input.injected);
+  if (!ok2xx(controlRead.status) || !ok2xx(injectedRead.status)) return { verdict: "lead", reason: `a created object could not be read back (HTTP ${controlRead.status} / ${injectedRead.status}): inconclusive` };
+  const v0 = fieldValue(controlRead.body, field), vI = fieldValue(injectedRead.body, field);
+  if (vI === undefined) return { verdict: "lead", reason: `"${field}" is not in the created object's read: cannot prove it was stored` };
+  if (v0 === injected) return { verdict: "lead", reason: `the object created WITHOUT "${field}" already has ${v0}: pick a value that differs from the default` };
+  if (vI === injected) return { verdict: "set", reason: `an object created with "${field}": ${injected} reads back ${vI}, while one created without it reads back ${v0 ?? "(absent)"}: the server stored a field from the request body` };
+  return { verdict: "denied", reason: `"${field}" was not taken from the body (read back ${vI}, injected ${injected})` };
+}

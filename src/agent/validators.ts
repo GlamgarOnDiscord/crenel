@@ -26,7 +26,7 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
-import { massAssignOracle, buildBody, fieldRaw, fieldValue } from "./massassign.js";
+import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
 import { redirectOracle, type RedirectResp } from "./redirect.js";
@@ -1120,9 +1120,10 @@ const exploreMassAssignValidator: Validator = {
   class: "explore.mass-assignment",
   name: "mass-assignment (body field accepted and persisted)",
   async validate(claim, env) {
-    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown };
+    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown; mode?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
     if (!env.scope.allowActiveTesting) return no("mass-assignment mutates the object: needs allowActiveTesting");
+    if (d.mode === "create") return createAssignment(claim, env, this.name);
     if (typeof d.url !== "string") return no("need detail.url (the update endpoint)");
     if (typeof d.field !== "string" || !d.field) return no("need detail.field (the field the client should not control)");
     if (d.value === undefined) return no("need detail.value (the value to inject)");
@@ -1174,6 +1175,39 @@ const exploreMassAssignValidator: Validator = {
     return no(r.reason + restore);
   },
 };
+
+/* Create mode: {mode:"create", url (the create endpoint), update (the body; "__UNIQUE__" in a string becomes a fresh
+ * value, e.g. an e-mail), field, value, readUrl (with ":id" for the new object's id), as?}. Two objects are created on
+ * the staging origin (control without the field, then with it) and read back as the same actor. They are not deleted:
+ * the result says so. */
+async function createAssignment(claim: Claim, env: ValidatorEnv, name: string): Promise<ClaimVerdict> {
+  const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; as?: unknown };
+  const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: name, reason });
+  if (typeof d.url !== "string" || typeof d.field !== "string" || !d.field || d.value === undefined) return no("create mode needs detail.url, field and value");
+  if (typeof d.readUrl !== "string" || !d.readUrl.includes(":id")) return no('create mode needs detail.readUrl with ":id" where the new object\'s id goes');
+  const url = resolveExploreUrl(d.url, env.stagingUrl);
+  if (!url || !env.stagingUrl || new URL(url).origin !== new URL(env.stagingUrl).origin) return no("create mode writes only to the declared stagingUrl's origin");
+  const actor = parseActor(d.as);
+  if (actor && actor !== "anon" && !actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+  const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
+  const fresh = () => JSON.parse(JSON.stringify(base).replace(/__UNIQUE__/g, () => nonce("u"))) as Record<string, unknown>;
+  const create = async (extra: Record<string, unknown> | null) => {
+    const r = await sendAs({ url, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fresh(), ...(extra ?? {}) }), as: actor }, actor, env, url);
+    const id = ok2xx(r.status) ? createdId(r.body) : undefined;
+    if (!id) return { status: r.status, body: r.body, id };
+    const readUrl = resolveExploreUrl((d.readUrl as string).replace(":id", encodeURIComponent(id)), env.stagingUrl);
+    if (!readUrl || new URL(readUrl).origin !== new URL(url).origin) return { status: 0, body: "", id };
+    const rr = await sendAs({ url: readUrl, method: "GET", as: actor }, actor, env, readUrl);
+    return { status: rr.status, body: rr.body, id };
+  };
+  let control, injected;
+  try { control = await create(null); injected = await create({ [d.field]: d.value }); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+  if (!control.id || !injected.id) return no(`the create endpoint did not return a new object's id (HTTP ${control.status}): nothing to read back`);
+  const r = createAssignOracle({ field: d.field, injected: d.value, controlRead: control, injectedRead: injected });
+  const left = `; two objects were created (ids ${control.id} and ${injected.id}) and left in place: delete them`;
+  if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: name, reason: `Mass-assignment on create at ${pathOnly(url)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)${left}`, evidence: { request: `POST ${pathOnly(url)} with {"${d.field}": ${JSON.stringify(d.value)}}, read back at ${String(d.readUrl).replace(":id", injected.id)}`, response: `HTTP ${injected.status}\n${excerpt(injected.body)}`, sha256: sha(injected.body), control: `created without the field: id ${control.id}, read back HTTP ${control.status}` }, ceiling: "high" };
+  return no(r.reason + left);
+}
 
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two

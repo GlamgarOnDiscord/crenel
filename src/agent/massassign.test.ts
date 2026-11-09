@@ -64,3 +64,14 @@ test("buildBody: json and form, with and without extra", () => {
   assert.equal(new URLSearchParams(f.body).get("name"), "x");
   assert.equal(new URLSearchParams(f.body).get("role"), null);
 });
+
+test("create mode: the injected value read back where the control has the default is proven; a default equal to it is not", async () => {
+  const { createAssignOracle, createdId } = await import("./massassign.js");
+  const read = (role: string) => ({ status: 200, body: JSON.stringify({ data: { id: 9, role } }) });
+  assert.equal(createAssignOracle({ field: "role", injected: "admin", controlRead: read("customer"), injectedRead: read("admin") }).verdict, "set");
+  assert.equal(createAssignOracle({ field: "role", injected: "admin", controlRead: read("admin"), injectedRead: read("admin") }).verdict, "lead");
+  assert.equal(createAssignOracle({ field: "role", injected: "admin", controlRead: read("customer"), injectedRead: read("customer") }).verdict, "denied");
+  assert.equal(createdId('{"status":"success","data":{"id":28,"role":"admin"}}'), "28");
+  assert.equal(createdId('{"_id":"abc"}'), "abc");
+  assert.equal(createdId("[]"), undefined);
+});
