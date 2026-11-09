@@ -24,6 +24,9 @@ interface AuthInjectEndpoint {
   method?: string;
   /** Also try NoSQL operator injection ({field:{$ne:...}}). Default true. */
   nosql?: boolean;
+  /** Send this account's bearer token (from options.authz-matrix.accounts[as].token)
+   * when the endpoint is behind auth, e.g. an authenticated coupon/lookup API. */
+  as?: string;
 }
 
 // Generic SQL tautology pairs (TRUE / FALSE), tried in order. The FALSE member is
@@ -53,9 +56,12 @@ export const authInjection: Check = {
       const url = ep.url.startsWith("http") ? ep.url : base + ep.url;
       if (!ctx.scope.isHostAllowed(url)) continue;
       const method = ep.method ?? "POST";
+      const accounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string }> }).accounts ?? {};
+      const token = ep.as ? accounts[ep.as]?.token : undefined;
+      const authHeader: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
       const send = async (fieldVal: unknown, extra?: Record<string, unknown>) => {
         const body = JSON.stringify({ ...(ep.template ?? {}), ...extra, [ep.field]: fieldVal });
-        const r = await safeFetch(url, ctx.scope, { method, headers: { "content-type": "application/json" }, body, maxBytes: 256 * 1024 });
+        const r = await safeFetch(url, ctx.scope, { method, headers: { "content-type": "application/json", ...authHeader }, body, maxBytes: 256 * 1024 });
         return { status: r.status, body: r.body };
       };
       try {
@@ -75,21 +81,26 @@ export const authInjection: Check = {
           if (v.verdict === "proven") proof = v;
         }
         if (!proof) { ctx.log(`auth-injection: ${ep.field} at ${ep.url} not injectable`); continue; }
+        // Name the flaw by the proof's actual kind so a NoSQL finding never reads
+        // as "SQL injection" (and vice-versa): the two are distinct weaknesses.
+        const kind = proof.kind.toLowerCase().startsWith("nosql") ? "NoSQL injection" : "SQL injection";
         findings.push({
           id: `auth-injection:${ep.field}:${ep.url}`,
           check: "auth-injection",
-          title: `SQL/NoSQL injection in ${ep.field} at ${ep.url} (${proof.kind})`,
+          title: `${kind} in ${ep.field} at ${ep.url} (${proof.kind})`,
           severity: "critical",
           state: "proven",
           location: url,
-          description: `The ${ep.field} field of ${ep.url} is injectable: ${proof.reason}. An attacker bypasses authentication or the lookup filter. SQL injection / broken authentication.`,
-          remediation: `Use parameterized queries for ${ep.field}; never build the auth query by string concatenation, and reject operator objects where a scalar is expected.`,
+          description: `The ${ep.field} field of ${ep.url} is injectable (${kind}): ${proof.reason}. An attacker bypasses authentication or the lookup filter.`,
+          remediation: `Use parameterized queries for ${ep.field}; never build the ${kind.startsWith("NoSQL") ? "document-store filter" : "SQL query"} by string concatenation, and reject operator objects where a scalar is expected.`,
           proof: {
-            method: "live differential on staging: benign baseline, TRUE tautology, FALSE tautology (control)",
-            replay: `curl -i -X ${method} -H 'content-type: application/json' --data '{"${ep.field}":"<benign>\\' OR 1=1-- "}' '${url}'`,
+            method: "live differential on staging: benign baseline, always-true probe, always-false probe (control)",
+            replay: kind.startsWith("NoSQL")
+              ? `curl -i -X ${method} -H 'content-type: application/json' --data '{"${ep.field}":{"$gt":""}}' '${url}'`
+              : `curl -i -X ${method} -H 'content-type: application/json' --data '{"${ep.field}":"<benign>' OR '1'='1"}' '${url}'`,
             evidence: `baseline HTTP ${baseline.status}; ${proof.reason}`,
           },
-          regressionHint: `After deploy, a tautology in ${ep.field} at ${ep.url} must not be accepted where a benign value is denied.`,
+          regressionHint: `After deploy, an always-true probe in ${ep.field} at ${ep.url} must not be accepted where a benign value is denied.`,
         });
       } catch (err) {
         ctx.log(`auth-injection: ${ep.url} failed: ${(err as Error).message}`);
