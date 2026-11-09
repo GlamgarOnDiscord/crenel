@@ -10,7 +10,7 @@
 // the window it stays a lead (a firewall, no egress, or simply not vulnerable).
 
 import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
+import { AddressInfo, isIP } from "node:net";
 
 export interface Callback {
   /** The URL to inject; hitting it records the nonce. */
@@ -24,9 +24,10 @@ export interface Callback {
 /**
  * Start an OOB listener. `host` is the address to advertise in callback URLs —
  * the one the TARGET can reach back (e.g. the host's docker bridge IP for a
- * container target, or a public collaborator for a remote target). Binding is
- * always on 0.0.0.0 so a container on the same host can reach it; the listener
- * is loopback-only in spirit (authorised local testing).
+ * container target, or a public collaborator for a remote target). The listener
+ * binds that address when it is a local IP (loopback stays loopback), and all
+ * interfaces only when it is a name or an address this machine does not hold
+ * (a forwarded public collaborator). It records at most 5000 tokens.
  */
 export async function startCallback(host: string, fixedPort = 0): Promise<Callback> {
   const seen: string[] = [];
@@ -44,10 +45,15 @@ export async function startCallback(host: string, fixedPort = 0): Promise<Callba
   });
   // A bad request line or an occupied fixed port must fail the validation cleanly,
   // never crash the process with an unhandled 'error'.
-  const port = await new Promise<number>((resolve, reject) => {
+  const listen = (addr: string) => new Promise<number>((resolve, reject) => {
     srv.once("error", reject);
-    srv.listen(fixedPort, "0.0.0.0", () => { srv.removeListener("error", reject); resolve((srv.address() as AddressInfo).port); });
+    srv.listen(fixedPort, addr, () => { srv.removeListener("error", reject); resolve((srv.address() as AddressInfo).port); });
   });
+  let port: number;
+  if (isIP(host)) {
+    try { port = await listen(host); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "EADDRNOTAVAIL") throw e; port = await listen("0.0.0.0"); }
+  } else port = await listen("0.0.0.0");
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host; // bracket IPv6 literals
   return {
     port,

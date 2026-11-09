@@ -30,3 +30,8 @@ test("reuse: no success marker -> lead", () => {
   const r = reuseOracle({ first: applied, second: applied, control: rejected, successMarkers: [] });
   assert.equal(r.verdict, "lead");
 });
+
+test("reuse: a marker inside a refusal on the second try is not a reuse", () => {
+  const r = reuseOracle({ first: { status: 200, body: '{"discount":10}' }, second: { status: 200, body: '{"message":"discount already used"}' }, control: { status: 404, body: "no" }, successMarkers: ["discount"] });
+  assert.equal(r.verdict, "lead");
+});

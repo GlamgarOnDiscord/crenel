@@ -935,6 +935,7 @@ const exploreStoredXssValidator: Validator = {
     if (typeof d.retrieveUrl !== "string") return no("need detail.retrieveUrl (where the stored value is served)");
     const sUrl = resolveExploreUrl(d.storeUrl, env.stagingUrl), rUrl = resolveExploreUrl(d.retrieveUrl, env.stagingUrl);
     if (!sUrl || !rUrl) return no("not http(s) URLs");
+    if (!env.scope.allowActiveTesting) return no("stored XSS writes a record: needs allowActiveTesting");
     const actor = parseActor(d.as);
     const where: "query" | "body" = d.storeWhere === "query" ? "query" : "body";
     const t = nonce(String(d.storeParam ?? "stored"));
@@ -951,8 +952,10 @@ const exploreStoredXssValidator: Validator = {
       body = res.body;
     } catch (e) { return no(`retrieve request failed: ${(e as Error).message}`); }
     const r = xssOracle({ token: t, body, status: 200 });
-    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
-    return no(r.verdict === "lead" ? `${r.reason} (stored but check escaping/context)` : "the stored marker is not served unescaped");
+    // The probe stays stored: it is inert (onload=1 runs no code), and the result says where to delete it.
+    const left = `; the inert probe "${payload}" stays in the record stored via ${pathOnly(sUrl)}: delete it, or point storeUrl at a disposable record`;
+    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}${left}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
+    return no((r.verdict === "lead" ? `${r.reason} (stored but check escaping/context)` : "the stored marker is not served unescaped") + left);
   },
 };
 
@@ -1188,7 +1191,7 @@ const exploreReuseValidator: Validator = {
     try { first = await send(d.body); second = await send(d.body); control = await send(d.controlBody); }
     catch (e) { return no(`request failed: ${(e as Error).message}`); }
     const r = reuseOracle({ first, second, control, successMarkers: markers });
-    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)} applied twice; invalid control rejected`, response: r.reason }, ceiling: "medium" };
+    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)}\n${d.body.slice(0, 300)}\n(sent twice as ${actor ? actor.toUpperCase() : "anon"})`, response: `HTTP ${second.status}\n${excerpt(second.body)}`, sha256: sha(second.body), control: `first: HTTP ${first.status}, sha256 ${sha(first.body).slice(0, 12)}; invalid artifact: HTTP ${control.status}, sha256 ${sha(control.body).slice(0, 12)}` }, ceiling: "medium" };
     return no(r.reason);
   },
 };
