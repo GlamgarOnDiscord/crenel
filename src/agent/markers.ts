@@ -60,3 +60,35 @@ export function deriveMarkers(reads: Partial<Record<"a" | "b" | "c", Read>>, ano
 
 /** Usual identity endpoints (paths only, the same for any API); options.authz-matrix.whoami puts one first. */
 export const WHOAMI_PATHS = ["/api/me", "/api/users/me", "/api/user", "/api/auth/me", "/api/profile", "/me", "/api/v1/me", "/api/account"];
+
+/** Identity values carried by a JWT's payload (sub, id, userId, email, at the root or under data/user). Empty for a non-JWT. */
+export function tokenIdentity(token: string | undefined): string[] {
+  if (!token) return [];
+  let p: unknown;
+  try { p = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")); } catch { return []; }
+  const out: string[] = [];
+  const take = (o: unknown) => {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return;
+    for (const k of ["sub", "id", "userId", "user_id", "uid", "email"]) { const v = (o as Record<string, unknown>)[k]; if ((typeof v === "string" && v) || typeof v === "number") out.push(String(v)); }
+  };
+  take(p);
+  for (const w of ["data", "user", "account"]) take((p as Record<string, unknown> | null)?.[w]);
+  return [...new Set(out)];
+}
+
+// Fields that name an object's owner, in any API ("UserId", "owner_id", "accountId", "createdBy", …).
+const OWNER_FIELD = /^(user|owner|account|customer|author|member|created_?by|tenant)_?id$|^(owner|created_?by)$/i;
+
+/** Owner-field values of a JSON object (at the root or under one wrapper such as data). Pure. */
+export function ownerFieldValues(body: string): string[] {
+  let j: unknown;
+  try { j = JSON.parse(body); } catch { return []; }
+  const out: string[] = [];
+  const take = (o: unknown) => {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return;
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) if (OWNER_FIELD.test(k) && (typeof v === "string" || typeof v === "number")) out.push(String(v));
+  };
+  take(j);
+  if (j && typeof j === "object" && !Array.isArray(j)) for (const w of Object.values(j as Record<string, unknown>)) take(w);
+  return out;
+}

@@ -26,6 +26,7 @@ import { startCallback, ssrfOracle } from "./ssrf.js";
 import { proveDomXss, domXssPayload } from "./domxss.js";
 import { traversalPayloads, lfiOracle } from "./lfi.js";
 import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
+import { ownerFieldValues, tokenIdentity } from "./markers.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -607,8 +608,18 @@ const exploreCrossActorValidator: Validator = {
     if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
     // Without a marker the leak rests on "same body as the owner". That holds only for a URL that names one object:
     // on a collection or a "my …" route every caller gets their own scope, and two empty or default scopes are equal.
-    if (!(marker && attackerRes.body.includes(marker)) && !namesObject(url, id)) {
-      return no(`the attacker gets the same body as ${owner.toUpperCase()}, but ${path} names no object: each account may simply get its own (empty or default) scope. Declare or derive ${owner.toUpperCase()}'s marker, or claim a URL with ${owner.toUpperCase()}'s object id`, evidence);
+    if (!(marker && attackerRes.body.includes(marker))) {
+      if (!namesObject(url, id)) return no(`the attacker gets the same body as ${owner.toUpperCase()}, but ${path} names no object: each account may simply get its own (empty or default) scope. Declare or derive ${owner.toUpperCase()}'s marker, or claim a URL with ${owner.toUpperCase()}'s object id`, evidence);
+      // Same body as the owner proves a cross-account read only if the object is the owner's: an object every
+      // account may read (a catalog behind login) also gives the same body. Without a marker, the object's own
+      // owner field (UserId, owner_id, …) must hold the owner's identity from its token, and not the attacker's.
+      const owners = ownerFieldValues(ownerRes.body);
+      const ownerIds = tokenIdentity(ownerToken), attackerIds = attacker === "anon" ? [] : tokenIdentity(actorToken(env.options, attacker));
+      // The owner's own account record also counts: the URL names an id that is the owner's id in its token.
+      const selfRecord = ownerIds.some((v) => namesObject(url, v) && new URL(url).pathname.split("/").includes(v)) && createdId(ownerRes.body) !== undefined && ownerIds.includes(createdId(ownerRes.body)!);
+      if (!selfRecord && (!owners.some((v) => ownerIds.includes(v)) || owners.some((v) => attackerIds.includes(v)))) {
+        return no(`the attacker gets the same body as ${owner.toUpperCase()}, but nothing shows the object is ${owner.toUpperCase()}'s (no marker, and no owner field holding ${owner.toUpperCase()}'s id from its token): an object every account may read looks the same. Claim one of ${owner.toUpperCase()}'s own objects, or declare its marker`, evidence);
+      }
     }
     // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out —
     // UNLESS that anonymous read carries the owner's own marker, which makes it a broken-authentication leak (worse
