@@ -54,10 +54,9 @@ So the gap closes on two tracks, and neither is overfitting (no target signature
 
 ## Track A — more generic validators (incremental)
 
-Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none and forgery, mass-assignment (update and create), **cross-account write** (B creates, A deletes or changes), **privilege escalation** (a gate flips denied to allowed after the account's own write), **user enumeration** (two-absent control), **excessive data exposure** (two or more accounts' markers in one response), CORS, business-logic **reuse**, GraphQL suggestions and batching, **open-redirect** (two-sentinel differential).
+Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none and forgery, mass-assignment (update and create), **cross-account write** (B creates, A deletes or changes), **privilege escalation** (a gate flips denied to allowed after the account's own write), **user enumeration** (two-absent control), **excessive data exposure** (two or more accounts' markers in one response), **BFLA** (a normal account reaches a function declared for a privileged one), CORS, business-logic **reuse**, GraphQL suggestions and batching, **open-redirect** (two-sentinel differential).
 
 Candidates next, with an honest oracle:
-- **function-level auth (BFLA) across accounts** — a non-admin account reaches a function a declared admin account uses while anonymous is denied; needs a role declared in the config, so it is not yet shipped.
 
 ## Track B — let the model work like a free agent (the real lever)
 
