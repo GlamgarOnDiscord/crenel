@@ -1381,6 +1381,48 @@ const exploreePrivEscValidator: Validator = {
   },
 };
 
+/* ---------------- explore.data-exposure ---------------- */
+// Excessive data exposure: an endpoint returns to one account the data of SEVERAL
+// other accounts (a list, an admin view, an unscoped search). Distinct from
+// cross-actor, which is one named object. The proof uses the configured/derived
+// markers: A reads the endpoint and its body carries the markers of at least two
+// DIFFERENT other accounts (so it is aggregate cross-tenant data, not one shared
+// object), none of them echoed from the request, and an anonymous read is a
+// boundary (denied, or it does not carry those markers — otherwise it is public,
+// reported as the worse flaw). No target string. See explore-validators.test.ts.
+const exploreDataExposureValidator: Validator = {
+  class: "explore.data-exposure",
+  name: "excessive data exposure (several accounts' markers in one response)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; as?: unknown };
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const actor = parseActor(d.as) ?? "a";
+    if (actor !== "anon" && !actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+    // Markers of every account OTHER than the reader (declared, or derived at run time).
+    const others = (["a", "b", "c"] as const).filter((k) => k !== actor).map((k) => [k, actorMarker(env.options, k)] as const).filter((x): x is readonly ["a" | "b" | "c", string] => !!x[1]);
+    if (others.length < 2) return no("fewer than two other accounts have a marker: declare or derive accounts.<x>.marker so aggregate exposure can be told from a single shared object");
+    const res = await sendAs({ url, method: "GET", as: actor }, actor, env, url);
+    if (!ok2xx(res.status)) return no(`HTTP ${res.status}: no data returned`);
+    // A marker the request itself carries would be an echo, not data the server holds.
+    let sent = url.toLowerCase(); try { sent = decodeURIComponent(sent); } catch { /* keep */ }
+    const seen = others.filter(([, m]) => res.body.includes(m) && !sent.includes(m.toLowerCase()));
+    if (seen.length < 2) return no(`the response carries ${seen.length} other account's marker(s): not shown to aggregate several tenants (cross-actor covers a single object)`, { request: reqLine("GET", url, actor), response: `HTTP ${res.status}\n${excerpt(res.body)}`, sha256: sha(res.body) });
+    const evidence: Evidence = { request: reqLine("GET", url, actor), response: `HTTP ${res.status}\n${excerpt(res.body)}`, sha256: sha(res.body), control: `markers of ${seen.map(([k]) => k.toUpperCase()).join(", ")} all present` };
+    // Boundary: an anonymous read must not get the same aggregate (else it is public, worse).
+    if (actor !== "anon") {
+      const anon = await sendAs({ url, method: "GET" }, "anon", env, url);
+      const anonSeen = others.filter(([, m]) => anon.body.includes(m));
+      evidence.control += `; anonymous -> HTTP ${anon.status}`;
+      if (ok2xx(anon.status) && anonSeen.length >= 2) return { claimId: claim.id, state: "proven", validator: this.name, reason: `Excessive data exposure at ${pathOnly(url)}: an anonymous visitor gets the data of ${anonSeen.length} accounts (${anonSeen.map(([k]) => k.toUpperCase()).join(", ")}): public aggregate leak`, evidence, ceiling: "critical" };
+    }
+    return { claimId: claim.id, state: "proven", validator: this.name, reason: `Excessive data exposure at ${pathOnly(url)}: account ${actor.toUpperCase()} receives the markers of ${seen.length} other accounts (${seen.map(([k]) => k.toUpperCase()).join(", ")}) in one response`, evidence, ceiling: "high" };
+  },
+};
+
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two
 // distinct attacker origins and the oracle decides; a read-only GET, no active
@@ -1592,7 +1634,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator, exploreDataExposureValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

@@ -78,6 +78,10 @@ export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoi
       }
     }
   }
+  // Aggregate data exposure on collection routes (no :id): read as A, several tenants' markers in one body.
+  if (accounts.includes("a")) for (const ep of input.endpoints.filter((e) => !e.template?.includes(":id") && !e.graphql).slice(0, 20)) {
+    claims.push({ id: `auto:dx:${claims.length}`, class: "explore.data-exposure", source: "check", detail: { url: ep.url, as: "a" } });
+  }
   // A GraphQL endpoint with introspection open: its own String arguments become injection claims.
   for (const ep of input.endpoints.filter((e) => e.graphql)) {
     try {
