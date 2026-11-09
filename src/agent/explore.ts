@@ -168,6 +168,10 @@ export class Explorer {
   private readonly claimed = new Set<string>();
   private bundle?: ServedFile[];
   private readonly approved = new Set<string>();
+  // Where findings are lost, per claim class: submitted, proven, and the stage that stopped the rest.
+  private readonly funnel: Record<string, { submitted: number; proven: number; lost: Record<string, number> }> = {};
+  private notedLeads = 0;
+  private rejectedTurns = 0;
 
   constructor(private readonly d: ExploreDeps) {
     const onAbort = () => this.ac.abort(d.signal.reason);
@@ -237,6 +241,7 @@ export class Explorer {
       this.tokens += estimateTokens(prompt) + estimateTokens(raw);
       const parsed = parseTurn(raw);
       if (!parsed) {
+        this.rejectedTurns++;
         this.d.emit("explore.rejected", { turn, reason: "not the expected JSON", sha256: sha(raw) });
         this.history.push(`[tour ${turn}] ta réponse n'était pas le JSON attendu, rien n'a été exécuté.`);
         continue;
@@ -256,12 +261,15 @@ export class Explorer {
     const over = this.overBudget();
     if (over && !this.stopped && this.calls < this.d.budget.maxCalls) this.stopped = over;
     const proven = this.found.filter((x) => x.f.state === "proven").length;
+    const funnel = { claims: this.funnel, notedLeads: this.notedLeads, rejectedTurns: this.rejectedTurns, requestsByActor: this.byActor() };
+    const funnelLine = Object.entries(this.funnel).map(([c, v]) => `${c} ${v.proven}/${v.submitted}${Object.keys(v.lost).length ? ` (perdu: ${Object.entries(v.lost).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`).join(" · ");
     const lines = [
       `${this.calls} appel(s) au modèle, ${this.requests} requête(s), ~${this.tokens} jetons${this.toolRuns ? `, ${this.toolRuns} outil(s) lancé(s)` : ""}`,
       `${proven} prouvé(s) par un validateur générique, ${this.found.length - proven} piste(s) gardée(s)`,
+      ...(funnelLine ? [`entonnoir: ${funnelLine}${this.notedLeads ? ` · ${this.notedLeads} piste(s) notée(s) sans claim` : ""}`] : this.notedLeads ? [`entonnoir: aucune claim, ${this.notedLeads} piste(s) notée(s)`] : []),
       ...(this.stopped ? [`arrêt: ${this.stopped}`] : []),
     ];
-    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, proven, leads: this.found.length - proven });
+    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, proven, leads: this.found.length - proven, funnel });
     return { found: this.found, calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, lines };
   }
 
@@ -525,6 +533,7 @@ export class Explorer {
     const id = `explore:lead:${sha(`${a.title}|${a.location ?? ""}`).slice(0, 12)}`;
     if (this.claimed.has(id)) return { text: "déjà noté", summary: "duplicate lead" };
     this.claimed.add(id);
+    this.notedLeads++;
     const reqs = (a.requests ?? []).map((r) => `${(r.method ?? "GET").toUpperCase()} ${resolveExploreUrl(r.url, this.d.config.scope.stagingUrl) ?? r.url} as=${r.as ?? "anon"}`);
     this.found.push({
       f: {
@@ -535,6 +544,13 @@ export class Explorer {
       },
     });
     return { text: "piste notée (non prouvée)", summary: "lead noted" };
+  }
+
+  /** The model's own requests per actor: an exploration that never authenticates shows here. */
+  private byActor(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const l of this.log) out[l.as] = (out[l.as] ?? 0) + 1;
+    return out;
   }
 
   /** The last requests the model sent, kept with every claim and lead. */
@@ -569,6 +585,10 @@ export class Explorer {
     }
     this.d.emit("verdict", { claim, verdict, source: "explore" });
     const proven = verdict.state === "proven";
+    const fc = (this.funnel[a.class] ??= { submitted: 0, proven: 0, lost: {} });
+    fc.submitted++;
+    if (proven) fc.proven++;
+    else { const stage = lossStage(verdict); fc.lost[stage] = (fc.lost[stage] ?? 0) + 1; }
     const loc = a.class === "file-match" ? `${String(a.detail.file ?? "")}${a.detail.line ? `:${String(a.detail.line)}` : ""}`
       : `${String(((a.detail.request as ExploreRequest | undefined)?.method ?? writes ?? "GET")).toUpperCase()} ${pathOf(urls?.[0] ?? String(a.detail.url ?? ""))}`;
     const sev = proven ? capSev(a.severity, verdict.ceiling ?? "medium") : capSev(a.severity, "medium");
@@ -586,6 +606,16 @@ export class Explorer {
     this.found.push({ f, v: verdict });
     return { text: `${proven ? "PROUVÉ" : "NON PROUVÉ (gardé comme piste)"}: ${one(verdict.reason, 400)}`, summary: `${a.class} -> ${verdict.state}` };
   }
+}
+
+/** The stage that stopped an unproven claim, for the funnel: before any request, or the validator's own verdict. */
+export function lossStage(v: ClaimVerdict): string {
+  if (v.validator !== null) return "validator";
+  if (/declared host/.test(v.reason)) return "scope";
+  if (/budget/.test(v.reason)) return "budget";
+  if (/gate/.test(v.reason)) return "gate";
+  if (/changes state/.test(v.reason)) return "write-mode";
+  return "detail";
 }
 
 /** Most requests a claim's validator can send, reserved before it runs so a proof is never cut halfway. */

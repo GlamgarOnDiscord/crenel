@@ -165,6 +165,11 @@ test("explore: a claim no validator proves is kept as a lead, with the reasoning
     assert.match(plan.verdict ?? plan.description, /marker|public|owner/);
     assert.equal(plan.severity, "medium", "an unproven claim is capped");
     assert.equal(items.find((f) => f.title.startsWith("Statement"))!.severity, "medium");
+    // The funnel says where each claim was lost: here, both reached the validator and failed there.
+    const end = events(t.run, "explore.end")[0]!.funnel as { claims: Record<string, { submitted: number; proven: number; lost: Record<string, number> }>; notedLeads: number; requestsByActor: Record<string, number> };
+    assert.deepEqual(end.claims["cross-actor"], { submitted: 2, proven: 0, lost: { validator: 2 } });
+    assert.equal(end.notedLeads, 1);
+    assert.equal(end.requestsByActor.a, 1);
   } finally { t.close(); }
 });
 
