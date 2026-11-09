@@ -57,6 +57,9 @@ So the gap closes on two tracks, and neither is overfitting (no target signature
 Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none and forgery, mass-assignment (update and create), **cross-account write** (B creates, A deletes or changes), **privilege escalation** (a gate flips denied to allowed after the account's own write), **user enumeration** (two-absent control), **excessive data exposure** (two or more accounts' markers in one response), **BFLA** (a normal account reaches a function declared for a privileged one), CORS, business-logic **reuse**, GraphQL suggestions and batching, **open-redirect** (two-sentinel differential).
 
 Candidates next, with an honest oracle:
+- **DOM-XSS in autoprobe** — the deterministic path does not yet drive a headless browser; the model path proves it when Playwright is configured (`CRENEL_PLAYWRIGHT`). Wiring a bounded browser probe into `autoprobe` would make it reproducible.
+- **time-based blind SQLi / NoSQLi** — a payload that sleeps the database proves injection where no boolean differential surfaces; honest only with a repeated-measure control to rule out a slow endpoint.
+- **CSRF** — a state-changing POST accepted with no token and a cross-site `Origin`, proven by a differential (the same request with a valid token/origin vs without); needs active mode and a careful control so a token-less public endpoint is not flagged.
 
 ## Track B — let the model work like a free agent (the real lever)
 
