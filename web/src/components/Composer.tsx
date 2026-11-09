@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, KeyRound, Mic, Paperclip, Plus, Radar, Square, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, KeyRound, Mic, Paperclip, Plus, Radar, Search, Square, Trash2, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
+import { ProviderIcon, hasProviderIcon } from "../brand/ProviderIcon.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
 import { CONNECTORS, EXPLORES, GOALS, MODELS, MODEL_KEY_ENVS, MODES, activeModelView, connectorOf, connectorToDraft, customSource, customSpec, draftNotes, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type Connector, type CustomModel, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
@@ -45,10 +46,10 @@ function ExploreMenu({ placement }: { placement: "up" | "down" }) {
   );
 }
 
-/* A connector's mark: the provider's own logo when we ship one (OpenAI,
-   Anthropic, Gemini, Mistral), otherwise a two-letter tinted tile. */
+/* A connector's mark: the provider's logo (brand/ProviderIcon), or a tinted
+   "{}" tile for a generic OpenAI-compatible endpoint. */
 export function ConnectorMark({ c, size = 22 }: { c: Connector | undefined; size?: number }) {
-  if (c && c.logo !== "custom") return <span className="cmark logo" style={{ width: size, height: size }}><ModelLogo provider={c.logo} size={Math.round(size * 0.62)} /></span>;
+  if (c && hasProviderIcon(c.id)) return <span className="cmark logo" style={{ width: size, height: size }}><ProviderIcon id={c.id} size={Math.round(size * 0.64)} /></span>;
   const tint = c?.tint ?? "#A1A1AA";
   return (
     <span className="cmark mono" style={{ width: size, height: size, fontSize: Math.round(size * 0.42), color: tint, background: `color-mix(in srgb, ${tint} 16%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tint} 30%, transparent)` }}>
@@ -70,6 +71,7 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
   const [step, setStep] = useState<"pick" | "details">(initial ? "details" : "pick");
   const [touched, setTouched] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [query, setQuery] = useState("");
   const errors = validateDraft(draft);
   const notes = draftNotes(draft);
   const prov = providerOf(draft.provider);
@@ -85,24 +87,38 @@ function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; 
   const keySet = key && data.modelKeys ? data.modelKeys.includes(key) : null;
 
   if (step === "pick") {
+    const q = query.trim().toLowerCase();
+    const match = (c: Connector) => !q || c.label.toLowerCase().includes(q) || c.id.includes(q) || (c.baseUrl ?? "").includes(q);
+    const ready = (c: Connector) => !!c.apiKeyEnv && !!data.modelKeys?.includes(c.apiKeyEnv);
     const tile = (c: Connector) => (
       <button key={c.id} type="button" className={cn("cmf-conn", c.id === "custom" && "wide")} onClick={() => pick(c)}
         title={c.baseUrl ?? "Un point d'accès compatible OpenAI à renseigner"}>
-        <ConnectorMark c={c} size={22} />
+        <ConnectorMark c={c} size={24} />
         <span className="cmf-conn-l">{c.label}</span>
         {c.id === "custom" && <span className="cmf-conn-d">compatible OpenAI</span>}
+        {ready(c) && <span className="cmf-ready" title={`${c.apiKeyEnv} est définie : prêt à l'emploi`} aria-label="clé définie" />}
       </button>
     );
+    const cloud = CONNECTORS.filter((c) => !c.local && c.id !== "custom" && match(c));
+    const local = [...CONNECTORS.filter((c) => c.local), connectorOf("custom")!].filter(match);
+    const readyCount = CONNECTORS.filter(ready).length;
     return (
       <div className="cmf" role="group" aria-label="Choisir un connecteur">
         <div className="cmf-head">
           <button type="button" className="tbtn icon" aria-label="Retour à la liste" onClick={onCancel}><ArrowLeft size={15} /></button>
-          <div className="cmf-head-t"><span className="cmf-title">Ajouter un modèle</span><span className="cmf-sub">Choisissez où il tourne.</span></div>
+          <div className="cmf-head-t">
+            <span className="cmf-title">Ajouter un modèle</span>
+            <span className="cmf-sub">{readyCount > 0 ? `${readyCount} fournisseur${readyCount > 1 ? "s" : ""} avec une clé déjà définie` : "Choisissez où il tourne."}</span>
+          </div>
         </div>
-        <span className="cmf-sec-l">Cloud</span>
-        <div className="cmf-conns">{CONNECTORS.filter((c) => !c.local && c.id !== "custom").map(tile)}</div>
-        <span className="cmf-sec-l">Sur votre machine <em>sans clé</em></span>
-        <div className="cmf-conns">{CONNECTORS.filter((c) => c.local).map(tile)}{tile(connectorOf("custom")!)}</div>
+        <label className="cmf-search">
+          <Search size={14} aria-hidden="true" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un fournisseur" autoFocus spellCheck={false}
+            onKeyDown={(e) => { if (e.key === "Enter") { const first = [...cloud, ...local][0]; if (first) { e.preventDefault(); pick(first); } } }} />
+        </label>
+        {cloud.length > 0 && <><span className="cmf-sec-l">Cloud</span><div className="cmf-conns">{cloud.map(tile)}</div></>}
+        {local.length > 0 && <><span className="cmf-sec-l">Sur votre machine <em>sans clé</em></span><div className="cmf-conns">{local.map(tile)}</div></>}
+        {cloud.length + local.length === 0 && <div className="cmf-empty">Aucun fournisseur ne correspond. <button type="button" onClick={() => pick(connectorOf("custom")!)}>Saisir un point d'accès</button></div>}
       </div>
     );
   }
