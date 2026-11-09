@@ -37,6 +37,8 @@ function app() {
       return json(200, { id: "n1", owner: "acct_b_marker", body: "B's note" });
     }
     if (u.pathname === "/hello") return json(200, { msg: INJECTION });
+    // An identity endpoint: each account's own id, which its objects carry as owner.
+    if (u.pathname === "/api/me") return who ? json(200, { user: { id: who === "t_a" ? "acct_a_marker" : "acct_b_marker", plan: "pro" } }) : json(401, { error: "auth" });
     json(404, { error: "not found" });
   });
   return { srv, hits };
@@ -284,4 +286,20 @@ test("claimWriteMethod: a proof that writes is gated as a write with its real me
   assert.equal(claimWriteMethod("injection", { url: "/s", param: "q", method: "DELETE" }), "DELETE");
   assert.equal(claimWriteMethod("replay", { request: { url: "/x", method: "DELETE" } }), null);
   assert.equal(claimWriteMethod("cross-actor", { url: "/x" }), null);
+});
+
+test("explore: without declared markers, each account's marker is derived from its identity read, and a cross-account read is proven", async () => {
+  const t = await setup({
+    options: { "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { token: "tok-b" } } } },
+    script: [
+      turn([{ tool: "claim.submit", args: { class: "replay", title: "A reads B's billing statement", severity: "critical", reasoning: "query-param id", detail: { request: { url: "/rpc/billing.getStatement?statement=stm_b_19", as: "a" }, expect: { status: 200, bodyIncludes: ["acct_b_marker"] }, id: "stm_b_19" } } }], true),
+    ],
+  });
+  try {
+    await t.run.start();
+    assert.deepEqual(events(t.run, "explore.markers")[0], { path: "/api/me", accounts: ["a", "b"] });
+    assert.ok(t.hits.includes("GET /api/me anon"), "the anonymous control read was sent");
+    const f = t.store.findings().items.find((x) => x.check === "explore")!;
+    assert.equal(f.state, "proven", f.verdict ?? f.description);
+  } finally { t.close(); }
 });

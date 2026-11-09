@@ -62,7 +62,7 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 
 | Claim class | What it proves | Oracle |
 |---|---|---|
-| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection, NoSQL operator injection ($ne/$eq) in one parameter. REST query or form body, JSON-body operators, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database/parse error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
+| `explore.injection` | SQL injection (boolean and error), reflected XSS, template/expression injection, OS command injection, NoSQL operator injection ($ne against $eq to a fresh nonce, or $in: [] in JSON) in one parameter, or a JSON `bodyTemplate` with `"__INJECT__"` at the field. REST query or form body, JSON-body operators, or GraphQL with `__INJECT__` inside a string argument | differential (TRUE matches the baseline, FALSE diverges, or a database/parse error), reflection (unescaped markup only), computation (`7*7` returned as `49` next to a nonce) |
 | `explore.ssrf` | The server fetches a URL taken from a parameter (REST or GraphQL) | out-of-band: Crenel starts a listener and injects a callback URL with a nonce; a hit proves it |
 | `explore.stored-xss` | Markup sent through a store request is served unescaped by another request | reflection, on the retrieve response |
 | `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
@@ -78,6 +78,26 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 The older classes (`explore.replay`, `explore.cross-actor`, `explore.secret`,
 `explore.file-match`) replay a request, compare two actors, check a secret in a
 response and match a line in a file.
+
+**Account markers.** `explore.replay` and `explore.cross-actor` prove a
+cross-account read by an account's marker in the body. When an account has a
+token but no declared `marker`, the exploration first reads an identity endpoint
+(`options.authz-matrix.whoami`, then `/api/me`, `/api/users/me`, `/api/user`,
+`/api/auth/me`) as each account and as anonymous, and keeps an identity field
+(email, username, id, …) that only that account's read carries: 6+ characters
+with a letter or 8+ digits, absent from every other account's read and from the
+anonymous one (`src/agent/markers.ts`). It is read-only and gated, and a
+declared marker always wins. Without either, those claims stay leads.
+
+**Funnel.** `explore.end` reports, per claim class, how many claims were
+submitted and proven and where the rest stopped (`scope`, `budget`, `gate`,
+`write-mode`, `detail`, or the `validator`'s own verdict), plus the leads noted
+without a claim and the model's requests per account. A low recall shows there
+where it is lost.
+
+A claim whose validator writes (mass-assignment, reuse, stored XSS, an injection
+or SSRF in a body) is gated as a write with its real method: only in `full`
+exploration, with `allowActiveTesting`, and the gate asks every time.
 
 Options for the classes above, under `options.explore`:
 

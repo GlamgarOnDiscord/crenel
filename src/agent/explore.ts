@@ -24,6 +24,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { z } from "zod";
 import type { Config } from "../core/config.js";
 import { safeFetch, type SafeResponse } from "../core/net.js";
+import { deriveMarkers, WHOAMI_PATHS } from "./markers.js";
 import { Scope, type NetEvent } from "../core/scope.js";
 import type { Check, Finding, Severity } from "../core/types.js";
 import { relative, walkFiles } from "../core/walk.js";
@@ -171,9 +172,12 @@ export class Explorer {
   // Where findings are lost, per claim class: submitted, proven, and the stage that stopped the rest.
   private readonly funnel: Record<string, { submitted: number; proven: number; lost: Record<string, number> }> = {};
   private notedLeads = 0;
+  // The config's options, with account markers derived at run time where none is declared.
+  private options: Record<string, unknown>;
   private rejectedTurns = 0;
 
   constructor(private readonly d: ExploreDeps) {
+    this.options = d.config.options;
     const onAbort = () => this.ac.abort(d.signal.reason);
     if (d.signal.aborted) onAbort(); else d.signal.addEventListener("abort", onAbort, { once: true });
     const s = d.config.scope;
@@ -213,6 +217,7 @@ export class Explorer {
     // Reconnaissance before the first model call, deterministic and cheap: the
     // page and the routes its scripts cite, so the first turn already has
     // something to work on (a model call costs more than a few GETs).
+    await this.deriveAccountMarkers();
     if (this.d.config.scope.stagingUrl && this.d.budget.maxRequests >= 10) {
       const out = await this.tool("bundle.fetch", {});
       const page = this.bundle?.find((f) => f.kind === "html");
@@ -282,7 +287,7 @@ export class Explorer {
     const ssrfCb = exOpts.ssrfCallbackHost && exOpts.ssrfCallbackPort
       ? ` Un écouteur hors-bande est configuré (${exOpts.ssrfCallbackHost}:${exOpts.ssrfCallbackPort}): le validateur compose lui-même l'URL de rappel avec un nonce, ne la mets pas dans detail.`
       : "";
-    const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(cfg.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(cfg.options, k)})` : ""}`);
+    const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(this.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(this.options, k)})` : ""}`);
     const b = this.d.budget;
     const tools = [
       `http.request {method?, url, as?, headers?, body?}: une requête vers un hôte déclaré (url absolue ou chemin relatif à la cible). as = "a" | "b" | "c" | "anon" (le jeton du compte est ajouté par l'outil; tu ne le vois jamais). GET/HEAD seulement${this.d.mode === "full" ? "; une écriture (POST, PUT, PATCH, DELETE) passe par la porte et allowActiveTesting, et l'utilisateur est sollicité à chaque fois" : ""}.`,
@@ -546,6 +551,44 @@ export class Explorer {
     return { text: "piste notée (non prouvée)", summary: "lead noted" };
   }
 
+  /**
+   * Accounts with a token but no declared marker: read each one's identity
+   * endpoint (and the same as anonymous) and keep a value only that account's read
+   * carries (markers.ts). Without a marker, cross-account claims can only be leads;
+   * with one, the validators still apply all their controls. Read-only, gated, and
+   * stops at the first path every account can read.
+   */
+  private async deriveAccountMarkers(): Promise<void> {
+    const base = this.d.config.scope.stagingUrl;
+    const missing = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k) && !actorMarker(this.options, k));
+    if (!base || !missing.length || this.d.budget.maxRequests < 40) return;
+    const am = (this.options["authz-matrix"] ?? {}) as AuthzOptions & { whoami?: unknown };
+    const paths = [...new Set([...(typeof am.whoami === "string" ? [am.whoami] : []), ...WHOAMI_PATHS])].slice(0, 4);
+    const withToken = (["a", "b", "c"] as const).filter((k) => actorToken(this.options, k));
+    const urls = paths.map((p) => resolveExploreUrl(p, base)).filter((u): u is string => !!u && this.scope.isHostAllowed(u));
+    if (!urls.length || !(await this.gateFor("explore.http", urls.map((url) => ({ method: "GET", url }))))) return;
+    for (const url of urls) {
+      if (this.ac.signal.aborted) return;
+      const read = async (k: "a" | "b" | "c" | "anon") => {
+        const token = k === "anon" ? undefined : actorToken(this.options, k);
+        try { const r = await safeFetch(url, this.scope, { headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, maxBytes: 64 * 1024 }); return { status: r.status, body: r.body }; }
+        catch { return { status: 0, body: "" }; }
+      };
+      const reads: Partial<Record<"a" | "b" | "c", { status: number; body: string }>> = {};
+      for (const k of withToken) reads[k] = await read(k);
+      if (!withToken.every((k) => reads[k]!.status >= 200 && reads[k]!.status < 300)) continue;
+      const derived = deriveMarkers(reads, await read("anon"));
+      const got = missing.filter((k) => derived[k]);
+      if (!got.length) continue;
+      const accounts = { ...(am.accounts ?? {}) } as Record<string, Record<string, unknown>>;
+      for (const k of got) accounts[k] = { ...(accounts[k] ?? {}), marker: derived[k] };
+      this.options = { ...this.options, "authz-matrix": { ...am, accounts } };
+      this.d.emit("explore.markers", { path: pathOf(url), accounts: got });
+      this.history.push(`[reconnaissance] marqueurs de compte tirés de ${pathOf(url)} (lecture de chaque compte, absent des autres et de l'anonyme): ${got.map((k) => `${k}`).join(", ")}. Ils servent aux validateurs cross-actor et replay.`);
+      return;
+    }
+  }
+
   /** The model's own requests per actor: an exploration that never authenticates shows here. */
   private byActor(): Record<string, number> {
     const out: Record<string, number> = {};
@@ -569,7 +612,7 @@ export class Explorer {
     const claim: Claim = { id: `claim:${key}`, class: cls, source: "llm", detail: a.detail };
     const urls = claimUrls(a.class, a.detail, this.d.config.scope.stagingUrl);
     const writes = claimWriteMethod(a.class, a.detail);
-    let env: ValidatorEnv = { scope: this.scope, projectDir: this.d.projectDir, options: this.d.config.options, stagingUrl: this.d.config.scope.stagingUrl, checks: this.d.checks };
+    let env: ValidatorEnv = { scope: this.scope, projectDir: this.d.projectDir, options: this.options, stagingUrl: this.d.config.scope.stagingUrl, checks: this.d.checks };
     let verdict: ClaimVerdict;
     const offline = new Scope({ allowedHosts: [], signal: this.ac.signal });
     if (urls === null) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "no request or file to replay in the detail" };
