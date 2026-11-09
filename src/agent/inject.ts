@@ -82,6 +82,8 @@ export function sqliOracle(input: {
   // differential as the NoSQL bypass, no target signature.
   const ok = (r: { status: number; body: string }) => r.status >= 200 && r.status < 300;
   if (ok(truthy) && !ok(baseline) && !ok(falsy) && !same(truthy, falsy)) {
+    // As for NoSQL: a 2xx whose body is empty or reads as an error is not a success.
+    if (!truthy.body.trim() || /\b(error|invalid|denied|forbidden|unauthori[sz]ed|fail(ed|ure)?|captcha|challenge|not allowed)\b/i.test(truthy.body.slice(0, 2000))) return { verdict: "lead", kind: "sqli-bypass", reason: `the TRUE tautology gets HTTP ${truthy.status} where the literal value and FALSE are denied, but the body is empty or reads as an error: review by hand` };
     return { verdict: "proven", kind: "sqli-bypass", reason: "a TRUE tautology (' OR '1'='1) is accepted where the literal value and a FALSE tautology are both denied (auth/filter bypass)" };
   }
   // Two differently written TRUE conditions answer identically while FALSE answers differently: the server

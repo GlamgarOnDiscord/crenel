@@ -14,6 +14,9 @@ import type { Claim, ClaimVerdict, ValidatorEnv } from "./validators.js";
 import { validateClaim, actorToken } from "./validators.js";
 import { safeFetch } from "../core/net.js";
 
+// Login routes by their usual names (the same in any API), not by a target's path.
+const LOGIN_PATH = /(^|\/)(login|signin|sign-in|log-in|authenticate)(\/|$)/i;
+
 export interface Endpoint { url: string; params?: string[]; graphql?: boolean }
 
 /** Build the systematic claim set for the discovered endpoints. Pure. `accounts`
@@ -38,8 +41,11 @@ export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; o
     }
     // JWT signature bypass against any endpoint that may be protected (needs an account token).
     if (has("a")) add("explore.jwt-forge", { url: ep.url, as: "a" });
-    // Injection on each discovered parameter (query), and NoSQL body-template on the endpoint.
+    // Injection on each discovered parameter (query).
     for (const p of (ep.params ?? []).slice(0, 8)) add("explore.injection", { url: ep.url, param: p, where: "query" });
+    // A login route: the identifier of the usual JSON login body (SQL tautology or NoSQL operator bypass).
+    let path = ""; try { path = new URL(ep.url).pathname; } catch { /* keep */ }
+    if (LOGIN_PATH.test(path)) for (const id of ["email", "username"]) add("explore.injection", { url: ep.url, method: "POST", bodyTemplate: JSON.stringify({ [id]: "__INJECT__", password: "crenel-wrong-password" }) });
   }
   return claims;
 }

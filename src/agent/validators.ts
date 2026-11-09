@@ -769,16 +769,21 @@ const exploreInjectionValidator: Validator = {
     if (!url0) return no("not an http(s) URL");
     const where: "query" | "body" | "json" = d.where === "body" ? "body" : d.where === "json" ? "json" : "query";
     const baseVal = typeof d.value === "string" && d.value ? d.value : "1";
-    const pname = hasParam ? d.param as string : gql ? "gql-arg" : "__INJECT__";
+    const pname = hasParam ? d.param as string : gql ? "gql-arg" : (/"([^"]{1,60})"\s*:\s*"__INJECT__"/.exec(template ?? "")?.[1] ?? "__INJECT__");
     const actor = parseActor(d.as);
     const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "query" ? "GET" : "POST"), as: actor, body: where !== "query" && typeof d.body === "string" ? d.body : undefined };
     const imp0 = `crenel-${nonce(pname)}`;
+    // A template-only claim: the value goes where "__INJECT__" is in the JSON body, as a string (SQL, XSS, template
+    // and command probes) or as an operator object (NoSQL, below).
+    const tplOnly = !gql && !hasParam && !!template;
     const fetchWith = async (value: string) => {
-      const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
+      const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor }
+        : tplOnly ? { url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: template!.replace('"__INJECT__"', JSON.stringify(value)), as: actor }
+        : injectParam(base, d.param as string, value, where);
       const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
       return { status: res.status, body: res.body, contentType: res.headers.get("content-type") ?? "" };
     };
-    const ev = (what: string): Evidence => ({ request: `${(base.method ?? "GET")} ${pathOnly(url0)} (${pname}=…)`, response: what });
+    const ev = (what: string): Evidence => ({ request: `${tplOnly ? (typeof d.method === "string" ? d.method : "POST") : (base.method ?? "GET")} ${pathOnly(url0)} (${tplOnly ? template : `${pname}=…`})`, response: what });
     const leads: string[] = [];
 
     // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
@@ -793,8 +798,6 @@ const exploreInjectionValidator: Validator = {
         if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
       } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
     }
-    // A template-only claim has no parameter for the probes below.
-    if (!gql && !hasParam) return no(leads.length ? `not proven; leads: ${leads.join("; ")}` : "no NoSQL injection proven through the body template", ev(leads.join(" | ")));
 
     // 1. SQL injection — boolean/error differential (strongest, hardest to fake).
     // Try standard breakout contexts (string with different closers, and numeric):
