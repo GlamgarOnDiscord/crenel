@@ -61,7 +61,7 @@ export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoi
   for (const ep of input.endpoints.filter((e) => e.graphql)) {
     try {
       const r = await safeFetch(ep.url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: GRAPHQL_SCHEMA_QUERY }), maxBytes: 2 * 1024 * 1024 });
-      if (r.status >= 200 && r.status < 300) claims.push(...graphqlArgClaims(r.body, ep.url, { mutations: env.scope.allowActiveTesting }));
+      if (r.status >= 200 && r.status < 300) claims.push(...graphqlArgClaims(r.body, ep.url, { mutations: env.scope.allowActiveTesting, ssrf: true }));
     } catch { /* no schema: nothing to add */ }
   }
   const proven: ClaimVerdict[] = [];
@@ -85,7 +85,7 @@ interface GqlType { name: string; kind: string; fields?: GqlField[] | null }
 
 const named = (t: GqlTypeRef | null | undefined): GqlTypeRef | null => (!t ? null : t.name ? t : named(t.ofType));
 
-export function graphqlArgClaims(schemaBody: string, url: string, opts: { mutations: boolean; max?: number }): Claim[] {
+export function graphqlArgClaims(schemaBody: string, url: string, opts: { mutations: boolean; ssrf?: boolean; max?: number }): Claim[] {
   let s: { queryType?: { name: string } | null; mutationType?: { name: string } | null; types?: GqlType[] };
   try { s = (JSON.parse(schemaBody) as { data?: { __schema?: typeof s } }).data?.__schema ?? {}; } catch { return []; }
   const types = new Map((s.types ?? []).map((t) => [t.name, t]));
@@ -102,6 +102,19 @@ export function graphqlArgClaims(schemaBody: string, url: string, opts: { mutati
     for (const f of (root ? types.get(root)?.fields : undefined) ?? []) {
       const sel = selection(f.type);
       if (sel === null) continue;
+      // Out-of-band SSRF: an argument that takes a URL, or a host and a port taken apart (usual names, any API).
+      const args = new Map((f.args ?? []).map((a) => [a.name.toLowerCase(), a]));
+      const argStr = (n: string) => named(args.get(n)?.type)?.name;
+      const urlArg = (f.args ?? []).find((a) => named(a.type)?.name === "String" && /^(url|uri|link|href|endpoint|callback|webhook|target|src|source|image_?url|avatar_?url|feed|remote)$/i.test(a.name));
+      if (opts.ssrf && /^[_A-Za-z]\w*$/.test(f.name)) {
+        if (urlArg) claims.push({ id: `auto:gql:${claims.length}`, class: "explore.ssrf", source: "check", detail: { url, gql: `${op} { ${f.name}(${urlArg.name}: "__CALLBACK_URL__")${sel} }` } });
+        else if (argStr("host") === "String" && args.has("port")) {
+          const parts = [`${args.get("host")!.name}: "__CALLBACK_HOST__"`, `${args.get("port")!.name}: ${argStr("port") === "String" ? '"__CALLBACK_PORT__"' : "__CALLBACK_PORT__"}`];
+          if (argStr("path") === "String") parts.push(`${args.get("path")!.name}: "/__INJECT__"`);
+          if (argStr("scheme") === "String") parts.push(`${args.get("scheme")!.name}: "http"`);
+          claims.push({ id: `auto:gql:${claims.length}`, class: "explore.ssrf", source: "check", detail: { url, gql: `${op} { ${f.name}(${parts.join(", ")})${sel} }` } });
+        }
+      }
       for (const a of f.args ?? []) {
         if (named(a.type)?.name !== "String" || !/^[_A-Za-z]\w*$/.test(a.name) || !/^[_A-Za-z]\w*$/.test(f.name)) continue;
         claims.push({ id: `auto:gql:${claims.length}`, class: "explore.injection", source: "check", detail: { url, gql: `${op} { ${f.name}(${a.name}: "__INJECT__")${sel} }`, param: `${f.name}.${a.name}` } });

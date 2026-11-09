@@ -63,3 +63,16 @@ test("graphqlArgClaims: every String argument of a root field becomes an injecti
   assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).length, 3);
   assert.deepEqual(graphqlArgClaims("not json", "http://x/graphql", { mutations: true }), []);
 });
+
+test("graphqlArgClaims: a URL argument, or a host and port taken apart, becomes an out-of-band SSRF claim", async () => {
+  const { graphqlArgClaims } = await import("./autoprobe.js");
+  const t = (kind: string, name: string | null, ofType: unknown = null) => ({ kind, name, ofType });
+  const S = t("SCALAR", "String"), I = t("SCALAR", "Int");
+  const schema = JSON.stringify({ data: { __schema: { queryType: { name: "Q" }, mutationType: { name: "M" }, types: [
+    { name: "Q", kind: "OBJECT", fields: [{ name: "preview", type: S, args: [{ name: "url", type: S }] }] },
+    { name: "M", kind: "OBJECT", fields: [{ name: "importFrom", type: S, args: [{ name: "host", type: S }, { name: "port", type: I }, { name: "path", type: S }] }] },
+  ] } } });
+  const ssrf = graphqlArgClaims(schema, "http://x/graphql", { mutations: true, ssrf: true }).filter((c) => c.class === "explore.ssrf").map((c) => c.detail.gql);
+  assert.deepEqual(ssrf, ['query { preview(url: "__CALLBACK_URL__") }', 'mutation { importFrom(host: "__CALLBACK_HOST__", port: __CALLBACK_PORT__, path: "/__INJECT__") }']);
+  assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).filter((c) => c.class === "explore.ssrf").length, 0);
+});

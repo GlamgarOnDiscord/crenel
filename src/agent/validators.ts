@@ -913,9 +913,9 @@ const exploreSsrfValidator: Validator = {
   async validate(claim, env) {
     const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; gql?: unknown; as?: unknown; callbackHost?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
-    const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
+    const gql = typeof d.gql === "string" && /__INJECT__|__CALLBACK_URL__/.test(d.gql) ? d.gql : null;
     if (typeof d.url !== "string") return no("need detail.url");
-    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
+    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ or __CALLBACK_URL__ (GraphQL)");
     const url0 = resolveExploreUrl(d.url, env.stagingUrl);
     if (!url0) return no("not an http(s) URL");
     const opts = (env.options.explore as { ssrfCallbackHost?: string; ssrfCallbackPort?: number } | undefined) ?? {};
@@ -930,9 +930,13 @@ const exploreSsrfValidator: Validator = {
       // Single URL parameter: inject the whole callback URL (validator composes it).
       // Structured/GraphQL (host/port/path split): the model built the callback from
       // the advertised host:port and left __INJECT__ as the nonce slot, so inject the nonce.
+      // A GraphQL template may name the listener's parts: __CALLBACK_URL__ (the whole URL), or __CALLBACK_HOST__ and
+      // __CALLBACK_PORT__ for an API that takes them apart; the validator fills them, the claim never chooses a host.
+      const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+      const filled = gql ? gql.replace(/__CALLBACK_URL__/g, cb.url(n)).replace(/__CALLBACK_HOST__/g, authority).replace(/__CALLBACK_PORT__/g, String(cb.port)) : null;
       const payload = gql ? n : cb.url(n);
       const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
-      const req = gql ? { ...injectGraphql(d.url, gql, payload), as: actor } : injectParam(base, d.param as string, payload, where);
+      const req = filled ? { ...injectGraphql(d.url, filled, payload), as: actor } : injectParam(base, d.param as string, payload, where);
       // The server often BLOCKS on the outbound SSRF request, so sendAs may time
       // out or error — the callback can still have fired. Fire-and-forget, then
       // poll the listener regardless of the request's own outcome.
