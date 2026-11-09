@@ -29,6 +29,7 @@ import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems
 import { ownerFieldValues, tokenIdentity } from "./markers.js";
 import { crossWriteOracle } from "./xwrite.js";
 import { userEnumOracle } from "./userenum.js";
+import { privEscOracle } from "./privesc.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -1326,6 +1327,60 @@ const exploreUserEnumValidator: Validator = {
   },
 };
 
+/* ---------------- explore.priv-escalation ---------------- */
+// An account's access flips from denied to allowed after a write it made itself.
+// The model names a gate the account cannot reach and a write on its own object
+// (role/isAdmin/plan). The gate must be stably denied for the account and refused
+// to anonymous (a real boundary); after the write it must answer. Writes to the
+// account's own object only, on the staging origin; active mode; the field is put
+// back afterwards. privEscOracle decides (privesc.ts). See privesc.test.ts.
+const exploreePrivEscValidator: Validator = {
+  class: "explore.priv-escalation",
+  name: "privilege escalation (gate denied, then allowed after the account's own write)",
+  async validate(claim, env) {
+    const d = claim.detail as { updateUrl?: unknown; update?: unknown; field?: unknown; value?: unknown; gateUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown };
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    if (!env.scope.allowActiveTesting) return no("privilege escalation writes the account's object: needs allowActiveTesting");
+    if (typeof d.updateUrl !== "string" || typeof d.gateUrl !== "string") return no("need detail.updateUrl (the self-update endpoint) and detail.gateUrl (an endpoint the account cannot reach)");
+    if (typeof d.field !== "string" || !d.field || d.value === undefined) return no("need detail.field and detail.value (the privilege field the write sets)");
+    const upUrl = resolveExploreUrl(d.updateUrl, env.stagingUrl), gate = resolveExploreUrl(d.gateUrl, env.stagingUrl);
+    if (!upUrl || !gate) return no("not http(s) URLs");
+    if (!env.stagingUrl || new URL(upUrl).origin !== new URL(env.stagingUrl).origin) return no("the write goes only to the declared stagingUrl's origin");
+    if (!env.scope.isHostAllowed(gate)) return no("off-scope gate host");
+    const actor = parseActor(d.as);
+    if (!actor || actor === "anon") return no("need detail.as: the account that escalates its own privilege");
+    if (!actorToken(env.options, actor)) return no(`no token configured for account ${actor.toUpperCase()}`);
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : "PUT";
+    if (!["POST", "PUT", "PATCH"].includes(method)) return no(`method ${method}: a self-update is POST, PUT or PATCH`);
+    const bodyType: "json" | "form" = d.bodyType === "form" ? "form" : "json";
+    const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
+    const gateAs = async (a: Actor | undefined) => { const r = await sendAs({ url: gate, method: "GET", as: a }, a, env, gate); return { status: r.status, body: r.body }; };
+    const writeField = async (v: unknown) => { const { body, contentType } = buildBody(base, { [d.field as string]: v }, bodyType); await sendAs({ url: upUrl, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl); };
+    let before1, before2, gateAnon, after, restore = "";
+    try {
+      // Read the field first so it can be restored; refuse if the account cannot read its own object.
+      const own = await sendAs({ url: upUrl, method: "GET", as: actor }, actor, env, upUrl);
+      const v0 = ok2xx(own.status) ? fieldRaw(own.body, d.field) : undefined;
+      before1 = await gateAs(actor);
+      before2 = await gateAs(actor);
+      gateAnon = await gateAs("anon");
+      // Only write once the gate is shown to be a boundary this account is behind: avoids a needless mutation.
+      if (!(before1.status === before2.status && (before1.status === 401 || before1.status === 403 || before1.status === 404)) || ok2xx(gateAnon.status)) {
+        after = before1;
+      } else {
+        await writeField(d.value);
+        after = await gateAs(actor);
+        if (v0 !== undefined) { try { await writeField(v0); restore = `; "${d.field}" restored to ${String(v0)}`; } catch { restore = `; WARNING: could not restore "${d.field}" to ${String(v0)}`; } }
+        else restore = `; WARNING: "${d.field}" was not in the account's read, left as written (${JSON.stringify(d.value)})`;
+      }
+    } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = privEscOracle({ gateBefore1: before1, gateBefore2: before2, gateAfter: after, gateAnon });
+    const evidence: Evidence = { request: `${method} ${pathOnly(upUrl)} as ${actor.toUpperCase()} with {"${d.field}": ${JSON.stringify(d.value)}}, gate GET ${pathOnly(gate)}`, response: r.reason, control: `${actor.toUpperCase()} gate before: HTTP ${before1.status}, ${before2.status}; anonymous gate: HTTP ${gateAnon.status}; after: HTTP ${after.status}` };
+    if (r.verdict === "escalated") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Privilege escalation: account ${actor.toUpperCase()} at ${pathOnly(upUrl)}: ${r.reason}${restore}`, evidence, ceiling: "critical" };
+    return no(r.reason + restore, evidence);
+  },
+};
+
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two
 // distinct attacker origins and the oracle decides; a read-only GET, no active
@@ -1537,7 +1592,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

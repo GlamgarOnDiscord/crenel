@@ -800,3 +800,36 @@ test("user-enum: a login that says 'no such user' vs 'wrong password' is proven;
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
 });
+
+test("priv-escalation: A's access to an admin gate flips from 403 to 200 after A sets its own role -> proven; an enforced gate stays denied", async () => {
+  for (const vulnerable of [true, false]) {
+    const roles: Record<string, string> = { a: "user" };
+    const srv = createServer((req, res) => {
+      const who = req.headers.authorization === "Bearer tok-a" ? "a" : null;
+      const json = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+      if (req.url === "/api/me" && req.method === "GET") return who ? json(200, { role: roles[who] }) : json(401, {});
+      if (req.url === "/api/me" && (req.method === "PUT" || req.method === "PATCH")) {
+        if (!who) return json(401, {});
+        let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => { let b: any = {}; try { b = JSON.parse(c); } catch {} if (typeof b.role === "string") roles[who] = b.role; json(200, { role: roles[who] }); });
+        return;
+      }
+      if (req.url === "/api/admin/stats") {
+        // The gate: admin only. Vulnerable server trusts the (client-set) role; enforced server never lets 'a' in.
+        if (!who) return json(401, {});
+        const isAdmin = vulnerable ? roles[who] === "admin" : false;
+        return isAdmin ? json(200, { users: 99 }) : json(403, {});
+      }
+      return json(404, {});
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "crenel-pe-"));
+    try {
+      const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [], options: { "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
+      const v = await validateClaim(claim("explore.priv-escalation", { updateUrl: "/api/me", update: {}, field: "role", value: "admin", gateUrl: "/api/admin/stats", as: "a" }), env);
+      assert.equal(v.state, vulnerable ? "proven" : "unproven", v.reason);
+      if (vulnerable) { assert.equal(v.ceiling, "critical"); assert.match(v.reason, /gained access/); }
+      assert.equal(roles.a, "user", "the role is restored to user afterwards");
+    } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
