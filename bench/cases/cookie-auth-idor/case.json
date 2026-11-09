@@ -1,0 +1,17 @@
+{
+  "title": "Cookie-session IDOR: any logged-in user reads another tenant's note",
+  "type": "live",
+  "config": {
+    "options": { "authz-matrix": {
+      "resources": [ { "name": "note", "path": "/notes/:id", "methods": ["GET"] } ],
+      "accounts": {
+        "a": { "label": "user A", "cookie": "session=a-valid-session" },
+        "b": { "label": "user B", "marker": "b@tenant.example", "owns": { "note": ["note_b_1"] } }
+      }
+    } }
+  },
+  "mustFind": [
+    { "id": "cookie-idor", "check": "authz", "text": "note_b_1", "state": "proven", "minSeverity": "high", "why": "A logged-in A, authenticating by session cookie, reads B's note (carrying B's marker) while a non-existent id 404s." }
+  ],
+  "mustNotFlag": []
+}

@@ -47,6 +47,11 @@ interface AccountSpec {
   label: string;
   /** Bearer token for this test account (staging only). */
   token?: string;
+  /** Session-cookie auth: the raw Cookie header value, for apps that authenticate
+   * by cookie session (Flask-Login, Django, Rails, PHP) rather than a bearer. */
+  cookie?: string;
+  /** Any other auth headers this account needs (a custom scheme, an API key header). */
+  headers?: Record<string, string>;
   /** Resource ids that belong to this account, keyed by resource name. */
   owns?: Record<string, string[]>;
   /** A string only B's objects contain (an email, an org id): proof the body is B's. */
@@ -57,6 +62,17 @@ interface AuthzOptions {
   resources?: ResourceSpec[];
   accounts?: { a?: AccountSpec; b?: AccountSpec; c?: AccountSpec };
 }
+
+/** The request headers that carry this account's identity, from any of the three
+ * generic auth shapes (bearer token, session cookie, custom headers). Empty for
+ * an anonymous caller. No target specifics: the values are operator config. */
+type Auth = { token?: string; cookie?: string; headers?: Record<string, string> };
+const authHeaders = (a?: Auth): Record<string, string> =>
+  a ? { ...(a.token ? { authorization: `Bearer ${a.token}` } : {}), ...(a.cookie ? { cookie: a.cookie } : {}), ...(a.headers ?? {}) } : {};
+const hasAuth = (a?: Auth): boolean => !!(a && (a.token || a.cookie || (a.headers && Object.keys(a.headers).length > 0)));
+/** A redacted curl snippet for the replay hint, matching the auth shape used. */
+const replayAuth = (a: Auth | undefined, key: string): string =>
+  a?.token ? ` -H 'authorization: Bearer <${key.toUpperCase()}_TOKEN>'` : a?.cookie ? ` -H 'cookie: <${key.toUpperCase()}_SESSION>'` : hasAuth(a) ? ` -H '<${key.toUpperCase()}_AUTH>'` : "";
 
 
 export const authzMatrix: Check = {
@@ -93,8 +109,8 @@ export const authzMatrix: Check = {
     const ownerFieldResources = resources.filter(
       (r) => !r.public && r.ownerField && (r.probeIds?.length ?? 0) > 0,
     );
-    const canProbe = !!ctx.stagingUrl && !!cfg.accounts?.a?.token && cases.length > 0;
-    const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (!!cfg.accounts?.a?.token || ownerFieldResources.some((r) => r.gql));
+    const canProbe = !!ctx.stagingUrl && hasAuth(cfg.accounts?.a) && cases.length > 0;
+    const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (hasAuth(cfg.accounts?.a) || ownerFieldResources.some((r) => r.gql));
 
     if (!canProbe && !canOwnerField) {
       // Offline: emit one finding that carries the generated test as its proof-of-intent.
@@ -130,7 +146,8 @@ export const authzMatrix: Check = {
     const markers = [accounts.b?.marker ?? ""].filter(Boolean);
     // Distinct contexts (Teycir's guard): if A and B are the same account, every
     // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
-    const same = sameIdentity(accounts.a?.token, accounts.b?.token);
+    const same = sameIdentity(accounts.a?.token, accounts.b?.token)
+      || (accounts.a?.cookie && accounts.a.cookie === accounts.b?.cookie ? "use the same session cookie" : null);
     if (same) {
       ctx.log(`authz-matrix: accounts A and B are the same identity (${same}), live probe skipped`);
       findings.push({
@@ -141,8 +158,8 @@ export const authzMatrix: Check = {
       });
       return findings;
     }
-    const get = (url: string, token?: string) =>
-      safeFetch(url, ctx.scope, { method: "GET", headers: token ? { authorization: `Bearer ${token}` } : {} })
+    const get = (url: string, auth?: Auth) =>
+      safeFetch(url, ctx.scope, { method: "GET", headers: authHeaders(auth) })
         .then((r) => ({ status: r.status, body: r.body }));
 
     // Same oracle as the agent's validator: a 200 is not proof. The attacker's
@@ -150,10 +167,10 @@ export const authzMatrix: Check = {
     // not exist) must not answer the same way. Each case is tried with A's
     // token, C's if declared, then with no token at all: a route can refuse a
     // wrong token and still serve an anonymous caller.
-    const actors: { key: "a" | "c" | "anon"; who: string; token?: string }[] = [
-      { key: "a", who: "account A's token", token: accounts.a?.token },
-      ...(accounts.c?.token ? [{ key: "c" as const, who: "account C's token (another tenant)", token: accounts.c.token }] : []),
-      { key: "anon", who: "no token at all" },
+    const actors: { key: "a" | "c" | "anon"; who: string; auth?: Auth }[] = [
+      { key: "a", who: "account A's credentials", auth: accounts.a },
+      ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c }] : []),
+      { key: "anon", who: "no credentials at all" },
     ];
     const ownerBodies: string[] = [];
     for (const c of cases) {
@@ -162,17 +179,17 @@ export const authzMatrix: Check = {
       const controlUrl = base + c.resource.path.replace(":id", `crenel-nonexistent-${randomBytes(6).toString("hex")}`);
       ctx.scope.assertUrlAllowed(url);
       try {
-        const owner = accounts.b?.token ? await get(url, accounts.b.token) : undefined;
+        const owner = hasAuth(accounts.b) ? await get(url, accounts.b) : undefined;
         if (owner && owner.status >= 200 && owner.status < 300) ownerBodies.push(owner.body);
         for (const actor of actors) {
-          const attacker = await get(url, actor.token);
-          const control = await get(controlUrl, actor.token);
+          const attacker = await get(url, actor.auth);
+          const control = await get(controlUrl, actor.auth);
           const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
           if (o.verdict === "denied") continue;
           // A leak must hold on two more replays: a flaky route (a cache, a race)
           // is a lead, not a proof.
-          const proven = o.verdict === "leak" && await stableLeak(() => get(url, actor.token), owner, control, markers);
-          const auth = actor.token ? ` -H 'authorization: Bearer <${actor.key.toUpperCase()}_TOKEN>'` : "";
+          const proven = o.verdict === "leak" && await stableLeak(() => get(url, actor.auth), owner, control, markers);
+          const auth = replayAuth(actor.auth, actor.key);
           findings.push({
             id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}${actor.key === "a" ? "" : `:${actor.key}`}`,
             check: "authz-matrix",
@@ -209,17 +226,17 @@ export const authzMatrix: Check = {
     // not own. Covers objects whose body names its owner (UserId, owner_id, ...).
     const aOwns = accounts.a?.owns ?? {};
     const field = (r: ResourceSpec) => r.ownerField!;
-    const aToken = accounts.a?.token;
+    const aAuth = hasAuth(accounts.a) ? accounts.a : undefined;
     // Read a resource by id over its transport: a GraphQL POST (object taken from
     // under `data`) when `gql` is set, else a REST GET. The attacker is A when a
     // token is configured, otherwise anonymous (unauthenticated APIs like DVGA).
     const readOwner = async (r: ResourceSpec, idOrRaw: string, raw = false): Promise<{ status: number; body: string }> => {
       if (r.gql) {
         const q = r.gql.replace(/:id/g, raw ? idOrRaw : JSON.stringify(idOrRaw).slice(1, -1));
-        const res = await safeFetch(base + r.path, ctx.scope, { method: "POST", headers: { "content-type": "application/json", ...(aToken ? { authorization: `Bearer ${aToken}` } : {}) }, body: JSON.stringify({ query: q }) }).then((x) => ({ status: x.status, body: x.body }));
+        const res = await safeFetch(base + r.path, ctx.scope, { method: "POST", headers: { "content-type": "application/json", ...authHeaders(aAuth) }, body: JSON.stringify({ query: q }) }).then((x) => ({ status: x.status, body: x.body }));
         try { const j = JSON.parse(res.body); const obj = j?.data && typeof j.data === "object" ? Object.values(j.data)[0] : undefined; return { status: obj == null ? 404 : res.status, body: JSON.stringify(obj ?? null) }; } catch { return res; }
       }
-      return get(base + r.path.replace(":id", raw ? idOrRaw : encodeURIComponent(idOrRaw)), aToken);
+      return get(base + r.path.replace(":id", raw ? idOrRaw : encodeURIComponent(idOrRaw)), aAuth);
     };
     for (const r of ownerFieldResources) {
       const targetIds = (r.probeIds ?? []).filter((id) => !provenIds.has(`${r.name}:${id}`));
@@ -241,7 +258,7 @@ export const authzMatrix: Check = {
           const val = ownerValue(res.body, field(r));
           if (val !== undefined) seen.push({ id, url, status: res.status, val });
         }
-        const caller = aToken ? "account A" : "an unauthenticated caller";
+        const caller = aAuth ? "account A" : "an unauthenticated caller";
         const verb = r.gql ? "a GraphQL query" : "a GET";
         const prove = (id: string, url: string, status: number, reason: string) => {
           provenIds.add(`${r.name}:${id}`);
@@ -253,7 +270,7 @@ export const authzMatrix: Check = {
             remediation: `Enforce the ownership check at the data layer for ${r.name}, comparing ${field(r)} to the caller's identity, and add the generated regression test.`,
             proof: {
               method: `live owner-id differential on staging: targets read as ${caller} over ${r.gql ? "GraphQL" : "REST"}, their owner-id field, negative control` + (selfVal !== undefined ? ", the attacker's own object" : ""),
-              replay: r.gql ? `POST ${base}${r.path} with query ${r.gql.replace(":id", id)}` : `curl -i${aToken ? " -H 'authorization: Bearer <A_TOKEN>'" : ""} '${url}'`,
+              replay: r.gql ? `POST ${base}${r.path} with query ${r.gql.replace(":id", id)}` : `curl -i${replayAuth(aAuth, "a")} '${url}'`,
               evidence: `HTTP ${status}; control ${control.status}. ${reason}`,
             },
             regressionHint: renderTestFile([r]),
@@ -292,15 +309,15 @@ export const authzMatrix: Check = {
         const controlUrl = base + d.resource.path.replace(":id", `crenel-nonexistent-${randomBytes(6).toString("hex")}`);
         try {
           ctx.scope.assertUrlAllowed(url);
-          const owner = await get(url, accounts.b.token);
+          const owner = await get(url, accounts.b);
           if (owner.status < 200 || owner.status >= 300) continue; // not readable by B: not provably B's
           const anon = await get(url);
           if (anon.status >= 200 && anon.status < 300 && anon.body === owner.body) continue; // public object
           for (const actor of actors.filter((x) => x.key !== "anon")) {
-            const attacker = await get(url, actor.token);
-            const control = await get(controlUrl, actor.token);
+            const attacker = await get(url, actor.auth);
+            const control = await get(controlUrl, actor.auth);
             const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });
-            if (o.verdict !== "leak" || !(await stableLeak(() => get(url, actor.token), owner, control, markers))) continue;
+            if (o.verdict !== "leak" || !(await stableLeak(() => get(url, actor.auth), owner, control, markers))) continue;
             findings.push({
               id: `authz-matrix:${d.resource.name}:GET:${d.id}${actor.key === "a" ? "" : `:${actor.key}`}:discovered`,
               check: "authz-matrix",
@@ -312,7 +329,7 @@ export const authzMatrix: Check = {
               remediation: `Enforce the ownership check on ${d.resource.name}, and declare ${d.id} (or ids like it) under accounts.b.owns so the regression test covers it.`,
               proof: {
                 method: "live cross-tenant replay of an id discovered in the owner's response: owner baseline, anonymous check, attacker, negative control",
-                replay: `curl -i -H 'authorization: Bearer <${actor.key.toUpperCase()}_TOKEN>' '${url}'`,
+                replay: `curl -i${replayAuth(actor.auth, actor.key)} '${url}'`,
                 evidence: `HTTP ${attacker.status}; owner ${owner.status}; anonymous ${anon.status}; control ${control.status}. ${o.reason}`,
               },
               regressionHint: renderTestFile([d.resource]),

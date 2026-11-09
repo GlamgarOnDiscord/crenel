@@ -211,6 +211,14 @@ into CI). With a `stagingUrl`, two tokens, and active testing enabled for an
 owned host, it replays each cross-tenant request and reports any that did not
 return 401/403/404 as a **proven** broken-authorization finding.
 
+**How each account authenticates.** A token is sent as `Authorization: Bearer`,
+but many apps are not bearer-based. An account may instead carry `cookie` (a raw
+`Cookie` header value, for session apps: Flask-Login, Django, Rails, PHP) or
+`headers` (any other auth header, e.g. an API-key header). The three combine, and
+the owner-marker proof needs no credentials for B at all — only a `marker` string
+that none but B's object contains. So a session-cookie SaaS is covered: declare
+account A's session cookie and B's marker, and a logged-in A reaching B's object
+is proven just as a bearer API would be.
 
 **From an OpenAPI file.** `options.authz-matrix.openapi: api.yaml` (path relative
 to the config) adds every GET route with exactly one path parameter as a

@@ -86,6 +86,41 @@ test("live probe: B's object returned to A is proven; a 403 or a soft 404 is not
   }
 });
 
+test("live probe: cookie-session auth + an owner marker proves the leak; the anonymous caller is redirected, not a finding", async () => {
+  const http = await import("node:http");
+  // A Flask-Login-style app: /draft/<id> serves B's object (carrying the marker
+  // "admin_draft") to any caller with a valid session cookie — broken authz —
+  // 302-redirects a caller with no cookie to the login page, and 404s an id that
+  // does not exist. No bearer token anywhere: the identity is a session cookie.
+  const server = http.createServer((req, res) => {
+    const cookie = req.headers.cookie ?? "";
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end("not found"); }
+    if (!cookie.includes("session=")) { res.writeHead(302, { location: "/login" }); return res.end(); }
+    res.writeHead(200); res.end('<input name="title" value="admin_draft"><textarea>flag{x}</textarea>');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true });
+    const options = {
+      "authz-matrix": {
+        resources: [{ name: "draft", path: "/draft/:id", methods: ["GET"] }],
+        accounts: { a: { label: "user", cookie: "session=a-valid-user-session" }, b: { label: "admin", marker: "admin_draft", owns: { draft: ["1"] } } },
+      },
+    };
+    const found = await authzMatrix.run({ scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {} });
+    const proven = found.filter((f) => f.state === "proven");
+    assert.equal(proven.length, 1, "A's cookie session reaching B's draft is proven once");
+    const p = proven[0]!;
+    assert.match(p.id, /:draft:GET:1$/);
+    assert.equal(p.severity, "critical");
+    assert.match(p.proof?.replay ?? "", /cookie: <A_SESSION>/, "the replay hint reflects cookie auth, not a bearer");
+    assert.ok(!found.some((f) => f.id.endsWith(":anon") && f.state === "proven"), "the redirected anonymous caller is not proven");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("discoverIds finds ids shaped like B's declared ones (prefix or UUID), nothing for undeclared shapes", async () => {
   const { discoverIds } = await import("./authz-matrix.js");
   const resources = [{ name: "file", path: "/f/:id" }, { name: "user", path: "/u/:id" }, { name: "note", path: "/n/:id" }];
