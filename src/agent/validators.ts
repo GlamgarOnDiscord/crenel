@@ -30,6 +30,7 @@ import { ownerFieldValues, tokenIdentity } from "./markers.js";
 import { crossWriteOracle } from "./xwrite.js";
 import { userEnumOracle } from "./userenum.js";
 import { privEscOracle } from "./privesc.js";
+import { bflaOracle } from "./bfla.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
@@ -89,7 +90,7 @@ const ok2xx = (s: number) => s >= 200 && s < 300;
 
 /* ---------------- authz.cross-tenant ---------------- */
 
-export interface AuthzAccount { token?: string; owns?: Record<string, string[]>; marker?: string }
+export interface AuthzAccount { token?: string; owns?: Record<string, string[]>; marker?: string; privileged?: boolean }
 export interface AuthzResource { name: string; path: string; methods?: string[]; public?: boolean; ownerField?: string }
 export interface AuthzOptions {
   resources?: AuthzResource[];
@@ -1423,6 +1424,53 @@ const exploreDataExposureValidator: Validator = {
   },
 };
 
+/* ---------------- explore.bfla ---------------- */
+// Function-level authorization: a normal account reaches a function meant for a
+// privileged one. "Privileged" is DECLARED in the config (accounts.<x>.privileged:
+// true) — it cannot be guessed — so this proves only the mechanism. P (privileged)
+// and the normal account call the same function; anonymous is the boundary; a
+// nonsense variant is the control. bflaOracle decides (bfla.ts). A write needs
+// active mode. See bfla.test.ts.
+const exploreBflaValidator: Validator = {
+  class: "explore.bfla",
+  name: "function-level auth (a normal account reaches a privileged function)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; privileged?: unknown; normal?: unknown; method?: unknown; body?: unknown };
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    if (typeof d.url !== "string") return no("need detail.url (the privileged function)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const accounts = ((env.options["authz-matrix"] ?? {}) as AuthzOptions).accounts ?? {};
+    const priv = parseActor(d.privileged);
+    const normal = parseActor(d.normal) ?? "a";
+    // The privileged account must be flagged in the config, or there is no declared boundary to prove a crossing of.
+    const flagged = (["a", "b", "c"] as const).filter((k) => accounts[k]?.privileged);
+    const P = priv && priv !== "anon" && accounts[priv]?.privileged ? priv : flagged[0];
+    if (!P) return no("no account is flagged accounts.<x>.privileged in the config: declare which account the function is meant for");
+    if (P === normal) return no("the privileged and normal accounts are the same");
+    if (normal === "anon") return no("the normal account must be a configured account (anonymous is the boundary control)");
+    if (!actorToken(env.options, P) || !actorToken(env.options, normal)) return no(`tokens for ${P.toUpperCase()} and ${normal.toUpperCase()} are needed`);
+    const method = typeof d.method === "string" ? d.method.toUpperCase() : "GET";
+    const isRead = method === "GET" || method === "HEAD";
+    if (!isRead && !env.scope.allowActiveTesting) return no(`a ${method} function call changes state: needs allowActiveTesting`);
+    const body = !isRead && typeof d.body === "string" ? d.body : undefined;
+    const headers = body ? { "content-type": "application/json" } : undefined;
+    const call = async (a: Actor | undefined, u = url) => { const r = await sendAs({ url: u, method, headers, body, as: a }, a, env, u); return { status: r.status, body: r.body }; };
+    let rP, rN, rAnon, rCtl;
+    try {
+      rP = await call(P);
+      rAnon = await call("anon");
+      rCtl = await call(normal, controlUrl(url, typeof (d as { id?: unknown }).id === "string" ? (d as { id: string }).id : undefined));
+      rN = await call(normal);
+    } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = bflaOracle({ isRead, privileged: rP, normal: rN, anon: rAnon, control: rCtl });
+    const evidence: Evidence = { request: `${method} ${pathOnly(url)} as ${normal.toUpperCase()} (normal) vs ${P.toUpperCase()} (privileged)`, response: `HTTP ${rN.status}\n${excerpt(rN.body)}`, sha256: sha(rN.body), control: `privileged ${P.toUpperCase()} -> HTTP ${rP.status}; anonymous -> HTTP ${rAnon.status}; nonsense variant as ${normal.toUpperCase()} -> HTTP ${rCtl.status}` };
+    if (r.verdict === "bfla") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Broken function-level authorization at ${pathOnly(url)}: ${r.reason}`, evidence, ceiling: "high" };
+    return no(r.reason, evidence);
+  },
+};
+
 /* ---------------- explore.cors ---------------- */
 // Reflects an arbitrary Origin with credentials. The validator sends its OWN two
 // distinct attacker origins and the oracle decides; a read-only GET, no active
@@ -1634,7 +1682,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator, exploreDataExposureValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator, exploreDataExposureValidator, exploreBflaValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
