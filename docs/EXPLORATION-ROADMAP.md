@@ -17,7 +17,7 @@ So the gap closes on two tracks, and neither is overfitting (no target signature
 
 ## Track A — more generic validators (incremental)
 
-Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none, mass-assignment, CORS.
+Each is a pure oracle + a negative control, proving a mechanism, never a signature. Shipped: replay, cross-actor (with anonymous auto-escalation), secret, file-match, injection (SQLi, reflected XSS, template/command, **NoSQL**), SSRF, stored-XSS, DOM-XSS, LFI, JWT alg:none, mass-assignment, CORS, **open-redirect** (two-sentinel differential).
 
 Candidates next, with an honest oracle:
 - **business-logic / reuse** — the same coupon, credit, or invite accepted beyond its limit, proven by replay + a state re-read (active mode). Overlaps the existing `race` check; fold them.

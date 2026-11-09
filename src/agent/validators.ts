@@ -29,6 +29,7 @@ import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems
 import { massAssignOracle, buildBody } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
+import { redirectOracle, type RedirectResp } from "./redirect.js";
 import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
 
@@ -1094,6 +1095,46 @@ const exploreReuseValidator: Validator = {
   },
 };
 
+/* ---------------- explore.redirect ---------------- */
+// Open redirect: a parameter whose value becomes the redirect target. The
+// validator injects two distinct, unguessable sentinel hosts under .invalid and
+// redirectOracle proves it only when BOTH come back as the Location (3xx) or a
+// meta-refresh, so a route that always redirects to one fixed place, or an
+// allowlist that happens to permit one guess, cannot pass. Read-only: GETs on
+// the declared host, the redirect is read, never followed. Generic — no target
+// signature. See redirect.test.ts.
+const exploreRedirectValidator: Validator = {
+  class: "explore.redirect",
+  name: "open redirect (parameter becomes the redirect target)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const tmpl = d.url.includes("__INJECT__");
+    if (!tmpl && typeof d.param !== "string") return no("need detail.param (the redirect parameter) or __INJECT__ in detail.url");
+    const url0 = resolveExploreUrl(tmpl ? d.url.replace(/__INJECT__/g, "x") : d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url0)) return no("off-scope host");
+    const s1 = `crenel-redirect-${nonce("r1")}.invalid`, s2 = `crenel-redirect-${nonce("r2")}.invalid`;
+    const inject = (host: string): string | null => {
+      const sentinel = `https://${host}/landing`;
+      if (tmpl) return resolveExploreUrl((d.url as string).replace(/__INJECT__/g, encodeURIComponent(sentinel)), env.stagingUrl);
+      try { const u = new URL(url0); u.searchParams.set(d.param as string, sentinel); return u.toString(); } catch { return null; }
+    };
+    const u1 = inject(s1), u2 = inject(s2);
+    if (!u1 || !u2) return no("could not build the probe URL");
+    const probe = async (u: string): Promise<RedirectResp> => {
+      const r = await safeFetch(u, env.scope, { method: "GET", followRedirects: false, maxBytes: 64 * 1024 });
+      return { status: r.status, location: r.headers.get("location"), body: r.body };
+    };
+    let r1, r2;
+    try { r1 = await probe(u1); r2 = await probe(u2); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const v = redirectOracle({ reqUrl: u1, s1, r1, s2, r2 });
+    if (v.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Open redirect at ${pathOnly(url0)}: ${v.reason}`, evidence: { request: `GET ${pathOnly(u1)} (redirect read, not followed)`, response: v.reason }, ceiling: v.ceiling };
+    return no(v.reason);
+  },
+};
+
 /* ---------------- explore.graphql ---------------- */
 // GraphQL field suggestions enabled (schema disclosure even with introspection
 // off). Universal near-miss probes of __typename; a "Did you mean" answer proves
@@ -1200,7 +1241,7 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 
