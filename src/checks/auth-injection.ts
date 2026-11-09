@@ -16,8 +16,13 @@ import { sqliOracle, nosqlOracle, nonce } from "../agent/inject.js";
 interface AuthInjectEndpoint {
   /** Path or absolute URL of the auth/lookup endpoint. */
   url: string;
-  /** The field to inject (e.g. "email", "username"). */
-  field: string;
+  /** The field to inject (e.g. "email", "username"). Ignored when `gql` is set. */
+  field?: string;
+  /** GraphQL sink: a query string with __INJECT__ where the value goes, e.g.
+   * `{ pastes(filter: "__INJECT__") { id } }`. The payload is injected into the
+   * string argument; the same SQL oracle decides (error-based or bypass). NoSQL
+   * operator objects do not apply to a string argument, so they are skipped. */
+  gql?: string;
   /** Other body fields to send unchanged (e.g. {password:"x"}). */
   template?: Record<string, unknown>;
   /** HTTP method. Default POST. */
@@ -59,8 +64,12 @@ export const authInjection: Check = {
       const accounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string }> }).accounts ?? {};
       const token = ep.as ? accounts[ep.as]?.token : undefined;
       const authHeader: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+      const sink = ep.gql ? "gql-arg" : ep.field;
+      if (!sink) { ctx.log(`auth-injection: ${ep.url} needs a field or a gql sink`); continue; }
       const send = async (fieldVal: unknown, extra?: Record<string, unknown>) => {
-        const body = JSON.stringify({ ...(ep.template ?? {}), ...extra, [ep.field]: fieldVal });
+        const body = ep.gql
+          ? JSON.stringify({ query: ep.gql.replace(/__INJECT__/g, String(fieldVal).replace(/"/g, '\\"')) })
+          : JSON.stringify({ ...(ep.template ?? {}), ...extra, [ep.field!]: fieldVal });
         const r = await safeFetch(url, ctx.scope, { method, headers: { "content-type": "application/json", ...authHeader }, body, maxBytes: 256 * 1024 });
         return { status: r.status, body: r.body };
       };
@@ -74,33 +83,37 @@ export const authInjection: Check = {
           const v = sqliOracle({ baseline, truthy, falsy });
           if (v.verdict === "proven") { proof = v; break; }
         }
-        if (!proof && ep.nosql !== false) {
+        // NoSQL operator objects only make sense for a JSON field, not a string arg.
+        if (!proof && !ep.gql && ep.nosql !== false) {
           const truthy = await send({ $ne: benign });
           const falsy = await send({ $eq: benign });
           const v = nosqlOracle({ baseline, truthy, falsy });
           if (v.verdict === "proven") proof = v;
         }
-        if (!proof) { ctx.log(`auth-injection: ${ep.field} at ${ep.url} not injectable`); continue; }
+        if (!proof) { ctx.log(`auth-injection: ${sink} at ${ep.url} not injectable`); continue; }
         // Name the flaw by the proof's actual kind so a NoSQL finding never reads
         // as "SQL injection" (and vice-versa): the two are distinct weaknesses.
         const kind = proof.kind.toLowerCase().startsWith("nosql") ? "NoSQL injection" : "SQL injection";
+        const where = ep.gql ? `the GraphQL argument of ${ep.url}` : `the ${sink} field of ${ep.url}`;
         findings.push({
-          id: `auth-injection:${ep.field}:${ep.url}`,
+          id: `auth-injection:${sink}:${ep.url}`,
           check: "auth-injection",
-          title: `${kind} in ${ep.field} at ${ep.url} (${proof.kind})`,
+          title: `${kind} in ${sink} at ${ep.url} (${proof.kind})`,
           severity: "critical",
           state: "proven",
           location: url,
-          description: `The ${ep.field} field of ${ep.url} is injectable (${kind}): ${proof.reason}. An attacker bypasses authentication or the lookup filter.`,
-          remediation: `Use parameterized queries for ${ep.field}; never build the ${kind.startsWith("NoSQL") ? "document-store filter" : "SQL query"} by string concatenation, and reject operator objects where a scalar is expected.`,
+          description: `${where[0]!.toUpperCase() + where.slice(1)} is injectable (${kind}): ${proof.reason}. An attacker bypasses authentication or the lookup filter.`,
+          remediation: `Use parameterized queries for ${sink}; never build the ${kind.startsWith("NoSQL") ? "document-store filter" : "SQL query"} by string concatenation, and reject operator objects where a scalar is expected.`,
           proof: {
             method: "live differential on staging: benign baseline, always-true probe, always-false probe (control)",
-            replay: kind.startsWith("NoSQL")
-              ? `curl -i -X ${method} -H 'content-type: application/json' --data '{"${ep.field}":{"$gt":""}}' '${url}'`
-              : `curl -i -X ${method} -H 'content-type: application/json' --data '{"${ep.field}":"<benign>' OR '1'='1"}' '${url}'`,
+            replay: ep.gql
+              ? `POST ${url} with query ${ep.gql.replace(/__INJECT__/g, "<benign>' OR '1'='1")}`
+              : kind.startsWith("NoSQL")
+                ? `curl -i -X ${method} -H 'content-type: application/json' --data '{"${sink}":{"$gt":""}}' '${url}'`
+                : `curl -i -X ${method} -H 'content-type: application/json' --data '{"${sink}":"<benign>' OR '1'='1"}' '${url}'`,
             evidence: `baseline HTTP ${baseline.status}; ${proof.reason}`,
           },
-          regressionHint: `After deploy, an always-true probe in ${ep.field} at ${ep.url} must not be accepted where a benign value is denied.`,
+          regressionHint: `After deploy, an always-true probe in ${sink} at ${ep.url} must not be accepted where a benign value is denied.`,
         });
       } catch (err) {
         ctx.log(`auth-injection: ${ep.url} failed: ${(err as Error).message}`);

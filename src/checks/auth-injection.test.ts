@@ -78,3 +78,28 @@ test("auth-injection: a safe login (no bypass) stays unproven", async () => {
 test("auth-injection: without active mode the check refuses to probe", async () => {
   await assert.rejects(() => run(true, false));
 });
+
+test("auth-injection: a GraphQL string argument that errors on a quote is proven SQLi (error-based)", async () => {
+  // A resolver that concatenates the filter into SQL: a quote breaks it (error),
+  // a benign value does not. Mirrors DVGA pastes(filter:).
+  const srv = createServer((req, res) => {
+    let b = ""; req.on("data", (c) => (b += c));
+    req.on("end", () => {
+      const q = (() => { try { return JSON.parse(b).query as string; } catch { return ""; } })();
+      const arg = q.match(/filter:\s*"((?:[^"\\]|\\.)*)"/)?.[1] ?? "";
+      const json = (o: unknown) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
+      if (arg.includes("'")) return json({ errors: [{ message: "(sqlite3.OperationalError) near \"'\": syntax error" }] });
+      return json({ data: { pastes: [] } });
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as import("node:net").AddressInfo).port}`;
+  try {
+    const f = await authInjection.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: ".", stagingUrl: base, log: () => {},
+      options: { "auth-injection": { enabled: true, endpoints: [{ url: "/graphql", method: "POST", gql: '{ pastes(filter: "__INJECT__") { id } }' }] } },
+    });
+    assert.equal(f.filter((x) => x.state === "proven").length, 1);
+    assert.match(f[0]!.title, /SQL injection/);
+  } finally { srv.close(); }
+});
