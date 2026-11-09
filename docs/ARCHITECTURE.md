@@ -68,7 +68,7 @@ no callback, so it is never proven (at best a lead, which never gates CI).
 | `explore.dom-xss` | The page's own script runs the injected payload | real execution in headless Chromium: `alert(nonce)` must fire |
 | `explore.lfi` | Path traversal reading a system file | file signature (`/etc/passwd` or `win.ini` content) over several traversal encodings |
 | `explore.jwt-none` | A forged unsigned `alg:none` token is accepted | differential: accepted where the anonymous request is denied |
-| `explore.mass-assignment` | A body field is accepted and persisted by the update (whether the client should be able to set it is the model's reading) | differential on the actor's own object (its marker in the read, not what anonymous gets), writes only to the staging origin with POST/PUT/PATCH: the re-read shows the injected value, a control update without the field leaves it exactly unchanged; the field is restored afterwards (active mode) |
+| `explore.mass-assignment` | A body field is accepted and persisted by the update (whether the client should be able to set it is the model's reading) | differential on the actor's own object (its marker in the read, not what anonymous gets), writes only to the staging origin with POST/PUT/PATCH: the re-read shows the injected value, a control update without the field leaves it exactly unchanged; the field is restored afterwards. Create mode (`mode: "create"`): an object created with the field reads back the injected value while one created without it reads back the default (active mode) |
 | `explore.cors` | CORS reflects any origin with credentials | differential: two distinct attacker origins are both reflected into `Access-Control-Allow-Origin` with the exact `Allow-Credentials: true`, or `Access-Control-Allow-Origin: null` with credentials on both (a sandboxed iframe); a wildcard or a single reflected origin is only a lead |
 | `explore.reuse` | A single-use artifact (coupon, credit, invite) applied more than once | differential: the same application succeeds twice while an invalid artifact is rejected (active mode) |
 | `explore.redirect` | A parameter whose value becomes the redirect target (open redirect) | differential: two distinct unguessable sentinel hosts under `.invalid` are both reflected into the redirect (3xx `Location` or a meta-refresh), read without following; a route that always redirects to one fixed place, or an allowlist that permits only one guess, is never proven (read-only) |
@@ -88,6 +88,14 @@ token but no declared `marker`, the exploration first reads an identity endpoint
 with a letter or 8+ digits, absent from every other account's read and from the
 anonymous one (`src/agent/markers.ts`). It is read-only and gated, and a
 declared marker always wins. Without either, those claims stay leads.
+
+**Ownership without a marker.** `explore.cross-actor` with no marker rests on "the
+attacker gets the owner's own body". That proves a cross-account read only for a
+URL that names one object (a collection or a "my …" route gives every caller their
+own scope) and for an object shown to be the owner's: an owner field (`UserId`,
+`owner_id`, `createdBy`, …) holding the owner's id from its token, or the owner's
+own account record. An object every account may read (a catalog behind login)
+stays a lead.
 
 **Funnel.** `explore.end` reports, per claim class, how many claims were
 submitted and proven and where the rest stopped (`scope`, `budget`, `gate`,
