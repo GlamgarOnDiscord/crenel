@@ -331,7 +331,10 @@ test("explore.jwt-none proves broken JWT verification, denies a server that reje
     const parts=auth.split(".");
     if(parts.length<2){res.writeHead(401);res.end("no token");return;}
     let alg="";try{alg=JSON.parse(Buffer.from(parts[0]!,"base64url").toString()).alg;}catch{}
-    if(alg==="none"&&!acceptNone){res.writeHead(401);res.end("none rejected");return;}
+    if(alg==="none"){ if(!acceptNone){res.writeHead(401);res.end("none rejected");return;} }
+    // The server does verify HS256 signatures (a corrupt one is rejected); the bug
+    // is only that alg:none skips verification. So a garbage-signature control fails.
+    else if(parts[2]!=="sig"){res.writeHead(401);res.end("bad signature");return;}
     res.writeHead(200);res.end("welcome "+(()=>{try{return JSON.parse(Buffer.from(parts[1]!,"base64url").toString()).sub;}catch{return"?";}})());
   });
   for(const [accept,expect] of [[true,"proven"],[false,"unproven"]] as const){

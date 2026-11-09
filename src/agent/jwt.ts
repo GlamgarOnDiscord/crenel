@@ -73,14 +73,19 @@ const DENY = new Set([401, 403, 404]); // protected resources often mask anon ac
 const ok2xx = (s: number) => s >= 200 && s < 300;
 
 /** alg:none kept for the explore.jwt-none class (anon-control form). */
-export function jwtNoneOracle(input: { forged: Observed; anon: Observed }): { verdict: "proven" | "lead" | "denied"; reason: string } {
-  const { forged, anon } = input;
+export function jwtNoneOracle(input: { forged: Observed; anon: Observed; control?: Observed }): { verdict: "proven" | "lead" | "denied"; reason: string } {
+  const { forged, anon, control } = input;
   if (!ok2xx(forged.status)) return { verdict: "denied", reason: `the alg:none token was rejected (HTTP ${forged.status})` };
-  if (DENY.has(anon.status) && forged.body !== anon.body) {
-    return { verdict: "proven", reason: `an unsigned alg:none token is accepted (HTTP ${forged.status}) where no token is denied (HTTP ${anon.status})` };
-  }
   if (ok2xx(anon.status)) return { verdict: "lead", reason: "the endpoint also answers without any token: not auth-gated, review by hand" };
-  return { verdict: "lead", reason: `alg:none gave HTTP ${forged.status} but the control is inconclusive` };
+  if (!DENY.has(anon.status)) return { verdict: "lead", reason: `alg:none gave HTTP ${forged.status} but the anonymous control is inconclusive (HTTP ${anon.status})` };
+  // A garbage-signature control with the same claims must be REJECTED, otherwise
+  // the server accepts any Bearer value and alg:none is not what bypassed it.
+  if (control) {
+    if (ok2xx(control.status) && control.body === forged.body) return { verdict: "lead", reason: `the server also accepts a same-claims token with a corrupt signature (HTTP ${control.status}): it does not verify signatures at all, not specific to alg:none` };
+    if (!DENY.has(control.status) && !ok2xx(control.status)) return { verdict: "lead", reason: `the corrupt-signature control is inconclusive (HTTP ${control.status})` };
+  }
+  if (forged.body === anon.body) return { verdict: "lead", reason: "the forged response is identical to the anonymous one: no elevated access shown" };
+  return { verdict: "proven", reason: `an unsigned alg:none token is accepted (HTTP ${forged.status}) where no token is denied (HTTP ${anon.status})${control ? " and a corrupt signature is rejected (HTTP " + control.status + ")" : ""}` };
 }
 
 export const isRsaAlg = (alg: unknown) => typeof alg === "string" && /^(RS|PS)\d{3}$/.test(alg);
