@@ -43,7 +43,7 @@ import type { RunResult } from "../core/runner.js";
 import { AgentRun, type Decision } from "../agent/run.js";
 import { readJournal, replayRun, type JournalEntry, type RunSummary } from "../agent/journal.js";
 import { GrantSet, StateStore } from "../agent/state.js";
-import { checkModelEndpoint, claudeCli, presentModelKeys, DEFAULT_MODEL, selectLlm, type Llm } from "../agent/llm.js";
+import { checkModelEndpoint, claudeCli, parseEffort, presentModelKeys, type Effort, DEFAULT_MODEL, selectLlm, type Llm } from "../agent/llm.js";
 import { EXPLORE_MODES, resolveExploreMode, type ExploreMode } from "../agent/explore.js";
 import { parseGoal, type GoalBudget } from "../agent/goal.js";
 import type { Mode } from "../agent/gate.js";
@@ -64,7 +64,7 @@ export interface ServeOptions {
   /** Result of the claude -p detection (injected so tests never spawn it). */
   claudeAvailable?: boolean;
   /** Override model access (tests). */
-  llmFactory?: (model: string) => Llm | null;
+  llmFactory?: (model: string, opts?: { effort?: Effort }) => Llm | null;
   /** Override checks (tests). */
   checks?: import("../core/types.js").Check[];
   /** Outbound HTTP for integrations (tests mock it). */
@@ -171,7 +171,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   const runs = new Map<string, AgentRun>();
   const webDir = opts.webDir === undefined ? findWebDir() : opts.webDir;
   const llmOn = opts.llm !== "off" && (opts.claudeAvailable ?? false);
-  const llmFor = (model: string): Llm | null => (llmOn ? (opts.llmFactory ?? claudeCli)(model) : null);
+  const llmFor = (model: string, effort?: Effort): Llm | null => (llmOn ? (opts.llmFactory ?? claudeCli)(model, { effort }) : null);
   const config = (): Config => loadConfig(configPath);
 
   // The key variable options.llm declares, if any (the owner's own choice).
@@ -186,8 +186,8 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
   // which does not need the CLI: it is resolved by selectLlm. Keys are never in
   // the body — only the NAME of an env var (apiKeyEnv); the value is read from
   // process.env inside the provider at call time. A bad spec/connection -> 4xx.
-  function runLlm(model: string, baseUrl: string | undefined, apiKeyEnv: string | undefined, temperature: number | undefined, cfg: Config): Llm | null {
-    if (!model.includes(":")) return llmFor(model);
+  function runLlm(model: string, baseUrl: string | undefined, apiKeyEnv: string | undefined, temperature: number | undefined, effort: Effort | undefined, cfg: Config): Llm | null {
+    if (!model.includes(":")) return llmFor(model, effort);
     if (opts.llm === "off") throw new HttpError(400, "model access is off on this server (crenel serve --llm off)");
     // The server reads the named env var and sends its value to the base URL:
     // both are checked (https or loopback, no URL credentials, not a scan
@@ -195,7 +195,7 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     const cfgLlm = (cfg.options as Record<string, unknown>).llm;
     const bad = checkModelEndpoint({ baseUrl, apiKeyEnv, scanHosts: cfg.scope.allowedHosts, configKeyEnv: configKeyEnv(cfg) });
     if (bad) throw new HttpError(400, bad);
-    const { llm, error } = selectLlm({ spec: model, baseUrl, apiKeyEnv, temperature, config: cfgLlm });
+    const { llm, error } = selectLlm({ spec: model, baseUrl, apiKeyEnv, temperature, effort, config: cfgLlm });
     if (error) throw new HttpError(400, error);
     if (!llm) throw new HttpError(400, `unknown model spec: ${model.split(":")[0]}:…`);
     return llm;
@@ -226,11 +226,16 @@ export async function startServer(opts: ServeOptions): Promise<CrenelServer> {
     const t = body.modelTemperature;
     if (t !== undefined && (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 2)) throw new HttpError(400, "modelTemperature must be a number between 0 and 2");
     const modelTemperature = t as number | undefined;
+    // The console's effort stop (low, med, high, max, or the API's names).
+    // Applied where the model takes it (claude -p, recent Messages API
+    // models), ignored elsewhere; an unknown value is a 400.
+    if (body.effort !== undefined && !parseEffort(body.effort)) throw new HttpError(400, "effort must be low, medium, high, xhigh or max");
+    const effort = parseEffort(body.effort);
     // The console's exploration toggle; the config's choice when absent. Safety does not depend on it.
     const explore = (EXPLORE_MODES as readonly unknown[]).includes(body.explore) ? (body.explore as ExploreMode) : undefined;
     let cfg: Config;
     try { cfg = config(); } catch (err) { throw new HttpError(422, (err as Error).message); }
-    const llm = runLlm(model, modelBaseUrl, modelApiKeyEnv, modelTemperature, cfg);
+    const llm = runLlm(model, modelBaseUrl, modelApiKeyEnv, modelTemperature, effort, cfg);
     const goalText = typeof body.goal === "string" ? body.goal : undefined;
     const goal = goalText ? parseGoal(goalText, (body.budget ?? {}) as Partial<GoalBudget>) : undefined;
     const notify = async (findings: import("../core/types.js").Finding[], run: string, counts: { proven: number; leads: number; fixed: number }) => {

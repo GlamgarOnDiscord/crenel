@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm, endpointUrl, displayBase, checkModelEndpoint, claudeCli, presentModelKeys } from "./llm.js";
+import { openAiCompatibleLlm, ollamaLlm, anthropicApiLlm, resolveLlm, selectLlm, endpointUrl, displayBase, checkModelEndpoint, claudeCli, presentModelKeys, parseEffort, anthropicSupportsEffort } from "./llm.js";
 
 // A throwaway http server: `handler` sees the parsed JSON body and the headers, and
 // returns [status, bodyString]. Resolves to the base URL and a close().
@@ -200,4 +200,39 @@ test("presentModelKeys: names of the model keys that are set, never other variab
   const env = { OPENAI_API_KEY: "x", GROQ_API_KEY: "", CRENEL_LLM_GATEWAY: "y", GITHUB_TOKEN: "z", MY_KEY: "w" };
   assert.deepEqual(presentModelKeys(env), ["CRENEL_LLM_GATEWAY", "OPENAI_API_KEY"]);
   assert.deepEqual(presentModelKeys(env, "MY_KEY"), ["CRENEL_LLM_GATEWAY", "MY_KEY", "OPENAI_API_KEY"]);
+});
+
+test("parseEffort: the console's stops and the API's names, nothing else", () => {
+  assert.equal(parseEffort("low"), "low");
+  assert.equal(parseEffort("med"), "medium");
+  assert.equal(parseEffort("max"), "max");
+  assert.equal(parseEffort("xhigh"), "xhigh");
+  assert.equal(parseEffort("turbo"), undefined);
+  assert.equal(parseEffort(3), undefined);
+});
+
+test("claudeCli: the effort reaches the CLI (shown in the label); none keeps the CLI default", () => {
+  assert.equal(claudeCli("opus-4-8", { effort: "high" })!.label, "claude -p (opus-4-8, effort high)");
+  assert.equal(claudeCli("sonnet")!.label, "claude -p (sonnet)");
+});
+
+test("anthropic-api: output_config.effort only for models that take it", async () => {
+  assert.ok(anthropicSupportsEffort("claude-opus-4-8"));
+  assert.ok(anthropicSupportsEffort("claude-opus-5-5"));
+  assert.ok(anthropicSupportsEffort("claude-sonnet-4-6"));
+  assert.ok(anthropicSupportsEffort("claude-haiku-5-5"));
+  assert.ok(!anthropicSupportsEffort("claude-haiku-4-5"), "Haiku 4.5 rejects effort");
+  assert.ok(!anthropicSupportsEffort("claude-sonnet-4-5"));
+  assert.ok(!anthropicSupportsEffort("claude-opus-4-5"), "Opus 4.5 has no max level");
+  const bodies: Record<string, unknown>[] = [];
+  const srv = createServer((req, res) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { bodies.push(JSON.parse(b)); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ content: [{ type: "text", text: "ok" }] })); }); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  process.env.CRENEL_LLM_TEST_ANTHROPIC = "k";
+  try {
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    await anthropicApiLlm("claude-opus-4-8", { baseUrl: base, apiKeyEnv: "CRENEL_LLM_TEST_ANTHROPIC", effort: "max" }).ask("hi");
+    await anthropicApiLlm("claude-haiku-4-5", { baseUrl: base, apiKeyEnv: "CRENEL_LLM_TEST_ANTHROPIC", effort: "max" }).ask("hi");
+    assert.deepEqual(bodies[0]?.output_config, { effort: "max" });
+    assert.equal(bodies[1]?.output_config, undefined);
+  } finally { delete process.env.CRENEL_LLM_TEST_ANTHROPIC; await new Promise<void>((r) => srv.close(() => r())); }
 });

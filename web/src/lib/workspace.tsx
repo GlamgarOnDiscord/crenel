@@ -12,9 +12,6 @@ export const MODELS = [
   { id: "opus", label: "Opus 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus récent, mais plus souvent bloqué." },
   { id: "sonnet", label: "Sonnet 5.5", provider: "claude", vendor: "Anthropic", desc: "Rapide et précis." },
   { id: "haiku", label: "Haiku 5.5", provider: "claude", vendor: "Anthropic", desc: "Le plus rapide, pour les vérifications simples." },
-  { id: "gpt", label: "GPT-5.5", provider: "openai", vendor: "OpenAI", desc: "Modèle généraliste d'OpenAI." },
-  { id: "gemini", label: "Gemini 3.5", provider: "gemini", vendor: "Google", desc: "Grande fenêtre de contexte, pour les gros dépôts.", example: "nom du modèle" },
-  { id: "mistral", label: "Mistral Large", provider: "mistral", vendor: "Mistral AI", desc: "Hébergé en Europe.", example: "mistral-large-latest" },
 ] as const;
 export type ModelId = (typeof MODELS)[number]["id"];
 /** The recommended built-in model, selected when nothing else is stored. */
@@ -65,7 +62,7 @@ export const CONNECTORS: Connector[] = [
   { id: "openrouter", label: "OpenRouter", logo: "custom", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", example: "openai/gpt-4o-mini", mono: "OR", tint: "#8B8CF8" },
   { id: "groq", label: "Groq", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY", example: "nom du modèle", mono: "Gq", tint: "#F7744F" },
   { id: "deepseek", label: "DeepSeek", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY", example: "deepseek-chat", mono: "DS", tint: "#6B86FF" },
-  { id: "mistral", label: "Mistral", logo: "mistral", provider: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", apiKeyEnv: "MISTRAL_API_KEY" },
+  { id: "mistral", label: "Mistral", logo: "mistral", provider: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", apiKeyEnv: "MISTRAL_API_KEY", example: "mistral-large-latest" },
   { id: "gemini", label: "Gemini", logo: "gemini", provider: "openai-compatible", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnv: "GEMINI_API_KEY" },
   { id: "xai", label: "xAI (Grok)", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.x.ai/v1", apiKeyEnv: "XAI_API_KEY", example: "nom du modèle", mono: "xA", tint: "#D4D4D8" },
   { id: "together", label: "Together", logo: "custom", provider: "openai-compatible", baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY", example: "fournisseur/modèle", mono: "To", tint: "#4D8DFF" },
@@ -190,6 +187,26 @@ export function activeModelView(model: string, custom: CustomModel[]): { label: 
   return { label: d.label, provider: d.provider, custom: false };
 }
 
+/** Same rule as the engine (anthropicSupportsEffort in src/agent/llm.ts). */
+const ANTHROPIC_EFFORT = /^claude-(opus-(4-[6-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|haiku-[5-9]|fable|mythos)/;
+
+/**
+ * What the active model can do, so the menu only shows what has an effect.
+ * - effort: the four-stop slider changes something (claude -p always takes
+ *   --effort; the Messages API only on recent models; OpenAI-compatible
+ *   endpoints and Ollama get none).
+ * - available: false when the server is live but cannot run it (no claude CLI).
+ */
+export function modelCaps(model: string, custom: CustomModel[], server: { live: boolean; llm: string | null }): { effort: boolean; available: boolean; why?: string } {
+  if (MODELS.some((m) => m.id === model)) {
+    const available = !server.live || !!server.llm;
+    return { effort: true, available, why: available ? undefined : "Le CLI claude est introuvable sur la machine qui lance Crenel." };
+  }
+  const c = custom.find((x) => x.id === model);
+  if (c?.provider === "anthropic-api") return { effort: ANTHROPIC_EFFORT.test(c.name), available: true, why: ANTHROPIC_EFFORT.test(c.name) ? undefined : "Ce modèle ne prend pas de réglage d'effort." };
+  return { effort: false, available: true, why: c ? "Ce fournisseur n'a pas de réglage d'effort : il décide seul." : undefined };
+}
+
 /** What `start(...)` sends: a built-in id passes through; a custom id becomes its spec + connection (never a key value). */
 export function modelSend(model: string, custom: CustomModel[]): { model: string; modelBaseUrl?: string; modelApiKeyEnv?: string; modelTemperature?: number } {
   const c = custom.find((x) => x.id === model);
@@ -235,7 +252,7 @@ export const GOALS = [
 export type GoalId = (typeof GOALS)[number]["id"];
 
 export const CONTEXT_WINDOW: Record<string, number> = {
-  "opus-4-8": 200_000, opus: 200_000, sonnet: 200_000, haiku: 200_000, gpt: 400_000, gemini: 1_000_000, mistral: 128_000,
+  "opus-4-8": 200_000, opus: 200_000, sonnet: 200_000, haiku: 200_000,
 };
 /** Context window for any model id (built-in or custom); a safe default otherwise. */
 export const contextWindowOf = (model: string) => CONTEXT_WINDOW[model] ?? 128_000;
@@ -273,7 +290,13 @@ const WorkspaceContext = createContext<Workspace>({
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [targetId, setTargetId] = useState(targets[0]!.id);
   const [customModels, setCustomModels] = useState<CustomModel[]>(() => loadCustomModels());
-  const [model, setModelState] = useState<string>(() => loadModelId(DEFAULT_MODEL_ID));
+  // A stored id that is no longer offered (the unwired GPT/Gemini/Mistral
+  // entries, a deleted custom model) falls back to the default instead of
+  // starting runs with no model.
+  const [model, setModelState] = useState<string>(() => {
+    const id = loadModelId(DEFAULT_MODEL_ID);
+    return MODELS.some((m) => m.id === id) || loadCustomModels().some((c) => c.id === id) ? id : DEFAULT_MODEL_ID;
+  });
   const [effort, setEffort] = useState<EffortId>("med");
   const [mode, setMode] = useState<ModeId>("ask");
   const [goal, setGoal] = useState<GoalId>("none");

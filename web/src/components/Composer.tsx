@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, KeyRound, Mic, Paperclip, Plus, Radar, Search, Square, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Gauge, Globe, Goal, Hand, KeyRound, Mic, Paperclip, Plus, Radar, Search, Square, Trash2, TriangleAlert, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
 import { ProviderIcon, hasProviderIcon } from "../brand/ProviderIcon.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { CONNECTORS, EXPLORES, GOALS, MODELS, MODEL_KEY_ENVS, MODES, activeModelView, connectorOf, connectorToDraft, customSource, customSpec, draftNotes, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type Connector, type CustomModel, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
+import { CONNECTORS, EXPLORES, GOALS, MODELS, MODEL_KEY_ENVS, MODES, activeModelView, modelCaps, connectorOf, connectorToDraft, customSource, customSpec, draftNotes, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type Connector, type CustomModel, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -208,24 +208,30 @@ const displayUrl = (u: string) => u.trim().replace(/^https?:\/\//, "").replace(/
 /* Model + effort in one compact trigger, as in the Codex composer: the AI
    Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
    the EffortControl on top, plus a "Modèles custom" group and its config card. */
-const VENDORS = ["Anthropic", "OpenAI", "Google", "Mistral AI"] as const;
 function ModelMenu({ placement }: { placement: "up" | "down" }) {
   const ws = useWorkspace();
+  const data = useData();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const view = activeModelView(ws.model, ws.customModels);
   const activeCustom = ws.customModels.find((m) => m.id === ws.model);
+  const caps = modelCaps(ws.model, ws.customModels, data);
   const effort = effortOf(ws.effort);
   const closeMenu = () => { setOpen(false); setAdding(false); };
+  const builtinCaps = modelCaps(MODELS[0]!.id, [], data);
+  // A custom model's key, as the server sees it (names only): missing is worth a word.
+  const keyMissing = (m: CustomModel) => !!m.apiKeyEnv && !!data.modelKeys && !data.modelKeys.includes(m.apiKeyEnv);
   return (
     <ModelSelector open={open} onOpenChange={(o) => { setOpen(o); if (!o) setAdding(false); }}>
       <ModelSelectorTrigger asChild>
-        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${view.label}, effort ${effort.label}`}>
+        <button type="button" className={cn("tbtn modelbtn", !caps.available && "warn")} aria-label={`Modèle ${view.label}${caps.effort ? `, effort ${effort.label}` : ""}${caps.available ? "" : ", indisponible"}`}>
           {activeCustom ? <ConnectorMark c={connectorFor(activeCustom)} size={16} /> : <ModelLogo provider={view.provider} size={14} />}
           <span className="tlabel mb-name">{view.label}</span>
-          <span className="mb-sep" aria-hidden="true" />
-          <EffortGauge level={effort.level} size={15} tone="muted" />
-          <span className="tlabel mb-eff">{effort.label}</span>
+          {caps.effort && <>
+            <span className="mb-sep" aria-hidden="true" />
+            <EffortGauge level={effort.level} size={15} tone="muted" />
+            <span className="tlabel mb-eff">{effort.label}</span>
+          </>}
           <ChevronDown size={13} className="mb-chev" aria-hidden="true" />
         </button>
       </ModelSelectorTrigger>
@@ -237,38 +243,56 @@ function ModelMenu({ placement }: { placement: "up" | "down" }) {
           />
         ) : (
           <>
-            <EffortControl value={ws.effort} onChange={ws.setEffort} />
+            {!caps.available && (
+              <div className="msel-alert" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>{view.label} ne peut pas tourner ici.</b> {caps.why} Installez Claude Code ou choisissez un de vos modèles.</span></div>
+            )}
+            {caps.effort ? <EffortControl value={ws.effort} onChange={ws.setEffort} /> : (
+              <div className="msel-noeffort"><Gauge size={14} aria-hidden="true" /><span>{caps.why ?? "Pas de réglage d'effort pour ce modèle."}</span></div>
+            )}
             <ModelSelectorCommand value={ws.model} label="Modèle">
-              <ModelSelectorInput placeholder="Rechercher un modèle" />
+              <ModelSelectorInput placeholder="Rechercher un modèle ou un fournisseur" />
               <ModelSelectorList>
-                <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
-                {VENDORS.map((v) => (
-                  <ModelSelectorGroup key={v} heading={v}>
-                    {MODELS.filter((m) => m.vendor === v).map((m) => (
-                      <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
-                        <ModelSelectorLogo provider={m.provider} />
-                        <ModelSelectorName desc={m.desc} recommended={"recommended" in m && m.recommended}>{m.label}</ModelSelectorName>
+                <ModelSelectorEmpty>Aucun modèle. <button type="button" className="msel-empty-add" onClick={() => setAdding(true)}>Ajouter un modèle</button></ModelSelectorEmpty>
+                <ModelSelectorGroup heading={builtinCaps.available ? "Claude · via claude -p" : "Claude · indisponible, CLI claude introuvable"}>
+                  {MODELS.map((m) => (
+                    <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor, "claude"]} disabled={!builtinCaps.available}
+                      onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                      <ModelSelectorLogo provider={m.provider} />
+                      <ModelSelectorName desc={m.desc} recommended={builtinCaps.available && "recommended" in m && m.recommended}>{m.label}</ModelSelectorName>
+                      <Check size={14} className="msel-check" aria-hidden="true" />
+                    </ModelSelectorItem>
+                  ))}
+                </ModelSelectorGroup>
+                {ws.customModels.length > 0 && (
+                  <ModelSelectorGroup heading="Vos modèles">
+                    {ws.customModels.map((m) => (
+                      <ModelSelectorItem key={m.id} value={m.id} keywords={[m.name, customSource(m).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                        <span className="msel-logo"><ConnectorMark c={connectorFor(m)} size={24} /></span>
+                        <span className="msel-name">
+                          <span className="msel-n">{m.name}</span>
+                          <span className="msel-d">{customSource(m).label}{keyMissing(m) ? <> · <span className="msel-warn" title={`${m.apiKeyEnv} n'est pas définie sur la machine qui lance Crenel`}>clé absente</span></> : modelCaps(m.id, [m], data).effort ? " · effort réglable" : ""}</span>
+                        </span>
+                        <button type="button" className="msel-del" aria-label={`Supprimer ${m.name}`}
+                          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); ws.removeCustomModel(m.id); }}>
+                          <Trash2 size={13} aria-hidden="true" />
+                        </button>
                         <Check size={14} className="msel-check" aria-hidden="true" />
                       </ModelSelectorItem>
                     ))}
                   </ModelSelectorGroup>
-                ))}
-                <ModelSelectorGroup heading="Modèles custom">
-                  {ws.customModels.map((m) => (
-                    <ModelSelectorItem key={m.id} value={m.id} keywords={[m.name, customSource(m).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
-                      <span className="msel-logo"><ConnectorMark c={connectorFor(m)} size={24} /></span>
-                      <ModelSelectorName desc={`${customSource(m).label} · ${customSpec(m)}`}>{m.name}</ModelSelectorName>
-                      <button type="button" className="msel-del" aria-label={`Supprimer ${m.name}`}
-                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); ws.removeCustomModel(m.id); }}>
-                        <Trash2 size={13} aria-hidden="true" />
-                      </button>
-                      <Check size={14} className="msel-check" aria-hidden="true" />
-                    </ModelSelectorItem>
-                  ))}
-                  <ModelSelectorItem value="__add-custom" keywords={["ajouter", "custom", "openai", "ollama", "anthropic", "local"]} className="msel-add" onSelect={() => setAdding(true)}>
+                )}
+                <ModelSelectorGroup heading="Autres fournisseurs">
+                  <ModelSelectorItem value="__add-custom" className="msel-add" onSelect={() => setAdding(true)}
+                    keywords={["ajouter", "custom", "local", ...CONNECTORS.flatMap((c) => [c.id, c.label]), "gpt", "chatgpt", "grok", "llama"]}>
                     <span className="msel-logo msel-logo-add" aria-hidden="true"><Plus size={16} /></span>
-                    <ModelSelectorName desc="OpenRouter, Groq, Mistral, Ollama, LM Studio…">Ajouter un modèle…</ModelSelectorName>
+                    <span className="msel-name">
+                      <span className="msel-n">Ajouter un modèle</span>
+                      <span className="msel-stack" aria-hidden="true">
+                        {["openai", "gemini", "mistral", "openrouter", "groq", "ollama"].map((id) => <ConnectorMark key={id} c={connectorOf(id)} size={18} />)}
+                        <em>+{CONNECTORS.length - 6}</em>
+                      </span>
+                    </span>
                   </ModelSelectorItem>
                 </ModelSelectorGroup>
               </ModelSelectorList>
