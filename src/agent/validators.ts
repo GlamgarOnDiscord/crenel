@@ -1442,7 +1442,11 @@ const exploreDataExposureValidator: Validator = {
       const anon = await sendAs({ url, method: "GET" }, "anon", env, url);
       const anonSeen = others.filter(([, m]) => anon.body.includes(m));
       evidence.control += `; anonymous -> HTTP ${anon.status}`;
-      if (ok2xx(anon.status) && anonSeen.length >= 2) return { claimId: claim.id, state: "proven", validator: this.name, reason: `Excessive data exposure at ${pathOnly(url)}: an anonymous visitor gets the data of ${anonSeen.length} accounts (${anonSeen.map(([k]) => k.toUpperCase()).join(", ")}): public aggregate leak`, evidence, ceiling: "critical" };
+      // If anonymous gets the same aggregate, it may be public BY DESIGN (a catalog, a leaderboard): not distinguishable
+      // from a leak without a trust boundary, so it is a lead, never a proof. The proof needs anon to be DENIED below.
+      if (ok2xx(anon.status) && anonSeen.length >= 2) return no(`${pathOnly(url)} returns the same markers to an anonymous visitor: public aggregate data (a catalog, or a public leak) — not shown to be private, so a lead, not a cross-account exposure. Claim it as a secret/leak if those values are sensitive`, evidence);
+    } else {
+      return no("the reader is anonymous: use a configured account, so the exposure is shown to cross an auth boundary");
     }
     return { claimId: claim.id, state: "proven", validator: this.name, reason: `Excessive data exposure at ${pathOnly(url)}: account ${actor.toUpperCase()} receives the markers of ${seen.length} other accounts (${seen.map(([k]) => k.toUpperCase()).join(", ")}) in one response`, evidence, ceiling: "high" };
   },

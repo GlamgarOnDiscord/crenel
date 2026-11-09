@@ -912,3 +912,67 @@ test("injection timing: a param that sleeps proportionally to the payload is pro
     } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
   }
 });
+
+// False-positive resistance: endpoints that LOOK vulnerable but are not. A proven
+// verdict on any of these would break the zero-false-positive invariant.
+test("data-exposure: a PUBLIC catalog listing account markers to anonymous is a lead, not a proof", async () => {
+  const srv = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ products: [{ name: "x", seller: "mk_b" }, { name: "y", seller: "mk_c" }] })); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp1-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "ta", marker: "mk_a" }, b: { token: "tb", marker: "mk_b" }, c: { token: "tc", marker: "mk_c" } } } } };
+    const v = await validateClaim(claim("explore.data-exposure", { url: "/catalog", as: "a" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+    assert.match(v.reason, /public aggregate|anonymous/i);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("user-enum: a uniform 401 carrying a fresh per-request token is not enumeration", async () => {
+  let n = 0;
+  const srv = createServer((req, res) => { let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => { res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "invalid", csrf: `tok${n++}-${Math.random()}` })); }); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp2-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [], options: {} };
+    const v = await validateClaim(claim("explore.user-enum", { url: "/login", existing: "real@corp.test", field: "email" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("bfla: a function open to every authenticated user (not a privileged boundary) is not proven", async () => {
+  const srv = createServer((req, res) => { res.writeHead(req.headers.authorization ? 200 : 401, { "content-type": "application/json" }); res.end("{}"); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp3-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "ta" }, c: { token: "tc", privileged: true } } } } };
+    const v = await validateClaim(claim("explore.bfla", { url: "/api/profile", privileged: "c", normal: "a" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("cross-actor-write: a DELETE that acks 200 but does not remove the object is not proven", async () => {
+  const store = new Map<string, boolean>(); let id = 0;
+  const srv = createServer((req, res) => {
+    const m = /^\/notes\/(\d+)$/.exec(req.url ?? "");
+    let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+      const J = (st: number, b: unknown) => { res.writeHead(st, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+      if (req.url === "/notes" && req.method === "POST") { const k = String(++id); store.set(k, true); return J(201, { id }); }
+      if (m) { if (req.method === "DELETE") return J(200, { ack: true }); return store.get(m[1]!) ? J(200, { id: Number(m[1]) }) : J(404, {}); }
+      return J(404, {});
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp4-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base, allowActiveTesting: true }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "ta" }, b: { token: "tb" } } } } };
+    const v = await validateClaim(claim("explore.cross-actor-write", { createUrl: "/notes", createBody: {}, objectUrl: "/notes/:id", method: "DELETE", owner: "b", attacker: "a" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
