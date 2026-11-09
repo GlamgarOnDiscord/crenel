@@ -578,6 +578,10 @@ const exploreCrossActorValidator: Validator = {
     const ownerRes = await sendAs(req, owner, env, url);
     if (!ok2xx(ownerRes.status)) return no(`the owner (${owner.toUpperCase()}) gets HTTP ${ownerRes.status}: no object to compare`);
     const marker = actorMarker(env.options, owner);
+    // The URL is the model's: a marker it carries would come back as an echo, not as the owner's data.
+    let decoded = url;
+    try { decoded = decodeURIComponent(url); } catch { /* keep */ }
+    if (marker && (url.includes(marker) || decoded.includes(marker))) return no(`the URL itself carries ${owner.toUpperCase()}'s marker: a reflection would look like a leak, so it proves nothing`);
     if (marker && !ownerRes.body.includes(marker)) return no(`the owner's response does not carry ${owner.toUpperCase()}'s marker: not shown to be ${owner.toUpperCase()}'s object`);
     const id = typeof claim.detail.id === "string" ? claim.detail.id : undefined;
     const ctl = controlUrl(url, id);
@@ -1231,11 +1235,13 @@ const exploreRedirectValidator: Validator = {
 
 /* ---------------- explore.graphql ---------------- */
 // GraphQL field suggestions enabled (schema disclosure even with introspection
-// off). Universal near-miss probes of __typename; a "Did you mean" answer proves
-// it. Read-only (a query-only POST). Generic protocol behaviour. See graphql.test.ts.
+// off). Universal near-miss probes of __typename; a "Did you mean" in a parsed
+// GraphQL error proves it. Read-only (a query-only POST); the probes stop at the
+// first response that is not GraphQL. In active mode, query batching too.
+// Generic protocol behaviour. See graphql.test.ts.
 const exploreGraphqlValidator: Validator = {
   class: "explore.graphql",
-  name: "GraphQL field suggestions enabled (schema disclosure)",
+  name: "GraphQL disclosure (field suggestions, query batching)",
   async validate(claim, env) {
     const d = claim.detail as { url?: unknown };
     const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
@@ -1250,10 +1256,12 @@ const exploreGraphqlValidator: Validator = {
         const o = graphqlSuggestionsOracle({ status: r.status, body: r.body });
         if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL field suggestions at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} ${probe}`, response: o.reason }, ceiling: "low" };
         if (o.verdict === "lead") lead = o.reason;
+        // Not a GraphQL answer: the endpoint does not speak GraphQL, the other probes would only hit a REST route.
+        else return no(`${pathOnly(url)} did not answer as GraphQL (HTTP ${r.status}): no more probes sent`);
       } catch (e) { lead = `probe failed: ${(e as Error).message}`; }
     }
     // Query batching (needs active mode: a JSON array body is not a read). A batch
-    // of N identical queries that runs as N results proves batching with no rate limit.
+    // of N identical queries that runs as N successful results proves batching is accepted.
     if (env.scope.allowActiveTesting) {
       try {
         const n = 5;

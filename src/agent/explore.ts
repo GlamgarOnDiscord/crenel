@@ -557,7 +557,7 @@ export class Explorer {
     const offline = new Scope({ allowedHosts: [], signal: this.ac.signal });
     if (urls === null) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "no request or file to replay in the detail" };
     else if (urls.some((u) => !this.scope.isHostAllowed(u))) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "a URL of the claim is not on a declared host: nothing was sent" };
-    else if (urls.length && this.requests + 6 > this.d.budget.maxRequests) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "request budget too low to replay it" };
+    else if (urls.length && this.requests + (CLAIM_COST[a.class] ?? 6) > this.d.budget.maxRequests) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: "request budget too low to replay it" };
     else if (writes && this.d.mode !== "full") verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state: only in "full" exploration` };
     else if (writes && !this.scope.allowActiveTesting) verdict = { claimId: claim.id, state: "unproven", validator: null, reason: `this proof sends ${writes}, which changes state, and allowActiveTesting is off in the config` };
     // A proof that writes is approved as a write, with its real method, every time (never on a read's approval).
@@ -586,6 +586,9 @@ export class Explorer {
     return { text: `${proven ? "PROUVÉ" : "NON PROUVÉ (gardé comme piste)"}: ${one(verdict.reason, 400)}`, summary: `${a.class} -> ${verdict.state}` };
   }
 }
+
+/** Most requests a claim's validator can send, reserved before it runs so a proof is never cut halfway. */
+const CLAIM_COST: Partial<Record<keyof typeof CLAIM_CLASSES, number>> = { injection: 32, graphql: 13, "jwt-forge": 16, "mass-assignment": 9, "cross-actor": 6 };
 
 /** The state-changing method a claim's validator sends to its first URL, or null when it only reads. */
 export function claimWriteMethod(cls: keyof typeof CLAIM_CLASSES, d: Record<string, unknown>): string | null {

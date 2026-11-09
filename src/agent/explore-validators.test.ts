@@ -609,7 +609,7 @@ test("graphql: a server with field suggestions on is proven", async () => {
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("graphql: query batching with no rate limit is proven", async () => {
+test("graphql: query batching (every operation answered) is proven", async () => {
   const srv = createServer((req, res) => {
     const u = new URL(req.url!, "http://x");
     if (u.pathname !== "/graphql" || req.method !== "POST") { res.writeHead(404); res.end("{}"); return; }

@@ -53,7 +53,8 @@ test("field suggestions are proven even when introspection is off", async () => 
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
   try {
-    const found = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
+    // Read-only near-miss queries: no active mode needed.
+    const found = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
     const sugg = found.find((f) => f.id.startsWith("graphql:suggestions:"));
     assert.ok(sugg, "field suggestions proven");
     assert.equal(sugg!.state, "proven");
@@ -78,5 +79,23 @@ test("query batching is proven under active mode", async () => {
     // without active mode, no batching finding
     const ro = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
     assert.ok(!ro.find((f) => f.id.startsWith("graphql:batching:")), "no batching without active mode");
+  } finally { srv.close(); }
+});
+
+test("a server that refuses array bodies gets no batching finding", async () => {
+  const srv = createServer((req, res) => {
+    let c = ""; req.on("data", (d) => (c += d)); req.on("end", () => {
+      let body: any; try { body = JSON.parse(c); } catch { res.writeHead(400); return res.end("{}"); }
+      res.writeHead(200, { "content-type": "application/json" });
+      if (Array.isArray(body)) return res.end(JSON.stringify({ errors: [{ message: "batching is not supported" }] }));
+      if (/__schema/.test(body.query || "")) return res.end(JSON.stringify({ errors: [{ message: "introspection disabled" }] }));
+      res.end(JSON.stringify({ data: { __typename: "Query" } }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const found = await graphql.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
+    assert.ok(!found.find((f) => f.id.startsWith("graphql:batching:")), "no batching finding when arrays are refused");
   } finally { srv.close(); }
 });
