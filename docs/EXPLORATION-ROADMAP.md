@@ -48,7 +48,7 @@ authorization bypass, stack traces.
 
 ## Why the gap is structural, not just missing checks
 
-The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee: false positives are kept out by the validators and none has been observed on the bench, which is not a claim that there can be none. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
+The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee: false positives are kept out by the validators and none has been observed on the bench, which is not a claim that there can be none. Each validator is additionally checked against adversarial *safe* servers — endpoints that look vulnerable but are not (a public catalog listing account names, a login carrying a fresh per-request token, a function open to every authenticated user, a DELETE that acks without deleting, a fixed redirect, a REST page that says "Did you mean") — which must stay unproven; this sweep found and fixed one false positive (a public aggregate wrongly flagged). That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
 
 So the gap closes on two tracks, and neither is overfitting (no target signatures, no self-asserted proofs):
 

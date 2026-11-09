@@ -976,3 +976,21 @@ test("cross-actor-write: a DELETE that acks 200 but does not remove the object i
     assert.equal(v.state, "unproven", v.reason);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("cross-actor: identical PUBLIC content to A and B (a shared article, no owner marker) is not a cross-tenant leak", async () => {
+  // Both accounts read the same help article; it is nobody's private object. A false "leak" here would be critical.
+  const srv = createServer((req, res) => {
+    const ok = req.headers.authorization === "Bearer ta" || req.headers.authorization === "Bearer tb";
+    res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+    res.end(ok ? JSON.stringify({ id: 5, article: "shared help text for everyone" }) : "{}");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-fp5-"));
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "ta" }, b: { token: "tb" } } } } };
+    const v = await validateClaim(claim("explore.cross-actor", { url: "/help/5", attacker: "a", owner: "b" }), env);
+    assert.equal(v.state, "unproven", v.reason);
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
