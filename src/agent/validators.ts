@@ -20,6 +20,8 @@ import type { Check, CheckContext, Finding } from "../core/types.js";
 import { scanBaas, readOneRow, type SupabasePair } from "../checks/baas-exposure.js";
 import { sameIdentity } from "../checks/authz-matrix.js";
 import { isPlaceholder, PATTERNS } from "../checks/exposed-secrets.js";
+// Key shapes that are routinely PUBLIC in a browser context: proven only when liveness shows them usable.
+const AMBIGUOUS_PUBLIC_KEYS = new Set(["google-api-key"]);
 import { checkLiveness, verifierHost } from "../checks/key-liveness.js";
 import { xssOracle, sqliOracle, templateOracle, nosqlOracle, nonce } from "./inject.js";
 import { startCallback, ssrfOracle } from "./ssrf.js";
@@ -676,6 +678,11 @@ const exploreSecretValidator: Validator = {
         if (isPlaceholder(key) || sent.includes(key)) continue;
         if (p.accept && !p.accept(key, res.body, m.index ?? 0)) continue;
         const masked = `${key.slice(0, Math.min(12, key.length - 4))}…${key.slice(-4)}`;
+        // Some key shapes are public by design in a web context (a Firebase web apiKey is restricted by domain, not
+        // secret). Without a liveness check that shows it is actually usable/unrestricted, these stay a lead, not a proof.
+        if (AMBIGUOUS_PUBLIC_KEYS.has(p.id) && !(env.options.explore as { secretLiveness?: boolean } | undefined)?.secretLiveness) {
+          return no(`a ${p.title} is served at ${pathOnly(url)}, but this shape is often public by design (e.g. a Firebase web key restricted by domain): review whether it is unrestricted, or enable options.explore.secretLiveness — kept a lead, not a proof`, evidence(`${p.title}: ${masked}`));
+        }
         let live = "";
         if ((env.options.explore as { secretLiveness?: boolean } | undefined)?.secretLiveness && verifierHost(p.id)) {
           const r = await checkLiveness(p.id, key, env.scope);
