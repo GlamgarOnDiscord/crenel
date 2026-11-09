@@ -923,7 +923,7 @@ const exploreDomXssValidator: Validator = {
       full = resolveExploreUrl(req.url, env.stagingUrl) ?? url0;
     }
     const opts = (env.options.explore as { domXssBrowser?: string; domXssPlaywright?: string } | undefined) ?? {};
-    const r = await proveDomXss(full, t, { executablePath: opts.domXssBrowser, playwrightPath: opts.domXssPlaywright });
+    const r = await proveDomXss(full, t, { executablePath: opts.domXssBrowser, playwrightPath: opts.domXssPlaywright, allowHost: (u) => env.scope.isHostAllowed(u) });
     if (!r.available) return no(r.reason);
     if (r.executed) return { claimId: claim.id, state: "proven", validator: this.name, reason: `DOM XSS in ${d.param ?? "url"} at ${tmpl ? (d.url as string).slice(0, 80) : pathOnly(url0)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(full)} (browser-executed)`, response: r.reason }, ceiling: "high" };
     return no(r.reason);

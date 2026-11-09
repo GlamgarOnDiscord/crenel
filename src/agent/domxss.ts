@@ -15,7 +15,7 @@
 export interface DomXssResult { available: boolean; executed: boolean; reason: string }
 
 /** Load `url` in headless chromium and report whether a dialog carrying `nonce` fired. */
-export async function proveDomXss(url: string, nonce: string, opts?: { playwrightPath?: string; executablePath?: string; timeoutMs?: number }): Promise<DomXssResult> {
+export async function proveDomXss(url: string, nonce: string, opts?: { playwrightPath?: string; executablePath?: string; timeoutMs?: number; allowHost?: (url: string) => boolean }): Promise<DomXssResult> {
   const pwPath = opts?.playwrightPath ?? process.env.CRENEL_PLAYWRIGHT ?? "playwright";
   let chromium: { launch: (o?: unknown) => Promise<unknown> };
   try {
@@ -26,12 +26,17 @@ export async function proveDomXss(url: string, nonce: string, opts?: { playwrigh
   const exe = opts?.executablePath ?? process.env.CRENEL_BROWSER;
   const timeoutMs = opts?.timeoutMs ?? 15_000;
   let browser: { newPage: () => Promise<Page>; close: () => Promise<void> } | undefined;
-  type Page = { on: (ev: string, fn: (d: { message?: () => string; accept: () => Promise<void> }) => void) => void; goto: (u: string, o?: unknown) => Promise<unknown>; waitForTimeout: (ms: number) => Promise<void> };
+  type Route = { abort: () => Promise<void>; continue: () => Promise<void> };
+  type Req = { url: () => string };
+  type Page = { on: (ev: string, fn: (d: { message?: () => string; accept: () => Promise<void> }) => void) => void; route: (p: string, h: (r: Route, q: Req) => unknown) => Promise<void>; goto: (u: string, o?: unknown) => Promise<unknown>; waitForTimeout: (ms: number) => Promise<void> };
   try {
     browser = (await chromium.launch(exe ? { executablePath: exe } : {})) as typeof browser;
     const page = await browser!.newPage();
+    // Keep the browser inside the perimeter: every request it makes (navigation,
+    // redirects, subresources) must be to an allowed host, or it is aborted.
+    if (opts?.allowHost) await page.route("**/*", (route, req) => { try { return opts.allowHost!(req.url()) ? route.continue() : route.abort(); } catch { return route.abort(); } });
     let fired = false;
-    page.on("dialog", (d) => { try { if ((d.message?.() ?? "") === nonce) fired = true; } catch { /* */ } void d.accept(); });
+    page.on("dialog", (d) => { try { if ((d.message?.() ?? "") === nonce) fired = true; } catch { /* */ } d.accept().catch(() => {}); });
     try { await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }); } catch { /* a slow/hung page can still have fired */ }
     await page.waitForTimeout(600);
     return { available: true, executed: fired, reason: fired ? "the injected script executed in the browser (alert with our nonce)" : "no script execution observed in the browser" };
