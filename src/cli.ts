@@ -20,7 +20,7 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
-import { claudeCli, DEFAULT_MODEL, detectClaude } from "./agent/llm.js";
+import { claudeCli, DEFAULT_MODEL, detectClaude, selectLlm } from "./agent/llm.js";
 import { crawlLiveBundle } from "./checks/live-bundle.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
@@ -65,7 +65,7 @@ options:
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
 const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify", "exit-with-stdin"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
-const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report", "mode", "max-calls", "llm-script", "state"]);
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report", "mode", "max-calls", "llm-script", "state", "model-base-url", "model-api-key-env"]);
 
 function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
@@ -401,10 +401,24 @@ async function main(): Promise<number> {
       const script = JSON.parse(readFileSync(flags["llm-script"], "utf8")) as unknown[];
       llm = scriptedLlm(script.map((x) => (typeof x === "string" ? x : JSON.stringify(x))), `scripted (${script.length} turn(s))`);
     } else {
-      const model = typeof flags.model === "string" ? flags.model : "sonnet";
-      llm = claudeCli(model);
-      if (!llm || !(await detectClaude())) {
-        process.stderr.write(`explore needs a model: the claude CLI (model ${model}), or --llm-script for a recorded run.\n`);
+      // --model opus|sonnet|haiku -> claude CLI (unchanged). With a provider
+      // prefix -> a custom/local endpoint: openai:<m>, ollama:<m>, anthropic-api:<m>,
+      // tuned by --model-base-url / --model-api-key-env or options.llm. Keys come
+      // only from the env var named by --model-api-key-env/apiKeyEnv, never argv.
+      const sel = selectLlm({
+        spec: typeof flags.model === "string" ? flags.model : undefined,
+        baseUrl: typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : undefined,
+        apiKeyEnv: typeof flags["model-api-key-env"] === "string" ? flags["model-api-key-env"] : undefined,
+        config: config.options.llm,
+      });
+      if (sel.error) { process.stderr.write(`${sel.error}\n`); return 2; }
+      llm = sel.llm;
+      if (!llm) {
+        process.stderr.write(`--model not recognised: use opus|sonnet|haiku, or openai:<model> / ollama:<model> / anthropic-api:<model>.\n`);
+        return 2;
+      }
+      if (sel.usesCli && !(await detectClaude())) {
+        process.stderr.write(`explore needs a model: the claude CLI, a custom provider (openai:/ollama:/anthropic-api:) via --model, or --llm-script for a recorded run.\n`);
         return 2;
       }
     }

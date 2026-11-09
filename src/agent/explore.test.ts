@@ -186,10 +186,10 @@ test("explore: the model-call and token budgets are enforced in code", async () 
     await t.run.start();
     assert.equal(t.llm.prompts.length, 2);
   } finally { t.close(); }
-  const k = await setup({ options: { explore: { maxTokens: 1500 } }, script: [turn([]), turn([]), turn([])] });
+  const k = await setup({ options: { explore: { maxTokens: 2200 } }, script: [turn([]), turn([]), turn([])] });
   try {
     await k.run.start();
-    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past 1500 tokens: not sent");
+    assert.equal(k.llm.prompts.length, 1, "the second prompt would go past 2200 tokens: not sent");
     assert.ok(events(k.run, "explore.stop").some((e) => String(e.reason).includes("token")));
   } finally { k.close(); }
 });

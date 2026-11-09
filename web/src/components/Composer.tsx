@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, Mic, Paperclip, Plus, Radar, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, ChevronDown, Compass, Eye, FolderGit2, Globe, Goal, Hand, KeyRound, Mic, Paperclip, Plus, Radar, Search, Square, Trash2, X } from "lucide-react";
 import { ModelLogo } from "../brand/ModelLogo.tsx";
+import { ProviderIcon, hasProviderIcon } from "../brand/ProviderIcon.tsx";
 import { useData } from "../data/api.ts";
 import { cn } from "../lib/cn.ts";
-import { EXPLORES, GOALS, MODELS, MODES, effortOf, goalOf, modelOf, useWorkspace, type GoalId, type ModeId } from "../lib/workspace.tsx";
+import { CONNECTORS, EXPLORES, GOALS, MODELS, MODEL_KEY_ENVS, MODES, activeModelView, connectorOf, connectorToDraft, customSource, customSpec, draftNotes, draftToModel, effortOf, emptyDraft, goalOf, providerOf, useWorkspace, validateDraft, type Connector, type CustomModel, type GoalId, type ModeId, type ModelDraft } from "../lib/workspace.tsx";
 import { ModelSelector, ModelSelectorCommand, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorLogo, ModelSelectorName, ModelSelectorTrigger } from "./ai/model-selector.tsx";
 import { EffortControl, EffortGauge } from "./EffortControl.tsx";
 import { Tooltip } from "./arc/tooltip/tooltip.tsx";
@@ -45,21 +46,183 @@ function ExploreMenu({ placement }: { placement: "up" | "down" }) {
   );
 }
 
+/* A connector's mark: the provider's logo (brand/ProviderIcon), or a tinted
+   "{}" tile for a generic OpenAI-compatible endpoint. */
+export function ConnectorMark({ c, size = 22 }: { c: Connector | undefined; size?: number }) {
+  if (c && hasProviderIcon(c.id)) return <span className="cmark logo" style={{ width: size, height: size }}><ProviderIcon id={c.id} size={Math.round(size * 0.64)} /></span>;
+  const tint = c?.tint ?? "#A1A1AA";
+  return (
+    <span className="cmark mono" style={{ width: size, height: size, fontSize: Math.round(size * 0.42), color: tint, background: `color-mix(in srgb, ${tint} 16%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tint} 30%, transparent)` }}>
+      {c?.mono ?? "?"}
+    </span>
+  );
+}
+
+/* Adding a custom model, in two steps.
+   1. Pick a connector: cloud providers, or a server on this machine.
+   2. Type the model name. The connector pre-fills the endpoint and the NAME of
+      the key's env var; whether that variable is set on the server shows right
+      there (names only, never a value). Endpoint, key variable and temperature
+      sit under "Réglages avancés", opened for "Autre point d'accès" or when one
+      of them needs fixing. The checks are the server's. */
+function CustomModelForm({ initial, onSave, onCancel }: { initial?: ModelDraft; onSave: (d: ModelDraft) => void; onCancel: () => void }) {
+  const data = useData();
+  const [draft, setDraft] = useState<ModelDraft>(() => initial ?? emptyDraft());
+  const [step, setStep] = useState<"pick" | "details">(initial ? "details" : "pick");
+  const [touched, setTouched] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [query, setQuery] = useState("");
+  const errors = validateDraft(draft);
+  const notes = draftNotes(draft);
+  const prov = providerOf(draft.provider);
+  const conn = connectorOf(draft.connector) ?? connectorOf("custom")!;
+  const set = (patch: Partial<ModelDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const pick = (c: Connector) => { setDraft((d) => connectorToDraft(c, d.name)); setAdvanced(c.id === "custom"); setTouched(false); setStep("details"); };
+  const valid = Object.keys(errors).length === 0;
+  const submit = () => { setTouched(true); if (valid) onSave(draft); else if (errors.baseUrl || errors.apiKeyEnv || errors.temperature) setAdvanced(true); };
+  const show = (k: keyof ModelDraft) => (touched || (k !== "name" && draft[k] !== "")) && errors[k];
+  const advOpen = advanced || !!show("baseUrl") || !!show("apiKeyEnv") || !!show("temperature");
+  const spec = `${prov.prefix}:${draft.name.trim() || "…"}`;
+  const key = draft.apiKeyEnv.trim();
+  const keySet = key && data.modelKeys ? data.modelKeys.includes(key) : null;
+
+  if (step === "pick") {
+    const q = query.trim().toLowerCase();
+    const match = (c: Connector) => !q || c.label.toLowerCase().includes(q) || c.id.includes(q) || (c.baseUrl ?? "").includes(q);
+    const ready = (c: Connector) => !!c.apiKeyEnv && !!data.modelKeys?.includes(c.apiKeyEnv);
+    const tile = (c: Connector) => (
+      <button key={c.id} type="button" className={cn("cmf-conn", c.id === "custom" && "wide")} onClick={() => pick(c)}
+        title={c.baseUrl ?? "Un point d'accès compatible OpenAI à renseigner"}>
+        <ConnectorMark c={c} size={24} />
+        <span className="cmf-conn-l">{c.label}</span>
+        {c.id === "custom" && <span className="cmf-conn-d">compatible OpenAI</span>}
+        {ready(c) && <span className="cmf-ready" title={`${c.apiKeyEnv} est définie : prêt à l'emploi`} aria-label="clé définie" />}
+      </button>
+    );
+    const cloud = CONNECTORS.filter((c) => !c.local && c.id !== "custom" && match(c));
+    const local = [...CONNECTORS.filter((c) => c.local), connectorOf("custom")!].filter(match);
+    const readyCount = CONNECTORS.filter(ready).length;
+    return (
+      <div className="cmf" role="group" aria-label="Choisir un connecteur">
+        <div className="cmf-head">
+          <button type="button" className="tbtn icon" aria-label="Retour à la liste" onClick={onCancel}><ArrowLeft size={15} /></button>
+          <div className="cmf-head-t">
+            <span className="cmf-title">Ajouter un modèle</span>
+            <span className="cmf-sub">{readyCount > 0 ? `${readyCount} fournisseur${readyCount > 1 ? "s" : ""} avec une clé déjà définie` : "Choisissez où il tourne."}</span>
+          </div>
+        </div>
+        <label className="cmf-search">
+          <Search size={14} aria-hidden="true" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un fournisseur" autoFocus spellCheck={false}
+            onKeyDown={(e) => { if (e.key === "Enter") { const first = [...cloud, ...local][0]; if (first) { e.preventDefault(); pick(first); } } }} />
+        </label>
+        {cloud.length > 0 && <><span className="cmf-sec-l">Cloud</span><div className="cmf-conns">{cloud.map(tile)}</div></>}
+        {local.length > 0 && <><span className="cmf-sec-l">Sur votre machine <em>sans clé</em></span><div className="cmf-conns">{local.map(tile)}</div></>}
+        {cloud.length + local.length === 0 && <div className="cmf-empty">Aucun fournisseur ne correspond. <button type="button" onClick={() => pick(connectorOf("custom")!)}>Saisir un point d'accès</button></div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmf" role="group" aria-label={`Nouveau modèle ${conn.label}`}
+      onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") { e.preventDefault(); submit(); } }}>
+      <div className="cmf-head">
+        <button type="button" className="tbtn icon" aria-label="Changer de connecteur" onClick={() => setStep("pick")}><ArrowLeft size={15} /></button>
+        <div className="cmf-head-t"><span className="cmf-title">Nouveau modèle</span><span className="cmf-sub mono" title={`Envoyé au moteur : ${spec}`}>{spec}</span></div>
+      </div>
+
+      <div className="cmf-picked">
+        <ConnectorMark c={conn} size={32} />
+        <div className="cmf-picked-t">
+          <b>{conn.label}</b>
+          <span className="mono">{draft.baseUrl ? displayUrl(draft.baseUrl) : "point d'accès à renseigner"}</span>
+        </div>
+        <button type="button" className="cmf-change" onClick={() => setStep("pick")}>Changer</button>
+      </div>
+
+      <label className="cmf-field">
+        <span className="cmf-lbl">Nom du modèle</span>
+        <input className="cmf-in big mono" value={draft.name} placeholder={conn.example ?? "nom du modèle"} spellCheck={false} autoCorrect="off" autoCapitalize="off"
+          onChange={(e) => set({ name: e.target.value })} aria-invalid={!!show("name")} autoFocus />
+        {show("name") ? <span className="cmf-err">{errors.name}</span> : <span className="cmf-hint">Tel que {conn.local ? "le serveur local" : "le fournisseur"} le nomme{conn.example && !/fournisseur|nom du|…/.test(conn.example) ? `, par ex. ${conn.example}` : ""}.</span>}
+      </label>
+
+      <div className={cn("cmf-key", notes.apiKeyEnv ? "bad" : key ? (keySet === true ? "ok" : keySet === false ? "miss" : "info") : "info")}>
+        <KeyRound size={14} aria-hidden="true" />
+        {!key ? <span>{conn.local ? "Modèle local : aucune clé n'est envoyée." : "Aucune clé : seulement si le point d'accès n'en demande pas."}</span>
+          : notes.apiKeyEnv ? <span><b className="mono">{key}</b> n'est pas une variable de clé de modèle : le serveur refusera de l'envoyer. Utilisez un nom <b className="mono">CRENEL_LLM_*</b> ou celui du fournisseur.</span>
+          : keySet === true ? <span><b className="mono">{key}</b> est définie sur la machine qui lance Crenel.</span>
+          : keySet === false ? <span><b className="mono">{key}</b> n'est pas définie : <code className="mono">export {key}=…</code> avant <code className="mono">crenel serve</code>.</span>
+          : <span>La clé sera lue dans <b className="mono">{key}</b>, sur la machine qui lance Crenel.</span>}
+      </div>
+
+      <div className={cn("cmf-adv", advOpen && "open")}>
+        <button type="button" className="cmf-adv-t" aria-expanded={advOpen} onClick={() => setAdvanced((o) => !o)}>
+          <ChevronDown size={14} className="cmf-adv-chev" aria-hidden="true" />
+          <span>Réglages avancés</span>
+          {!advOpen && <span className="cmf-adv-sum mono">{[key || "sans clé", draft.temperature.trim() ? `t=${draft.temperature.trim()}` : null].filter(Boolean).join(" · ")}</span>}
+        </button>
+        {advOpen && (
+          <div className="cmf-adv-b">
+            <label className="cmf-field">
+              <span className="cmf-lbl">Point d'accès</span>
+              <input className="cmf-in mono" value={draft.baseUrl} placeholder={prov.basePlaceholder} spellCheck={false} autoCorrect="off" autoCapitalize="off"
+                onChange={(e) => set({ baseUrl: e.target.value })} aria-invalid={!!show("baseUrl")} />
+              {show("baseUrl") ? <span className="cmf-err">{errors.baseUrl}</span> : <span className="cmf-hint">https, ou http://localhost pour un modèle local.</span>}
+            </label>
+            <div className="cmf-row">
+              <label className="cmf-field">
+                <span className="cmf-lbl">Variable de la clé</span>
+                <input className="cmf-in mono" value={draft.apiKeyEnv} placeholder={conn.local ? "aucune" : "OPENAI_API_KEY"} list="cmf-key-envs"
+                  onChange={(e) => set({ apiKeyEnv: e.target.value.toUpperCase() })} aria-invalid={!!show("apiKeyEnv")}
+                  autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+                <datalist id="cmf-key-envs">{MODEL_KEY_ENVS.map((n) => <option key={n} value={n} />)}<option value="CRENEL_LLM_API_KEY" /></datalist>
+              </label>
+              <label className="cmf-field">
+                <span className="cmf-lbl">Température</span>
+                <input className="cmf-in mono" value={draft.temperature} placeholder="défaut" inputMode="decimal"
+                  onChange={(e) => set({ temperature: e.target.value })} aria-invalid={!!show("temperature")} />
+              </label>
+            </div>
+            {show("apiKeyEnv") && <span className="cmf-err">{errors.apiKeyEnv}</span>}
+            {show("temperature") && <span className="cmf-err">{errors.temperature}</span>}
+            <span className="cmf-hint">Le nom de la variable, jamais la clé : sa valeur ne quitte pas la machine qui lance Crenel, sauf vers ce point d'accès.</span>
+          </div>
+        )}
+      </div>
+
+      <div className="cmf-actions">
+        <button type="button" className="btn quiet sm" onClick={onCancel}>Annuler</button>
+        <button type="button" className="btn sm" onClick={submit} disabled={!draft.name.trim()}>Ajouter {draft.name.trim() ? "ce modèle" : "le modèle"}</button>
+      </div>
+    </div>
+  );
+}
+
+// The connector a saved model shows: its preset, or one matching its provider.
+const connectorFor = (m: CustomModel) => connectorOf(m.connector) ?? connectorOf(m.provider === "ollama" ? "ollama" : m.provider === "anthropic-api" ? "anthropic" : "custom");
+
+// An endpoint as shown in the card: no scheme noise, no trailing slash.
+const displayUrl = (u: string) => u.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
 /* Model + effort in one compact trigger, as in the Codex composer: the AI
    Elements ModelSelector (cmdk in a popover, grouped by vendor, logos) with
-   the EffortControl on top. */
+   the EffortControl on top, plus a "Modèles custom" group and its config card. */
 const VENDORS = ["Anthropic", "OpenAI", "Google", "Mistral AI"] as const;
 function ModelMenu({ placement }: { placement: "up" | "down" }) {
   const ws = useWorkspace();
   const [open, setOpen] = useState(false);
-  const model = modelOf(ws.model);
+  const [adding, setAdding] = useState(false);
+  const view = activeModelView(ws.model, ws.customModels);
+  const activeCustom = ws.customModels.find((m) => m.id === ws.model);
   const effort = effortOf(ws.effort);
+  const closeMenu = () => { setOpen(false); setAdding(false); };
   return (
-    <ModelSelector open={open} onOpenChange={setOpen}>
+    <ModelSelector open={open} onOpenChange={(o) => { setOpen(o); if (!o) setAdding(false); }}>
       <ModelSelectorTrigger asChild>
-        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${model.label}, effort ${effort.label}`}>
-          <ModelLogo provider={model.provider} size={14} />
-          <span className="tlabel mb-name">{model.label}</span>
+        <button type="button" className="tbtn modelbtn" aria-label={`Modèle ${view.label}, effort ${effort.label}`}>
+          {activeCustom ? <ConnectorMark c={connectorFor(activeCustom)} size={16} /> : <ModelLogo provider={view.provider} size={14} />}
+          <span className="tlabel mb-name">{view.label}</span>
           <span className="mb-sep" aria-hidden="true" />
           <EffortGauge level={effort.level} size={15} tone="muted" />
           <span className="tlabel mb-eff">{effort.label}</span>
@@ -67,25 +230,52 @@ function ModelMenu({ placement }: { placement: "up" | "down" }) {
         </button>
       </ModelSelectorTrigger>
       <ModelSelectorContent side={placement === "up" ? "top" : "bottom"} align="end">
-        <EffortControl value={ws.effort} onChange={ws.setEffort} />
-        <ModelSelectorCommand value={ws.model} label="Modèle">
-          <ModelSelectorInput placeholder="Rechercher un modèle" />
-          <ModelSelectorList>
-            <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
-            {VENDORS.map((v) => (
-              <ModelSelectorGroup key={v} heading={v}>
-                {MODELS.filter((m) => m.vendor === v).map((m) => (
-                  <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); setOpen(false); }} data-checked={m.id === ws.model || undefined}>
-                    <ModelSelectorLogo provider={m.provider} />
-                    <ModelSelectorName desc={m.desc} recommended={"recommended" in m && m.recommended}>{m.label}</ModelSelectorName>
-                    <Check size={14} className="msel-check" aria-hidden="true" />
-                  </ModelSelectorItem>
+        {adding ? (
+          <CustomModelForm
+            onCancel={() => setAdding(false)}
+            onSave={(d) => { const m = draftToModel(d); ws.addCustomModel(m); ws.setModel(m.id); closeMenu(); }}
+          />
+        ) : (
+          <>
+            <EffortControl value={ws.effort} onChange={ws.setEffort} />
+            <ModelSelectorCommand value={ws.model} label="Modèle">
+              <ModelSelectorInput placeholder="Rechercher un modèle" />
+              <ModelSelectorList>
+                <ModelSelectorEmpty>Aucun modèle</ModelSelectorEmpty>
+                {VENDORS.map((v) => (
+                  <ModelSelectorGroup key={v} heading={v}>
+                    {MODELS.filter((m) => m.vendor === v).map((m) => (
+                      <ModelSelectorItem key={m.id} value={m.id} keywords={[m.label, m.vendor]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                        <ModelSelectorLogo provider={m.provider} />
+                        <ModelSelectorName desc={m.desc} recommended={"recommended" in m && m.recommended}>{m.label}</ModelSelectorName>
+                        <Check size={14} className="msel-check" aria-hidden="true" />
+                      </ModelSelectorItem>
+                    ))}
+                  </ModelSelectorGroup>
                 ))}
-              </ModelSelectorGroup>
-            ))}
-          </ModelSelectorList>
-        </ModelSelectorCommand>
-        <div className="msel-foot"><kbd>↑</kbd><kbd>↓</kbd> naviguer <kbd>⏎</kbd> choisir <kbd>Échap</kbd> fermer</div>
+                <ModelSelectorGroup heading="Modèles custom">
+                  {ws.customModels.map((m) => (
+                    <ModelSelectorItem key={m.id} value={m.id} keywords={[m.name, customSource(m).label, customSpec(m)]} onSelect={() => { ws.setModel(m.id); closeMenu(); }} data-checked={m.id === ws.model || undefined}>
+                      <span className="msel-logo"><ConnectorMark c={connectorFor(m)} size={24} /></span>
+                      <ModelSelectorName desc={`${customSource(m).label} · ${customSpec(m)}`}>{m.name}</ModelSelectorName>
+                      <button type="button" className="msel-del" aria-label={`Supprimer ${m.name}`}
+                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); ws.removeCustomModel(m.id); }}>
+                        <Trash2 size={13} aria-hidden="true" />
+                      </button>
+                      <Check size={14} className="msel-check" aria-hidden="true" />
+                    </ModelSelectorItem>
+                  ))}
+                  <ModelSelectorItem value="__add-custom" keywords={["ajouter", "custom", "openai", "ollama", "anthropic", "local"]} className="msel-add" onSelect={() => setAdding(true)}>
+                    <span className="msel-logo msel-logo-add" aria-hidden="true"><Plus size={16} /></span>
+                    <ModelSelectorName desc="OpenRouter, Groq, Mistral, Ollama, LM Studio…">Ajouter un modèle…</ModelSelectorName>
+                  </ModelSelectorItem>
+                </ModelSelectorGroup>
+              </ModelSelectorList>
+            </ModelSelectorCommand>
+            <div className="msel-foot"><kbd>↑</kbd><kbd>↓</kbd> naviguer <kbd>⏎</kbd> choisir <kbd>Échap</kbd> fermer</div>
+          </>
+        )}
       </ModelSelectorContent>
     </ModelSelector>
   );
