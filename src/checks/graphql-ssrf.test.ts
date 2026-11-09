@@ -19,11 +19,12 @@ function gqlServer() {
         const I = { kind: "SCALAR", name: "Int", ofType: null };
         const arg = (name: string, t: unknown) => ({ name, type: t });
         return send({ data: { __schema: {
-          queryType: { fields: [] },
+          // echo is a QUERY with a url arg: it IS probed (queries are safe) but it
+          // never fetches, so it is the real negative control.
+          queryType: { fields: [{ name: "echo", args: [arg("url", S)] }] },
           mutationType: { fields: [
             { name: "fetchThing", args: [arg("host", S), arg("port", I), arg("path", S), arg("scheme", S)] },
             { name: "deleteByUrl", args: [arg("url", S)] },
-            { name: "echo", args: [arg("url", S)] },
           ] },
         } } });
       }

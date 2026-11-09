@@ -26,9 +26,14 @@ const isString = (a: any) => named(a.type).name === "String";
 const isRequired = (a: any) => a?.type?.kind === "NON_NULL";
 // Argument names that commonly carry a URL / host the server will fetch.
 const URLARG = /^(url|uri|href|link|endpoint|callback|callback_?url|webhook|webhook_?url|fetch|src|source|image|image_?url|avatar|avatar_?url|proxy|target|host|hostname)$/i;
-// Field names whose call could have a destructive side effect beyond the fetch:
-// never fired, even to test SSRF.
-const DESTRUCTIVE = /(delete|remove|drop|destroy|purge|wipe|erase|revoke|reset)/i;
+// A query never mutates, so any query with a URL-like argument is safe to probe.
+// A MUTATION may create/update/send/charge/delete, so we only fire a mutation
+// whose name expresses a server-side FETCH intent (import a URL, fetch/proxy/
+// preview it) — the SSRF sink shape — and skip every other mutation, whose side
+// effect we cannot prove harmless. This keeps e.g. `importPaste` while excluding
+// `createX`, `updateWebhook`, `sendCallback`, `deleteX`, `pay`/`charge`/`transfer`.
+const FETCH_INTENT = /(import|fetch|load|preview|proxy|resolve|crawl|scrape|screenshot|thumbnail|unfurl|ping|probe|retrieve|download|mirror|render|snapshot)/i;
+const eligible = (f: { name: string; root: "query" | "mutation" }) => f.root === "query" || FETCH_INTENT.test(f.name);
 const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 /** A benign literal for a required scalar argument, so the probe query validates.
@@ -63,8 +68,8 @@ export const graphqlSsrf: Check = {
     // simply offers fewer fields — we work with what parsed, never guess a sink.
     const q: Field[] = (j?.data?.__schema?.queryType?.fields ?? []).map((f: any) => ({ ...f, root: "query" }));
     const m: Field[] = (j?.data?.__schema?.mutationType?.fields ?? []).map((f: any) => ({ ...f, root: "mutation" }));
-    const sinks = [...q, ...m].filter((f) => !DESTRUCTIVE.test(f.name) && (f.args ?? []).some((a: any) => isString(a) && URLARG.test(a.name))).slice(0, 12);
-    if (sinks.length === 0) { ctx.log("graphql-ssrf: no non-destructive URL-like string argument in the schema"); return []; }
+    const sinks = [...q, ...m].filter((f) => eligible(f) && (f.args ?? []).some((a: any) => isString(a) && URLARG.test(a.name))).slice(0, 40);
+    if (sinks.length === 0) { ctx.log("graphql-ssrf: no safely-probeable URL-like string argument in the schema"); return []; }
     const host = o.callbackHost || "127.0.0.1";
     const findings: Finding[] = [];
     for (const f of sinks) {
@@ -100,9 +105,18 @@ export const graphqlSsrf: Check = {
         // __typename is valid on any object. Fire every shape, and AWAIT them all,
         // so no probe outlives the check before the oracle and the callback close.
         const op = f.root === "mutation" ? "mutation" : "query";
-        const bodies = [`${op} { ${f.name}(${argStr}) }`, `${op} { ${f.name}(${argStr}) { __typename } }`];
-        await Promise.all(bodies.map((b) => gql(b)));
-        for (let i = 0; i < 48 && !cb.hits().includes(n); i++) await new Promise((r) => setTimeout(r, 250));
+        // Scalar-returning sinks take no selection; object-returning ones need one
+        // ({ __typename } is valid on any object). Fire both shapes but SEQUENTIALLY,
+        // recording the body that triggered the callback, so the finding's replay is
+        // the exact query that worked (a valid, replayable request).
+        const bodies = [`${op} { ${f.name}(${argStr}) { __typename } }`, `${op} { ${f.name}(${argStr}) }`];
+        let hitBody = bodies[0]!;
+        for (const b of bodies) {
+          await gql(b);
+          let got = false;
+          for (let i = 0; i < 24 && !(got = cb.hits().includes(n)); i++) await new Promise((r) => setTimeout(r, 250));
+          if (got) { hitBody = b; break; }
+        }
         const r = ssrfOracle({ nonce: n, hits: cb.hits() });
         if (r.verdict !== "proven") { ctx.log(`graphql-ssrf: ${f.root} ${f.name} no callback (host ${host}:${cb.port} reachable from the target?)`); continue; }
         findings.push({
@@ -114,7 +128,7 @@ export const graphqlSsrf: Check = {
           location: url,
           description: `The GraphQL ${f.root} field ${f.name} fetched an attacker-chosen URL: ${r.reason}. Discovered from the schema (URL-like argument), proven out-of-band. Internal services and cloud metadata are reachable.`,
           remediation: `Do not let a GraphQL argument choose the host of a server-side request; use an allowlist and block link-local / private ranges and redirects.`,
-          proof: { method: "schema-discovered sink + out-of-band callback on staging (unique nonce in the request path)", replay: `POST ${url} with ${op} { ${f.name}(${argStr.replace(new RegExp(n, "g"), "<nonce>")}) } — the server calls back to the listener`, evidence: `out-of-band hit received for nonce ${n}` },
+          proof: { method: "schema-discovered sink + out-of-band callback on staging (unique nonce in the request path)", replay: `POST ${url} with body {"query":"${hitBody.replace(new RegExp(n, "g"), "<nonce>").replace(/"/g, '\\"')}"} — the server calls back to the listener`, evidence: `out-of-band hit received for nonce ${n}` },
           regressionHint: `After deploy, a callback URL in ${f.name} must not produce an out-of-band request.`,
         });
       } finally { await cb.close(); }

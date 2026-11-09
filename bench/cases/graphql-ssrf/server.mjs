@@ -11,11 +11,13 @@ export default () => createServer((req, res) => {
     let query = ""; try { query = JSON.parse(body).query ?? ""; } catch {}
     const send = (o) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
     if (query.includes("__schema")) return send({ data: { __schema: {
-      queryType: { fields: [] },
+      // echo is a QUERY (safe, always probed) that never fetches: the negative
+      // control. importUrl is the vulnerable mutation sink; purgeByUrl is a
+      // destructive mutation that must never be fired.
+      queryType: { fields: [{ name: "echo", args: [a("url", S)] }] },
       mutationType: { fields: [
         { name: "importUrl", args: [a("host", S), a("port", I), a("path", S), a("scheme", S)] },
         { name: "purgeByUrl", args: [a("url", S)] },
-        { name: "echo", args: [a("url", S)] },
       ] },
     } } });
     const m = /importUrl\(host:\s*"([^"]+)",\s*port:\s*(\d+),\s*path:\s*"([^"]+)"/.exec(query);
