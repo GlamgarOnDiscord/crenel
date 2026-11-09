@@ -76,3 +76,10 @@ test("graphqlArgClaims: a URL argument, or a host and port taken apart, becomes 
   assert.deepEqual(ssrf, ['query { preview(url: "__CALLBACK_URL__") }', 'mutation { importFrom(host: "__CALLBACK_HOST__", port: __CALLBACK_PORT__, path: "/__INJECT__") }']);
   assert.equal(graphqlArgClaims(schema, "http://x/graphql", { mutations: true }).filter((c) => c.class === "explore.ssrf").length, 0);
 });
+
+test("autoClaims: an object route is also tried with the owner's own ids", () => {
+  const c = autoClaims({ endpoints: [{ url: "http://x/api/users/1", template: "/api/users/:id" }], accounts: ["a", "b"], ownerIds: ["27", "bob@x.test"] });
+  const urls = c.filter((x) => x.class === "explore.cross-actor").map((x) => x.detail.url);
+  assert.ok(urls.includes("http://x/api/users/27"));
+  assert.ok(!urls.some((u) => String(u).includes("bob")), "an e-mail is not an id segment");
+});

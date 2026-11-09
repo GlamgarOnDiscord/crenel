@@ -13,17 +13,18 @@
 import type { Claim, ClaimVerdict, ValidatorEnv } from "./validators.js";
 import { validateClaim, actorToken } from "./validators.js";
 import { safeFetch } from "../core/net.js";
+import { tokenIdentity } from "./markers.js";
 
 // Login routes by their usual names (the same in any API), not by a target's path.
 const LOGIN_PATH = /(^|\/)(login|signin|sign-in|log-in|authenticate)(\/|$)/i;
 
-export interface Endpoint { url: string; params?: string[]; graphql?: boolean }
+export interface Endpoint { url: string; params?: string[]; graphql?: boolean; /** The route with ":id" where the object id goes. */ template?: string }
 
 /** Build the systematic claim set for the discovered endpoints. Pure. `accounts`
  * are the configured test-account ids (a/b/c) that have a token. `origin` is the
  * scheme+host for the CORS probe. No target-specific values: only the endpoints the
  * recon already found and the generic techniques. */
-export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; origin?: string }): Claim[] {
+export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; origin?: string; ownerIds?: string[] }): Claim[] {
   const { endpoints, accounts } = input;
   const has = (a: string) => accounts.includes(a);
   const claims: Claim[] = [];
@@ -38,6 +39,10 @@ export function autoClaims(input: { endpoints: Endpoint[]; accounts: string[]; o
     if (has("b")) {
       add("explore.cross-actor", { url: ep.url, attacker: "anon", owner: "b" });
       if (has("a")) add("explore.cross-actor", { url: ep.url, attacker: "a", owner: "b" });
+      // The owner's own ids (from its token) in an object route: B's own record, read by A.
+      if (has("a") && ep.template?.includes(":id")) for (const id of (input.ownerIds ?? []).filter((v) => /^[\w-]{1,64}$/.test(v)).slice(0, 2)) {
+        try { add("explore.cross-actor", { url: new URL(ep.template.replace(":id", encodeURIComponent(id)), ep.url).toString(), attacker: "a", owner: "b", id }); } catch { /* skip */ }
+      }
     }
     // JWT signature bypass against any endpoint that may be protected (needs an account token).
     if (has("a")) add("explore.jwt-forge", { url: ep.url, as: "a" });
@@ -56,7 +61,7 @@ export interface AutoProbeResult { proven: ClaimVerdict[]; tried: number }
  * enforce scope, controls and no-false-positive; this only drives them. */
 export async function runAutoProbe(env: ValidatorEnv, input: { endpoints: Endpoint[]; origin?: string }, opts: { maxClaims?: number } = {}): Promise<AutoProbeResult> {
   const accounts = (["a", "b", "c"] as const).filter((a) => actorToken(env.options, a));
-  const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin }).slice(0, opts.maxClaims ?? 120);
+  const claims = autoClaims({ endpoints: input.endpoints, accounts, origin: input.origin, ownerIds: tokenIdentity(actorToken(env.options, "b")) }).slice(0, opts.maxClaims ?? 120);
   // A GraphQL endpoint with introspection open: its own String arguments become injection claims.
   for (const ep of input.endpoints.filter((e) => e.graphql)) {
     try {

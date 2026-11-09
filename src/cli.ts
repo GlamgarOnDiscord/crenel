@@ -532,7 +532,7 @@ async function main(): Promise<number> {
     const endpoints: Endpoint[] = [...paths].map((p) => {
       const u = new URL(p.replace(/:id|\{[^}]+\}/g, "1"), base + "/").toString();
       const ps = [...new Set([...new URL(u).searchParams.keys(), ...(qp[p.split("?")[0]!] ?? [])])];
-      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p) };
+      return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p), template: /:id|\{[^}]+\}/.test(p) ? new URL(p.split("?")[0]!.replace(/\{[^}]+\}/g, ":id"), base + "/").pathname : undefined };
     });
     log(`autoprobe: ${endpoints.length} endpoint(s) discovered; probing...`);
     const env = { scope, projectDir: config.projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };
