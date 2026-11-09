@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 42 checks. Each is deterministic and read-only by default (the
+Crenel runs 54 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -30,6 +30,12 @@ empty list runs every read-only check.
 | ssrf | Server fetching a URL taken from the request | no (leads) | no |
 | live-bundle | Server keys, BaaS keys and public source maps in the JS the deployed site serves | yes (key shape in a served file, map answering 200) | GETs of public assets on declared hosts |
 | exposed-files | .env, .git, dumps, debug pages served by the deployed site | yes (content signature + negative control) | GETs on the declared host |
+| error-disclosure | A malformed request returns a server stack trace (file paths, framework, versions) that a benign request does not | yes (benign vs malformed differential) | **malformed POST probes**: allowActiveTesting + `options.error-disclosure.enabled` |
+| cors-reflection | The server echoes an arbitrary request Origin into Access-Control-Allow-Origin with Allow-Credentials: true (confirmed on two distinct origins) | yes (two reflected origins + credentials) | GETs with an Origin header on the declared host |
+| header-injection | A request parameter flows into a response header without CR/LF stripping (CRLF / response splitting) | yes (injected header appears with our nonce; benign control does not) | GETs on the declared host |
+| dependency-exposure | A dependency manifest (package.json) or lockfile (package-lock.json) served with a library at an EXACT version below a known advisory bound (a version range is not provable and is skipped) | yes (manifest/lockfile served + an exactly-pinned version below the bound) | GETs on the declared host |
+| graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (error-based or boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control; boolean SQL requires all three responses error-free) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
+| reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (our exact nonce-bearing markup reflected unescaped in an HTML response vs a benign control; an escaped reflection is not flagged) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
@@ -203,6 +209,14 @@ into CI). With a `stagingUrl`, two tokens, and active testing enabled for an
 owned host, it replays each cross-tenant request and reports any that did not
 return 401/403/404 as a **proven** broken-authorization finding.
 
+**How each account authenticates.** A token is sent as `Authorization: Bearer`,
+but many apps are not bearer-based. An account may instead carry `cookie` (a raw
+`Cookie` header value, for session apps: Flask-Login, Django, Rails, PHP) or
+`headers` (any other auth header, e.g. an API-key header). The three combine, and
+the owner-marker proof needs no credentials for B at all — only a `marker` string
+that none but B's object contains. So a session-cookie SaaS is covered: declare
+account A's session cookie and B's marker, and a logged-in A reaching B's object
+is proven just as a bearer API would be.
 
 **From an OpenAPI file.** `options.authz-matrix.openapi: api.yaml` (path relative
 to the config) adds every GET route with exactly one path parameter as a

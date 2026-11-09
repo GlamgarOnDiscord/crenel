@@ -1,0 +1,11 @@
+{
+  "title": "CORS reflects any Origin with credentials, next to an endpoint that reflects without credentials",
+  "type": "live",
+  "config": { "options": { "cors-reflection": { "paths": ["/vuln", "/safe"] } } },
+  "mustFind": [
+    { "id": "cors-any-origin", "check": "cors-reflection", "where": "/vuln", "state": "proven", "minSeverity": "high", "why": "Any origin can read authenticated responses." }
+  ],
+  "mustNotFlag": [
+    { "id": "reflected-no-creds", "check": "cors-reflection", "where": "/safe", "forbid": "proven", "why": "Reflected origin without credentials is not cross-origin credential exposure." }
+  ]
+}

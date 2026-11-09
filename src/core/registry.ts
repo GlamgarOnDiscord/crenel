@@ -22,6 +22,12 @@ import { webhookSignature } from "../checks/webhook-signature.js";
 import { ssrf } from "../checks/ssrf.js";
 import { liveBundle } from "../checks/live-bundle.js";
 import { exposedFiles } from "../checks/exposed-files.js";
+import { errorDisclosure } from "../checks/error-disclosure.js";
+import { corsReflection } from "../checks/cors-reflection.js";
+import { headerInjection } from "../checks/header-injection.js";
+import { dependencyExposure } from "../checks/dependency-exposure.js";
+import { graphqlInjection } from "../checks/graphql-injection.js";
+import { reflectedXss } from "../checks/reflected-xss.js";
 import { graphql } from "../checks/graphql.js";
 import { metricsExposed } from "../checks/metrics-exposed.js";
 import { jwtVerification } from "../checks/jwt-verification.js";
@@ -52,7 +58,7 @@ import { authzWrite } from "../checks/authz-write.js";
 import { massAssignment } from "../checks/mass-assignment.js";
 import { race } from "../checks/race.js";
 
-export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, devServer, aiInfra, vercelPreview, cacheDeception, authConfig, authVariants, nextImage, apiDocs, supabaseRpc, cachePoisoning, businessLogic, supabaseFunctions, authzMatrix, authzWrite, massAssignment, race, metricsExposed, jwtVerification, authInjection, directoryListing, liveSsrf, commandInjection];
+export const REGISTRY: Check[] = [exposedSecrets, dependencyRisk, ciHardening, headers, cloudflareAudit, mcpSurface, dockerfile, committedEnv, sourcemaps, publicEnv, tlsVerification, jwtConfig, committedCredentials, baasExposure, webhookSignature, ssrf, liveBundle, exposedFiles, graphql, openRedirect, nextMiddleware, subdomainTakeover, emailDns, transport, gitHistory, storageBuckets, devServer, aiInfra, vercelPreview, cacheDeception, authConfig, authVariants, nextImage, apiDocs, supabaseRpc, cachePoisoning, businessLogic, supabaseFunctions, authzMatrix, authzWrite, massAssignment, race, metricsExposed, jwtVerification, authInjection, directoryListing, liveSsrf, commandInjection, errorDisclosure, corsReflection, headerInjection, dependencyExposure, graphqlInjection, reflectedXss];
 
 export function resolveChecks(names: string[], options: Record<string, unknown> = {}): Check[] {
   if (names.length === 0) {

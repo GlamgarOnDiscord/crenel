@@ -1,0 +1,11 @@
+{
+  "title": "A parameter reflected unescaped into HTML, next to one that escapes it",
+  "type": "live",
+  "config": { "options": { "reflected-xss": { "paths": ["/echo", "/safe"], "params": ["q"] } } },
+  "mustFind": [
+    { "id": "xss-reflected", "check": "reflected-xss", "where": "/echo", "state": "proven", "minSeverity": "high", "why": "The markup comes back unescaped and would execute." }
+  ],
+  "mustNotFlag": [
+    { "id": "xss-escaped", "check": "reflected-xss", "where": "/safe", "forbid": "proven", "why": "The endpoint HTML-escapes the value." }
+  ]
+}

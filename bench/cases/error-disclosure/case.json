@@ -1,0 +1,16 @@
+{
+  "title": "Stack trace disclosed on a malformed JSON body (dev error handler), next to an endpoint that errors cleanly",
+  "type": "live",
+  "config": {
+    "scope": { "allowActiveTesting": true },
+    "options": {
+      "error-disclosure": { "enabled": true, "endpoints": [ { "url": "/api/leaky" }, { "url": "/api/safe" } ] }
+    }
+  },
+  "mustFind": [
+    { "id": "stack-leak", "check": "error-disclosure", "text": "leaky", "state": "proven", "minSeverity": "medium", "why": "A malformed body returns a server stack trace (file paths, framework)." }
+  ],
+  "mustNotFlag": [
+    { "id": "clean-error", "check": "error-disclosure", "text": "safe", "forbid": "proven", "why": "This endpoint returns a generic error with no stack trace." }
+  ]
+}

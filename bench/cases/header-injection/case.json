@@ -1,0 +1,11 @@
+{
+  "title": "CRLF response header injection via a redirect parameter, next to one that strips CR/LF",
+  "type": "live",
+  "config": { "options": { "header-injection": { "paths": ["/vuln", "/safe"], "params": ["next"] } } },
+  "mustFind": [
+    { "id": "crlf-inject", "check": "header-injection", "where": "/vuln", "state": "proven", "minSeverity": "high", "why": "A CRLF in the parameter adds an attacker header to the response." }
+  ],
+  "mustNotFlag": [
+    { "id": "crlf-stripped", "check": "header-injection", "where": "/safe", "forbid": "proven", "why": "This endpoint strips CR/LF from the value." }
+  ]
+}
