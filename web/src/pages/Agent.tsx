@@ -30,7 +30,7 @@ import { useData } from "../data/api.ts";
 import { useLiveAgent } from "../data/live-run.ts";
 import { cn } from "../lib/cn.ts";
 import type { AgentEvent } from "../lib/types.ts";
-import { contextWindowOf, goalOf, modeLabel, modelSend, useWorkspace } from "../lib/workspace.tsx";
+import { contextWindowOf, goalOf, modeLabel, modelCaps, modelSend, useWorkspace } from "../lib/workspace.tsx";
 
 type Phase = "running" | "waiting" | "idle" | "interrupted";
 const GOAL_STATUS: Record<string, string> = {
@@ -86,7 +86,9 @@ export function Agent() {
   const startLive = (text: string) => {
     const goal = ws.goal !== "none" ? goalOf(ws.goal).text : undefined;
     if (goal) ws.setGoal("none");
-    void live.start(text, { mode: ws.mode, ...modelSend(ws.model, ws.customModels), goal, explore: ws.explore ?? undefined });
+    // The effort only travels when the model takes it (claude -p, recent Messages API models).
+    const effort = modelCaps(ws.model, ws.customModels, data).effort ? ws.effort : undefined;
+    void live.start(text, { mode: ws.mode, ...modelSend(ws.model, ws.customModels), effort, goal, explore: ws.explore ?? undefined });
   };
 
   // Reset when navigating here again with a new prompt or task.

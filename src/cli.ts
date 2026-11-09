@@ -20,7 +20,7 @@ import { generateRegressionFile } from "./generate/tests.js";
 import { loadBaseline, saveBaseline, diff, hasRegression } from "./core/baseline.js";
 import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
-import { claudeCli, DEFAULT_MODEL, detectClaude, selectLlm } from "./agent/llm.js";
+import { claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
 import { crawlLiveBundle } from "./checks/live-bundle.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
@@ -65,7 +65,7 @@ options:
 // (e.g. `crenel --verbose scan` must keep `scan` as the command).
 const BOOLEAN_FLAGS = new Set(["version", "verbose", "json", "force", "update-baseline", "help", "open", "llm", "no-llm", "notify", "exit-with-stdin"]);
 // Flags that require a value; a missing one is an error, not a silent skip.
-const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report", "mode", "max-calls", "llm-script", "state", "model-base-url", "model-api-key-env"]);
+const VALUE_FLAGS = new Set(["config", "out", "sarif", "audit", "baseline", "model", "max", "junit", "fail-on", "port", "host", "report", "mode", "max-calls", "llm-script", "state", "model-base-url", "model-api-key-env", "effort"]);
 
 function parseFlags(argv: string[]): { _: string[]; flags: Record<string, string | boolean>; warnings: string[] } {
   const _: string[] = [];
@@ -405,10 +405,12 @@ async function main(): Promise<number> {
       // prefix -> a custom/local endpoint: openai:<m>, ollama:<m>, anthropic-api:<m>,
       // tuned by --model-base-url / --model-api-key-env or options.llm. Keys come
       // only from the env var named by --model-api-key-env/apiKeyEnv, never argv.
+      if (typeof flags.effort === "string" && !parseEffort(flags.effort)) { process.stderr.write(`--effort must be low, medium, high, xhigh or max\n`); return 2; }
       const sel = selectLlm({
         spec: typeof flags.model === "string" ? flags.model : undefined,
         baseUrl: typeof flags["model-base-url"] === "string" ? flags["model-base-url"] : undefined,
         apiKeyEnv: typeof flags["model-api-key-env"] === "string" ? flags["model-api-key-env"] : undefined,
+        effort: parseEffort(flags.effort),
         config: config.options.llm,
       });
       if (sel.error) { process.stderr.write(`${sel.error}\n`); return 2; }
@@ -519,7 +521,7 @@ async function main(): Promise<number> {
       "  crenel triage [--config path] [--model opus-4-8] [--max 3]  LLM triage of leads (claude -p)",
       "  crenel review-bundle [--config path] [--model opus-4-8] [--max 20] [--out review.json]",
       "                 the model reads every JS chunk the live site serves (leads only)",
-      "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--max-calls N] [--json] [--state dir]",
+      "  crenel explore [--config path] [--mode assist|full] [--model sonnet] [--effort low|medium|high|max] [--max-calls N] [--json] [--state dir]",
       "                 free exploration by the model (claude -p); claims proven only by a validator's replay",
       "                 [--llm-script turns.json]: replay a recorded exploration, no model spent",
       "  crenel tools  status|build|selftest|nuclei|katana|trufflehog|httpx [--config path] [--json] [--audit log.jsonl]",

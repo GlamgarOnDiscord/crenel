@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeModelView, customSpec, draftToModel, emptyDraft, modelSend, parseCustomModels, validateDraft, CONNECTORS, connectorOf, connectorToDraft, type CustomModel, type ModelDraft, customSource, draftNotes } from "./workspace.tsx";
+import { activeModelView, customSpec, draftToModel, emptyDraft, modelSend, parseCustomModels, validateDraft, CONNECTORS, connectorOf, connectorToDraft, type CustomModel, type ModelDraft, customSource, draftNotes, modelCaps, MODELS } from "./workspace.tsx";
 
 const draft = (p: Partial<ModelDraft> = {}): ModelDraft => ({ ...emptyDraft(), ...p });
 
@@ -104,4 +104,21 @@ test("a connector preset is remembered for its logo and label, and the temperatu
   assert.equal(back[0]?.connector, "openrouter");
   assert.equal(parseCustomModels(JSON.stringify([{ ...m, connector: "nope" }]))[0]?.connector, undefined, "an unknown preset is dropped");
   assert.deepEqual(modelSend("cm-or", [m]), { model: "openai:fournisseur/modele", modelBaseUrl: "https://openrouter.ai/api/v1", modelApiKeyEnv: "OPENROUTER_API_KEY", modelTemperature: 0.4 });
+});
+
+test("modelCaps: the effort slider only where it changes something; Claude models need the CLI when live", () => {
+  const demo = { live: false, llm: null };
+  const live = { live: true, llm: "claude -p" };
+  const noCli = { live: true, llm: null };
+  assert.deepEqual(modelCaps("opus-4-8", [], live), { effort: true, available: true, why: undefined });
+  assert.equal(modelCaps("opus-4-8", [], demo).available, true, "the demo never says unavailable");
+  assert.equal(modelCaps("sonnet", [], noCli).available, false);
+  const mk = (provider: CustomModel["provider"], name: string): CustomModel => ({ id: `cm-${name}`, provider, name });
+  const opus48 = mk("anthropic-api", "claude-opus-4-8"), haiku45 = mk("anthropic-api", "claude-haiku-4-5");
+  const groq = mk("openai-compatible", "llama-3.3"), llama = mk("ollama", "llama3.1");
+  assert.equal(modelCaps(opus48.id, [opus48], live).effort, true);
+  assert.equal(modelCaps(haiku45.id, [haiku45], live).effort, false);
+  assert.equal(modelCaps(groq.id, [groq], live).effort, false);
+  assert.equal(modelCaps(llama.id, [llama], live).effort, false);
+  assert.ok(MODELS.every((m) => m.provider === "claude"), "only models the engine can run are listed as built-ins");
 });

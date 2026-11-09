@@ -805,6 +805,18 @@ kbd, .kbd { font-family: var(--f-mono); font-size: 11px; color: var(--fg-faint);
 .msel-logo { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--panel); color: var(--fg); flex: none; box-shadow: inset 0 0 0 1px var(--line); }
 .msel-name { display: grid; min-width: 0; flex: 1; }
 .msel-n { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; color: var(--fg); }
+.msel-noeffort { display: flex; align-items: center; gap: 9px; margin: 4px 4px 8px; padding: 9px 11px; border-radius: 11px; font-size: 12px; line-height: 1.4; color: var(--fg-faint); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.msel-noeffort svg { flex: none; color: var(--fg-ghost); }
+.msel-warn { color: var(--brand-ink); }
+.msel-alert { display: flex; align-items: flex-start; gap: 9px; margin: 4px 4px 8px; padding: 9px 11px; border-radius: 11px; font-size: 12px; line-height: 1.45; color: var(--fg-muted); background: color-mix(in srgb, var(--brand) 7%, var(--well)); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.msel-alert svg { flex: none; margin-top: 1px; color: var(--brand); }
+.msel-alert b { color: var(--fg); font-weight: 600; }
+.msel-item[data-disabled="true"] { opacity: .42; cursor: not-allowed; }
+.msel-stack { display: inline-flex; align-items: center; margin-top: 3px; }
+.msel-stack .cmark { margin-right: -4px; border-radius: 6px; box-shadow: 0 0 0 2px var(--panel-raised), inset 0 0 0 1px var(--line-strong); }
+.msel-stack em { margin-left: 9px; font-style: normal; font-size: 11px; color: var(--fg-faint); }
+.msel-empty-add { color: var(--brand-ink); font-weight: 500; }
+.modelbtn.warn { box-shadow: inset 0 0 0 1px var(--brand-line); }
 .msel-rec { font-size: 10.5px; font-weight: 600; color: var(--on-brand); background: var(--brand); border-radius: 999px; padding: 1px 7px; }
 .msel-d { font-size: 12px; color: var(--fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msel-check { color: var(--brand-ink); opacity: 0; transition: opacity .15s; flex: none; }

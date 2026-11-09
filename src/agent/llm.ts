@@ -55,13 +55,27 @@ const CLAUDE_MODELS: Record<string, string> = {
   haiku: "haiku",
 };
 
-export function claudeCli(model = DEFAULT_MODEL): Llm | null {
+/** Reasoning effort, as `claude --effort` and the Messages API name it. */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type Effort = (typeof EFFORT_LEVELS)[number];
+/** The console's four stops (Bas, Moyen, Élevé, Max) and the API's own names. */
+export function parseEffort(v: unknown): Effort | undefined {
+  if (typeof v !== "string") return undefined;
+  const alias: Record<string, Effort> = { med: "medium" };
+  const e = alias[v] ?? v;
+  return (EFFORT_LEVELS as readonly string[]).includes(e) ? (e as Effort) : undefined;
+}
+
+export function claudeCli(model = DEFAULT_MODEL, opts: { effort?: Effort } = {}): Llm | null {
   // Own keys only: "constructor" or "__proto__" must not pass as a model.
   if (!Object.prototype.hasOwnProperty.call(CLAUDE_MODELS, model)) return null;
   const cliModel = CLAUDE_MODELS[model]!;
+  // Every model behind these aliases takes an effort level (Opus 4.8 and the
+  // 5.5 line); without one, the CLI keeps its own default.
+  const args = ["-p", "--model", cliModel, ...(opts.effort ? ["--effort", opts.effort] : [])];
   return {
-    label: `claude -p (${model})`,
-    ask: (prompt, call) => runCli(["-p", "--model", cliModel], prompt, call),
+    label: `claude -p (${model}${opts.effort ? `, effort ${opts.effort}` : ""})`,
+    ask: (prompt, call) => runCli(args, prompt, call),
   };
 }
 
@@ -174,7 +188,16 @@ export function ollamaLlm(model: string, opts: { baseUrl?: string } = {}): Llm {
  * x-api-key + anthropic-version, reads content[0].text. Key via env only
  * (apiKeyEnv, default ANTHROPIC_API_KEY); a missing var throws before any request.
  */
-export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseUrl?: string; maxTokens?: number } = {}): Llm {
+/**
+ * Whether a Messages API model takes output_config.effort with the console's
+ * levels (low..max): Opus 4.6 and later, Sonnet 4.6 and later, Haiku 5 and
+ * later, Fable and Mythos. Older ones reject it (400), so it is not sent there.
+ */
+export function anthropicSupportsEffort(model: string): boolean {
+  return /^claude-(opus-(4-[6-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|haiku-[5-9]|fable|mythos)/.test(model);
+}
+
+export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseUrl?: string; maxTokens?: number; effort?: Effort } = {}): Llm {
   const base = (opts.baseUrl ?? DEFAULT_ANTHROPIC_BASE).replace(/\/+$/, "");
   const url = endpointUrl(base, "/v1", "/messages");
   const keyEnv = opts.apiKeyEnv ?? "ANTHROPIC_API_KEY";
@@ -184,7 +207,8 @@ export function anthropicApiLlm(model: string, opts: { apiKeyEnv?: string; baseU
       const key = process.env[keyEnv];
       if (!key) throw new Error(`anthropic-api: environment variable ${keyEnv} is not set`);
       const headers = { "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION };
-      const body = { model, max_tokens: opts.maxTokens ?? 4096, messages: [{ role: "user", content: prompt }] };
+      const body: Record<string, unknown> = { model, max_tokens: opts.maxTokens ?? 4096, messages: [{ role: "user", content: prompt }] };
+      if (opts.effort && anthropicSupportsEffort(model)) body.output_config = { effort: opts.effort };
       const json = await postJson(url, headers, body, call, "anthropic-api");
       const text = pick(json, "content", 0, "text");
       if (typeof text !== "string") throw new Error("anthropic-api: no content[0].text in the response");
@@ -261,16 +285,16 @@ export type LlmConfig = z.infer<typeof LlmOptions>;
  * Unknown provider or empty model -> null. Keys never come through `opts`, only
  * the NAME of their env var (apiKeyEnv).
  */
-export function resolveLlm(spec: string, opts: { baseUrl?: string; apiKeyEnv?: string; temperature?: number; path?: string; maxTokens?: number } = {}): Llm | null {
+export function resolveLlm(spec: string, opts: { baseUrl?: string; apiKeyEnv?: string; temperature?: number; path?: string; maxTokens?: number; effort?: Effort } = {}): Llm | null {
   const idx = spec.indexOf(":");
-  if (idx < 0) return claudeCli(spec);
+  if (idx < 0) return claudeCli(spec, { effort: opts.effort });
   const provider = spec.slice(0, idx);
   const model = spec.slice(idx + 1);
   if (!model) return null;
   switch (provider) {
     case "openai": return openAiCompatibleLlm(model, { baseUrl: opts.baseUrl, apiKeyEnv: opts.apiKeyEnv ?? "CRENEL_LLM_API_KEY", path: opts.path, temperature: opts.temperature });
     case "ollama": return ollamaLlm(model, { baseUrl: opts.baseUrl });
-    case "anthropic-api": return anthropicApiLlm(model, { apiKeyEnv: opts.apiKeyEnv ?? "ANTHROPIC_API_KEY", baseUrl: opts.baseUrl, maxTokens: opts.maxTokens });
+    case "anthropic-api": return anthropicApiLlm(model, { apiKeyEnv: opts.apiKeyEnv ?? "ANTHROPIC_API_KEY", baseUrl: opts.baseUrl, maxTokens: opts.maxTokens, effort: opts.effort });
     default: return null;
   }
 }
@@ -282,7 +306,7 @@ export function resolveLlm(spec: string, opts: { baseUrl?: string; apiKeyEnv?: s
  * caller then checks the CLI is installed), and a config error when options.llm is
  * malformed. Default, when nothing is set: the claude CLI with `sonnet`.
  */
-export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: string; temperature?: number; config?: unknown }): { llm: Llm | null; usesCli: boolean; error?: string } {
+export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: string; temperature?: number; effort?: Effort; config?: unknown }): { llm: Llm | null; usesCli: boolean; error?: string } {
   let cfg: LlmConfig = {};
   if (input.config !== undefined) {
     const r = LlmOptions.safeParse(input.config);
@@ -296,7 +320,7 @@ export function selectLlm(input: { spec?: string; baseUrl?: string; apiKeyEnv?: 
       spec = `${cfg.provider}:${cfg.model}`;
     } else spec = cfg.model ?? "sonnet"; // claude CLI
   }
-  const opts = { baseUrl: input.baseUrl ?? cfg.baseUrl, apiKeyEnv: input.apiKeyEnv ?? cfg.apiKeyEnv, temperature: input.temperature ?? cfg.temperature, path: cfg.path, maxTokens: cfg.maxTokens };
+  const opts = { baseUrl: input.baseUrl ?? cfg.baseUrl, apiKeyEnv: input.apiKeyEnv ?? cfg.apiKeyEnv, temperature: input.temperature ?? cfg.temperature, effort: input.effort, path: cfg.path, maxTokens: cfg.maxTokens };
   return { llm: resolveLlm(spec, opts), usesCli: spec.indexOf(":") < 0 };
 }
 

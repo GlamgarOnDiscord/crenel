@@ -152,3 +152,19 @@ test("when the server is started with --llm off, a custom model is refused", asy
     assert.deepEqual(state.customProviders, [], "no providers advertised when model access is off");
   } finally { await c.close(); }
 });
+
+test("the console's effort reaches the model factory; an unknown effort is a 400", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-cm-"));
+  const cfg = join(dir, "crenel.config.yaml");
+  writeFileSync(cfg, `project: t\nprojectDir: .\nscope:\n  allowedHosts: [127.0.0.1]\nchecks: []\n`);
+  const seen: { model: string; effort?: string }[] = [];
+  const srv = await startServer({ configPath: cfg, port: 0, token: "tk", webDir: null, llm: "auto", claudeAvailable: true, checks: [],
+    llmFactory: (model, o) => { seen.push({ model, effort: o?.effort }); return null; } });
+  const post = (body: unknown) => fetch(`${srv.url}/api/runs`, { method: "POST", headers: { authorization: "Bearer tk", "content-type": "application/json" }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await post({ prompt: "x", model: "opus-4-8", effort: "med" })).status, 201);
+    assert.equal((await post({ prompt: "x", model: "sonnet" })).status, 201);
+    assert.deepEqual(seen, [{ model: "opus-4-8", effort: "medium" }, { model: "sonnet", effort: undefined }]);
+    assert.equal((await post({ prompt: "x", model: "opus", effort: "turbo" })).status, 400);
+  } finally { await srv.close(); rmSync(dir, { recursive: true, force: true }); }
+});
