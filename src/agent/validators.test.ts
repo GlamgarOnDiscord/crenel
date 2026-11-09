@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authzOracle, ownerFieldOracle, ownerValue, claimFor, validateClaim, type Claim, type ValidatorEnv } from "./validators.js";
+import { authzOracle, ownerFieldOracle, ownerValue, injectParam, claimFor, validateClaim, type Claim, type ValidatorEnv } from "./validators.js";
 import { Scope } from "../core/scope.js";
 import { exposedSecrets } from "../checks/exposed-secrets.js";
 import { startDemoTarget, DEMO_TOKENS } from "../testing/demo-target.js";
@@ -29,6 +29,17 @@ test("oracle: volatile fields do not hide a match", () => {
   const o = { status: 200, body: '{"id":"p","owner":"b","updated_at":"2026-11-07T10:00:00Z","name":"roadmap for tenant b"}' };
   const a = { status: 200, body: '{"id":"p","owner":"b","updated_at":"2026-11-07T10:00:09Z","name":"roadmap for tenant b"}' };
   assert.equal(authzOracle({ attacker: a, owner: o, control: { status: 404, body: "" }, ownerMarkers: [] }).verdict, "leak");
+});
+
+test("injectParam: json mode puts the candidate in a JSON body (merging an existing one)", () => {
+  const q = injectParam({ url: "/s" }, "q", "x' OR 1=1", "query");
+  assert.match(q.url, /q=x/);
+  const b = injectParam({ url: "/s" }, "q", "v", "body");
+  assert.equal(b.headers?.["content-type"], "application/x-www-form-urlencoded");
+  const j = injectParam({ url: "/login", body: '{"user":"a"}' }, "pass", "' OR '1'='1", "json");
+  assert.equal(j.headers?.["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(j.body!), { user: "a", pass: "' OR '1'='1" });
+  assert.equal(j.method, "POST");
 });
 
 test("ownerValue: reads a field at the root or under a one-level wrapper, else undefined", () => {
