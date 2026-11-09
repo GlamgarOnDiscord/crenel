@@ -35,6 +35,7 @@ empty list runs every read-only check.
 | cors-reflection | The server echoes an arbitrary request Origin into Access-Control-Allow-Origin with Allow-Credentials: true (confirmed on two distinct origins) | yes (two reflected origins + credentials) | GETs with an Origin header on the declared host |
 | header-injection | A request parameter flows into a response header without CR/LF stripping (CRLF / response splitting) | yes (injected header appears with our nonce; benign control does not) | GETs on the declared host |
 | dependency-exposure | A dependency manifest (package.json, or a .bak reachable via a listing / null-byte) served with a library pinned below a known-advisory version | yes (manifest served + documented-vulnerable range) | GETs on the declared host |
+| graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |

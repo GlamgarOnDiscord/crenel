@@ -1,0 +1,12 @@
+{
+  "title": "GraphQL fields injectable by SQL (boolean) and OS command, discovered from the schema, next to a safe field",
+  "type": "live",
+  "config": { "scope": { "allowActiveTesting": true }, "options": { "graphql-injection": { "enabled": true, "endpoint": "/" } } },
+  "mustFind": [
+    { "id": "gql-sqli", "check": "graphql-injection", "text": "vulnSearch", "state": "proven", "minSeverity": "critical", "why": "A TRUE tautology changes the result set: SQL injection." },
+    { "id": "gql-cmd", "check": "graphql-injection", "text": "runCmd", "state": "proven", "minSeverity": "critical", "why": "The server evaluated 7*7: OS command injection." }
+  ],
+  "mustNotFlag": [
+    { "id": "gql-safe", "check": "graphql-injection", "text": "safeSearch", "forbid": "proven", "why": "This field treats its argument as a literal." }
+  ]
+}
