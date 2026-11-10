@@ -1,7 +1,7 @@
 // default-creds: a login endpoint accepts a well-known default/weak credential.
 // This is NOT a brute-force and NOT a target signature: it tries a small, generic
 // dictionary of universally-known weak passwords (the same idea as the JWT weak-
-// secret dictionary) against accounts the operator declares (or conventional admin
+// secret dictionary) against accounts the operator declares (required; no conventional-name
 // names), and proves a finding ONLY when a dictionary password is ACCEPTED while a
 // random wrong password on the SAME account is REJECTED — the negative control
 // that rules out an accept-all endpoint. Active (it submits logins), opt-in.
