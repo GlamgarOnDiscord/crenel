@@ -1,0 +1,42 @@
+{
+  "title": "GraphQL field that fetches an attacker URL (SSRF), next to a safe echo and a destructive field",
+  "type": "live",
+  "config": {
+    "scope": {
+      "allowActiveTesting": true
+    },
+    "options": {
+      "graphql-ssrf": {
+        "enabled": true,
+        "endpoint": "/",
+        "callbackHost": "127.0.0.1"
+      }
+    }
+  },
+  "mustFind": [
+    {
+      "id": "gql-ssrf",
+      "check": "graphql-ssrf",
+      "text": "importUrl",
+      "state": "proven",
+      "minSeverity": "high",
+      "why": "The importUrl field fetches an attacker-chosen host:port/path; the out-of-band listener is hit with the nonce."
+    }
+  ],
+  "mustNotFlag": [
+    {
+      "id": "safe-echo",
+      "check": "graphql-ssrf",
+      "text": "echo",
+      "forbid": "proven",
+      "why": "echo never performs a server-side fetch."
+    },
+    {
+      "id": "destructive-skipped",
+      "check": "graphql-ssrf",
+      "text": "purgeByUrl",
+      "forbid": "proven",
+      "why": "A destructive-named field must never be fired or proven."
+    }
+  ]
+}
