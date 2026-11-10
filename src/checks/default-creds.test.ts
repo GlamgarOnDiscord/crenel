@@ -12,7 +12,7 @@ function loginServer() {
   return createServer((req, res) => {
     let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => {
       let email = "", password = ""; try { ({ email, password } = JSON.parse(b)); } catch {}
-      const ok = () => { res.writeHead(200, { "content-type": "application/json" }); res.end('{"authentication":{"token":"t"}}'); };
+      const ok = () => { res.writeHead(200, { "content-type": "application/json" }); res.end('{"authentication":{"token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.ZmFrZXNpZ25hdHVyZXZhbHVl"}}'); };
       const no = () => { res.writeHead(401); res.end('{"error":"invalid"}'); };
       if (email === "weak@x") return password === "admin123" ? ok() : no();
       if (email === "open@x") return ok(); // accepts anything

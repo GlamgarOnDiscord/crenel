@@ -30,17 +30,21 @@ const DEFAULT_PASSWORDS = [
   "admin", "admin123", "password", "Password1", "123456", "12345678", "changeme",
   "root", "toor", "test", "letmein", "welcome", "qwerty", "admin@123", "P@ssw0rd",
 ];
-// Conventional admin identities, used when the operator declares no account.
-const CONVENTIONAL_ACCOUNTS = ["admin", "administrator", "admin@admin.com", "root@localhost", "test@test.com"];
 
-// A login is "accepted" when it answers 2xx and the body or a cookie carries an
-// authentication artefact (a token / session), so a 2xx error page is not a login.
-const AUTH_MARKER = /"?(token|authentication|access[_-]?token|jwt|bearer|sessionId|auth)"?\s*[:=]/i;
+// A login is "accepted" when it answers 2xx AND carries a non-empty authentication
+// artefact: a token/JWT value of real length in the body, or a session cookie with
+// a real value. A bare key or the word "token" in prose is not enough — we require
+// a plausible secret, so a 2xx page that merely mentions auth is not a login. The
+// negative control (a wrong password on the same account, which must NOT be
+// accepted) then rules out an accept-all endpoint.
+const TOKEN_VALUE = /"(?:token|access[_-]?token|jwt|id[_-]?token|authorization)"\s*:\s*"([^"]{16,})"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/i;
 function accepted(res: { status: number; body: string; headers: Headers }): boolean {
   if (res.status < 200 || res.status >= 300) return false;
-  if (AUTH_MARKER.test(res.body)) return true;
+  if (TOKEN_VALUE.test(res.body)) return true;
+  // A session cookie whose value is a real, non-trivial secret (not a flag/empty).
   const sc = res.headers.get("set-cookie") ?? "";
-  return /sess|token|auth|jwt|sid/i.test(sc);
+  const m = /(?:sess[^=;]*|token|jwt|sid|auth[^=;]*)=([^;,\s]{12,})/i.exec(sc);
+  return !!m && !/^(deleted|null|false|0|-)$/i.test(m[1] ?? "");
 }
 
 export const defaultCreds: Check = {
@@ -61,10 +65,15 @@ export const defaultCreds: Check = {
       const method = ep.method ?? "POST";
       const login = async (user: string, pass: string) => {
         const body = JSON.stringify({ [uf]: user, [pf]: pass });
-        const r = await safeFetch(url, ctx.scope, { method, headers: { "content-type": "application/json" }, body, maxBytes: 64 * 1024 });
+        // Do not follow redirects: a login that sets the session on a 3xx must be
+        // read at the first hop so the initial Set-Cookie is visible.
+        const r = await safeFetch(url, ctx.scope, { method, headers: { "content-type": "application/json" }, body, followRedirects: false, maxBytes: 64 * 1024 });
         return { status: r.status, body: r.body, headers: r.headers };
       };
-      for (const user of ep.accounts ?? CONVENTIONAL_ACCOUNTS) {
+      // Only accounts the operator explicitly declared are probed: trying a password
+      // list against conventional names could lock out real accounts the operator
+      // did not mean to test.
+      for (const user of ep.accounts ?? []) {
         // Control FIRST: a random wrong password on this account must be rejected.
         // If it is accepted, the endpoint accepts anything — prove nothing here.
         let control;
@@ -86,7 +95,7 @@ export const defaultCreds: Check = {
           remediation: `Force a password reset for accounts using default/weak passwords; block common passwords at sign-up and on change; add rate limiting and MFA on login.`,
           proof: {
             method: "live login on staging: a well-known password is accepted while a random wrong password on the same account is rejected (negative control)",
-            replay: `curl -i -X ${method} -H 'content-type: application/json' --data '{"${uf}":"${user}","${pf}":"${hit}"}' '${url}'  # authenticates; a wrong password returns ${control.status}`,
+            replay: `curl -i -X ${method} -H 'content-type: application/json' --data ${JSON.stringify(JSON.stringify({ [uf]: user, [pf]: hit }))} ${JSON.stringify(url)}  # authenticates; a wrong password returns ${control.status}`,
             evidence: `"${hit}" -> accepted; random wrong password -> HTTP ${control.status}`,
           },
           regressionHint: `After deploy, ${user} must not log in with "${hit}" at ${ep.url}.`,
