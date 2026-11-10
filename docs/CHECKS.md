@@ -59,6 +59,7 @@ empty list runs every read-only check.
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
 | authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
+| nested-authz | Cross-tenant read of a nested resource (server trusts the leaf id) | yes (live differential) | yes + active gate |
 | race | A limit (coupon, credits, invite) consumed more than allowed by concurrent requests | yes (responses and A's read both above the limit) | **writes**: allowActiveTesting + `options.race.enabled`, one burst of at most 25 |
 | mass-assignment | Privileged fields (role, plan, credits, isAdmin, owner) accepted in a user's own update | yes (A's next read shows the value) | **writes**: allowActiveTesting + `options.mass-assignment.enabled` |
 | auth-injection | SQL/NoSQL authentication bypass on a declared login field (a tautology accepted where a benign value and a false tautology are denied) | yes (live differential with a control, opt-in) | **crafted logins**: allowActiveTesting + `options.auth-injection.enabled` + declared endpoints |
