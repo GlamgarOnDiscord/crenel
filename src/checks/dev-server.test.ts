@@ -24,7 +24,7 @@ async function run(server: ReturnType<typeof serve>) {
   }
 }
 
-test("dev-server: an exposed Werkzeug interactive debugger is proven", async () => {
+test("dev-server: an exposed Werkzeug debugger is proven, with Flask-specific remediation", async () => {
   // Flask debug=True serves the debugger's own JS through the magic query.
   const server = serve((url) =>
     url.includes("__debugger__=yes") && url.includes("f=debugger.js")
@@ -34,8 +34,10 @@ test("dev-server: an exposed Werkzeug interactive debugger is proven", async () 
   const found = await run(server);
   const proven = found.filter((f) => f.state === "proven");
   assert.equal(proven.length, 1, "the exposed debugger is the one finding");
-  assert.match(proven[0]!.title, /Werkzeug interactive debugger/);
+  assert.match(proven[0]!.title, /Werkzeug debugger/);
   assert.equal(proven[0]!.severity, "high");
+  assert.match(proven[0]!.remediation ?? "", /debug off|FLASK_DEBUG/, "Flask users are told to turn debug off, not to run vite build");
+  assert.doesNotMatch(proven[0]!.remediation ?? "", /vite|next build/i);
 });
 
 test("dev-server: an app NOT in debug mode (404 on the magic query) is not a finding", async () => {
