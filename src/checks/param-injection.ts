@@ -31,6 +31,11 @@ interface ParamEndpoint {
 // Generic SQL tautology pairs (TRUE / FALSE). The FALSE member is the control: it
 // must diverge for the TRUE one to prove anything. Same set as auth-injection.
 const SQL_PAIRS: [string, string][] = [
+  // Error-based first: a lone quote breaks the query (a NEW database error the
+  // baseline lacks), while a doubled quote is valid and the control. Catches the
+  // very common case where a tautology parses cleanly but a bare quote does not.
+  ["'", "''"],
+  ['"', '""'],
   ["' OR '1'='1", "' AND '1'='2"],
   ["' OR 1=1-- ", "' AND 1=2-- "],
   ['" OR "1"="1', '" AND "1"="2'],
