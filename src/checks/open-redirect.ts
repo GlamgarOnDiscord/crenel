@@ -51,7 +51,7 @@ export const openRedirect: Check = {
           location: `${base}${path}`,
           description: `GET ${path}?${param}=<any URL> answers with a redirect to each of two distinct attacker URLs (${a.res.status}, ${b.res.status}). A link on your own domain can send users to a phishing page, or leak OAuth codes to another host.`,
           remediation: `Only redirect to relative paths or to an allowlist of your own hosts; reject absolute URLs and protocol-relative ones (//host) in ${param}.`,
-          proof: { method: "Two GETs with distinct sentinel URLs under .invalid, redirects read without following them", replay: `curl -sI '${a.url}' | grep -i '^location'`, evidence: `HTTP ${a.res.status}, Location: ${a.target}; HTTP ${b.res.status}, Location: ${b.target}` },
+          proof: { method: "Two GETs with distinct sentinel URLs under .invalid, redirects read without following them", replay: `curl -s -D - -o /dev/null '${a.url}' && curl -s -D - -o /dev/null '${b.url}'  # both Location headers echo the sentinel`, evidence: `HTTP ${a.res.status}, Location: ${a.target}; HTTP ${b.res.status}, Location: ${b.target}` },
           regressionHint: `${path}?${param}=https://example.invalid must not redirect off-site.`,
         });
         break; // one parameter per path is enough proof
