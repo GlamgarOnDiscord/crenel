@@ -13,6 +13,12 @@ const PROBES: { path: string; what: string; signature: RegExp; headers?: Record<
   { path: "/_next/webpack-hmr", what: "Next.js dev server (HMR channel)", signature: /^(data:|event:|:)/m, headers: { accept: "text/event-stream" } },
   { path: "/webpack-dev-server", what: "webpack-dev-server", signature: /webpack-dev-server|Webpack Dev Server/i },
   { path: "/sockjs-node/info", what: "webpack-dev-server (sockjs)", signature: /"websocket"\s*:\s*(true|false)/ },
+  // The Werkzeug (Flask) interactive debugger left on in production: debug=True
+  // serves its own debugger assets through the ?__debugger__=yes&cmd=resource
+  // magic query on any route. Those markers belong only to that debugger, so a
+  // 200 carrying them is an exposed interactive console (RCE-grade if the PIN is
+  // cracked or EVALEX is trusted), not a page that merely mentions debugging.
+  { path: "/?__debugger__=yes&cmd=resource&f=debugger.js", what: "Werkzeug interactive debugger (Flask debug mode)", signature: /createInteractiveConsole|initPinBox|EVALEX_TRUSTED/ },
 ];
 
 export const devServer: Check = {
