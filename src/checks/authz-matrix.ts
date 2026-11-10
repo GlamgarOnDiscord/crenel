@@ -174,12 +174,13 @@ export const authzMatrix: Check = {
     // Same oracle as the agent's validator: a 200 is not proof. The attacker's
     // body must be the owner's object, and a negative control (an id that does
     // not exist) must not answer the same way. Each case is tried with A's
-    // token, C's if declared, then with no token at all: a route can refuse a
-    // wrong token and still serve an anonymous caller.
-    const actors: { key: "a" | "c" | "anon"; who: string; auth?: Auth }[] = [
+    // token, and C's if declared — two *other tenants*. The anonymous caller is
+    // handled separately (the public-route guard below): a cross-tenant break is
+    // only meaningful on a route that actually refuses an anonymous caller, so a
+    // route anyone can read is reported as a lead, never a "proven" BOLA.
+    const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = [
       { key: "a", who: "account A's credentials", auth: accounts.a },
       ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c }] : []),
-      { key: "anon", who: "no credentials at all" },
     ];
     const ownerBodies: string[] = [];
     for (const c of cases) {
@@ -190,6 +191,36 @@ export const authzMatrix: Check = {
       try {
         const owner = hasAuth(accounts.b) ? await get(url, accounts.b) : undefined;
         if (owner && owner.status >= 200 && owner.status < 300) ownerBodies.push(owner.body);
+        // Public-route guard. Before claiming a cross-tenant break, check that the
+        // route refuses an anonymous caller. If an anonymous GET already returns
+        // B's object, the route is not access-controlled at all: another account
+        // reaching it is NOT broken object-level authorization (everyone can, by
+        // design or by a missing auth gate we cannot tell apart from here). Report
+        // one lead — never a "proven" BOLA an anonymous request would also satisfy.
+        // The anonymous probe never follows redirects: a 302 to /login is a
+        // denial, not a leak, and following it can loop. A failure here only skips
+        // the guard (treated as "not public"), never the cross-tenant checks below.
+        const anonGet = (u: string) => safeFetch(u, ctx.scope, { method: "GET", followRedirects: false }).then((r) => ({ status: r.status, body: r.body })).catch(() => ({ status: 0, body: "" }));
+        const anonCtl = await anonGet(controlUrl);
+        const anon = await anonGet(url);
+        const anonLeak = authzOracle({ attacker: anon, owner, control: anonCtl, ownerMarkers: markers });
+        if (anonLeak.verdict === "leak") {
+          findings.push({
+            id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}:public`,
+            check: "authz-matrix",
+            title: `${c.resource.name} is readable without authentication (${c.method} ${anon.status})`,
+            severity: "medium", state: "unproven", location: url,
+            description: `An anonymous ${c.method} on this ${c.resource.name} returns the object (${anonLeak.reason}). The route is not access-controlled, so another account reaching it is not a broken-authorization proof — anyone can read it. Confirm whether this object is meant to be public; if not, require authentication, then enforce the per-object ownership check.`,
+            remediation: `Require authentication on ${c.resource.name}, then enforce the per-object ownership check for every authenticated caller.`,
+            proof: {
+              method: "live anonymous read on staging: owner baseline, anonymous caller, negative control",
+              replay: `curl -i -X ${c.method} '${url}'`,
+              evidence: `anonymous HTTP ${anon.status}; control ${anonCtl.status}${owner ? `; owner ${owner.status}` : ""}. ${anonLeak.reason}`,
+            },
+            regressionHint: renderTestFile([c.resource]),
+          });
+          continue; // public route: do not assert a cross-tenant authorization break on it
+        }
         for (const actor of actors) {
           const attacker = await get(url, actor.auth);
           const control = await get(controlUrl, actor.auth);
@@ -203,7 +234,7 @@ export const authzMatrix: Check = {
             id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}${actor.key === "a" ? "" : `:${actor.key}`}`,
             check: "authz-matrix",
             title: proven
-              ? `${actor.key === "anon" ? "An anonymous caller" : `Account ${actor.key.toUpperCase()}`} reached account B's ${c.resource.name} (${c.method} ${attacker.status})`
+              ? `Account ${actor.key.toUpperCase()} reached account B's ${c.resource.name} (${c.method} ${attacker.status})`
               : `Possible cross-tenant access to ${c.resource.name} (${c.method} ${attacker.status}), not proven`,
             severity: proven ? "critical" : "medium",
             state: proven ? "proven" : "unproven",
@@ -322,7 +353,7 @@ export const authzMatrix: Check = {
           if (owner.status < 200 || owner.status >= 300) continue; // not readable by B: not provably B's
           const anon = await get(url);
           if (anon.status >= 200 && anon.status < 300 && anon.body === owner.body) continue; // public object
-          for (const actor of actors.filter((x) => x.key !== "anon")) {
+          for (const actor of actors) {
             const attacker = await get(url, actor.auth);
             const control = await get(controlUrl, actor.auth);
             const o = authzOracle({ attacker, owner, control, ownerMarkers: markers });

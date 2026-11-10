@@ -220,3 +220,36 @@ test("owner-id differential: a single owner across all reads is NOT proven (no f
     assert.ok(!found.some((f) => f.state === "proven"), "all one owner: nothing to prove");
   } finally { server.close(); }
 });
+
+test("public route: an anonymous caller already gets B's object, so another account reaching it is NOT a proven BOLA (zero false positive)", async () => {
+  const http = await import("node:http");
+  // A deliberately public endpoint: GET /users/v1/<name> returns the user's
+  // record (carrying the marker email) to ANY caller — bearer, wrong token, or
+  // none at all — and 404s a non-existent name. Account A reaching B's record is
+  // not broken authorization here: everyone can. The guard must report it as a
+  // lead ("readable without authentication"), never a critical cross-tenant proof.
+  const server = http.createServer((req, res) => {
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"not found"}'); }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ username: "name2", email: "mail2@mail.com" }));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true });
+    const options = {
+      "authz-matrix": {
+        resources: [{ name: "user", path: "/users/v1/:id", methods: ["GET"] }],
+        accounts: { a: { label: "A", token: "tok-a", owns: { user: ["name1"] } }, b: { label: "B", marker: "mail2@mail.com", owns: { user: ["name2"] } } },
+      },
+    };
+    const found = await authzMatrix.run({ scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {} });
+    assert.ok(!found.some((f) => f.state === "proven"), "a public route is never a proven cross-tenant break");
+    const lead = found.find((f) => f.id.endsWith(":public"));
+    assert.ok(lead, "the public route is reported as a lead");
+    assert.equal(lead!.state, "unproven");
+    assert.match(lead!.title, /without authentication/i);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
