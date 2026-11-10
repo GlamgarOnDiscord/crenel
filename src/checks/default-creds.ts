@@ -17,8 +17,9 @@ interface CredEndpoint {
   userField?: string;
   /** Body field for the password. Default "password". */
   passField?: string;
-  /** Accounts (emails/usernames) to try the dictionary against. When omitted, a
-   * small set of conventional admin identities is used. */
+  /** Accounts (emails/usernames) to try the dictionary against. Required: with no
+   * account the check does nothing, so a password list never hits an account the
+   * operator did not name (which could lock it out). */
   accounts?: string[];
   /** HTTP method. Default POST. */
   method?: string;
