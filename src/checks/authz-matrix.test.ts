@@ -253,3 +253,33 @@ test("public route: an anonymous caller already gets B's object, so another acco
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+test("public route guard: a one-off anonymous leak (stale cache, race) does not hide a real cross-tenant break", async () => {
+  const http = await import("node:http");
+  // The first anonymous read of B's record leaks (a shared cache entry), every
+  // later anonymous read is refused; account A keeps reading B's record. One
+  // anonymous response is not enough to call the route public: A's read is a BOLA.
+  let anonReads = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"not found"}'); }
+    if (!req.headers.authorization && anonReads++ > 0) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ username: "name2", email: "mail2@mail.com" }));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true });
+    const options = {
+      "authz-matrix": {
+        resources: [{ name: "user", path: "/users/v1/:id", methods: ["GET"] }],
+        accounts: { a: { label: "A", token: "tok-a", owns: { user: ["name1"] } }, b: { label: "B", marker: "mail2@mail.com", owns: { user: ["name2"] } } },
+      },
+    };
+    const found = await authzMatrix.run({ scope, projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {} });
+    assert.ok(!found.some((f) => f.id.endsWith(":public")), "one anonymous leak is not a public route");
+    assert.ok(found.some((f) => f.state === "proven"), "A reading B's record stays a proven cross-tenant break");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});

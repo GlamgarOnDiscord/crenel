@@ -204,7 +204,11 @@ export const authzMatrix: Check = {
         const anonCtl = await anonGet(controlUrl);
         const anon = await anonGet(url);
         const anonLeak = authzOracle({ attacker: anon, owner, control: anonCtl, ownerMarkers: markers });
-        if (anonLeak.verdict === "leak") {
+        // Skipping the authenticated probes hides a real BOLA if the anonymous read
+        // was a one-off (a shared cache entry, a race with B's own request): the
+        // route counts as public only when a second anonymous read leaks again.
+        const anonAgain = anonLeak.verdict === "leak" ? authzOracle({ attacker: await anonGet(url), owner, control: anonCtl, ownerMarkers: markers }) : anonLeak;
+        if (anonLeak.verdict === "leak" && anonAgain.verdict === "leak") {
           findings.push({
             id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}:public`,
             check: "authz-matrix",
