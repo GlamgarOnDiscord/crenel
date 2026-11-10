@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { openRedirect } from "./open-redirect.js";
 import { Scope } from "../core/scope.js";
 
-test("a login that redirects to any ?next= URL is proven; a relative-only redirect is not; nothing is followed", async () => {
+test("a login that redirects to any ?next= URL is proven; a fixed redirect is not; nothing is followed", async () => {
   const hits: string[] = [];
   const srv = createServer((req, res) => {
     hits.push(req.url ?? "");

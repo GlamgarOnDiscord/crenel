@@ -1,0 +1,11 @@
+{
+  "title": "A generic redirect parameter is reflected, next to a fixed redirect",
+  "type": "live",
+  "config": { "options": { "open-redirect": { "paths": ["/redirect", "/fixed"], "params": ["to"] } } },
+  "mustFind": [
+    { "id": "redirect-to-reflected", "check": "open-redirect", "where": "/redirect", "state": "proven", "minSeverity": "medium", "why": "Two distinct attacker-controlled URLs are both returned as the redirect target." }
+  ],
+  "mustNotFlag": [
+    { "id": "fixed-redirect", "check": "open-redirect", "where": "/fixed", "forbid": "any", "why": "The endpoint ignores the parameter and always redirects to the same in-site location." }
+  ]
+}
