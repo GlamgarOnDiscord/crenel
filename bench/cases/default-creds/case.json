@@ -1,0 +1,52 @@
+{
+  "title": "A login accepts a known default password, next to an account that does not",
+  "type": "live",
+  "config": {
+    "scope": {
+      "allowActiveTesting": true
+    },
+    "options": {
+      "default-creds": {
+        "enabled": true,
+        "endpoints": [
+          {
+            "url": "/login",
+            "userField": "email",
+            "passField": "password",
+            "accounts": [
+              "weak@x",
+              "strong@x",
+              "open@x"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "mustFind": [
+    {
+      "id": "weak-default",
+      "check": "default-creds",
+      "text": "weak@x",
+      "state": "proven",
+      "minSeverity": "high",
+      "why": "weak@x logs in with the well-known password admin123 while a random wrong password is rejected."
+    }
+  ],
+  "mustNotFlag": [
+    {
+      "id": "strong-account",
+      "check": "default-creds",
+      "text": "strong@x",
+      "forbid": "proven",
+      "why": "strong@x rejects every dictionary password."
+    },
+    {
+      "id": "accept-all",
+      "check": "default-creds",
+      "text": "open@x",
+      "forbid": "proven",
+      "why": "open@x accepts ANY password; the negative control must keep it unproven, proving the control works."
+    }
+  ]
+}

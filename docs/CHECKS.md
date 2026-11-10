@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 55 checks. Each is deterministic and read-only by default (the
+Crenel runs 56 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -36,6 +36,7 @@ empty list runs every read-only check.
 | dependency-exposure | A dependency manifest (package.json) or lockfile (package-lock.json) served with a library at an EXACT version below a known advisory bound (a version range is not provable and is skipped) | yes (manifest/lockfile served + an exactly-pinned version below the bound) | GETs on the declared host |
 | graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (error-based or boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control; boolean SQL requires all three responses error-free) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
 | graphql-ssrf | A schema-discovered GraphQL field (URL/host-like argument) fetches an attacker URL, proven out-of-band (the nonce rides the request path). Destructive-named fields are never fired; every probe is awaited | yes (OOB callback with a unique nonce) | **outbound-triggering**: a `stagingUrl` + allowActiveTesting + `options.graphql-ssrf.enabled` + a callbackHost the target can reach |
+| default-creds | A login accepts a well-known default/weak password for a declared account | yes (a dictionary password accepted while a random wrong password on the same account is rejected — the control rules out accept-all) | **login attempts**: a `stagingUrl` + declared `options.default-creds.endpoints` + allowActiveTesting + `options.default-creds.enabled` |
 | reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (our exact nonce-bearing markup reflected unescaped in an HTML response vs a benign control; an escaped reflection is not flagged) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
