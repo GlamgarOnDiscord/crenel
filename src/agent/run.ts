@@ -31,6 +31,7 @@ import { authorize, type GateDecision, type Judge, type Mode, type PlannedReques
 import { plannedWrites } from "../checks/authz-write.js";
 import { plannedMass } from "../checks/mass-assignment.js";
 import { plannedRace } from "../checks/race.js";
+import { plannedReplays } from "../checks/replay.js";
 import { authzUrl, claimFor, validateClaim, type AuthzOptions, type Claim, type ClaimVerdict } from "./validators.js";
 import { fence, untrusted, UNTRUSTED_PREAMBLE } from "./untrusted.js";
 import { estimateTokens, type Llm } from "./llm.js";
@@ -73,6 +74,7 @@ const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: stri
   "authz-write": plannedWrites,
   "mass-assignment": plannedMass,
   race: plannedRace,
+  replay: plannedReplays,
 };
 const LABEL: Record<string, string> = {
   "active.writes": "Écritures actives sur staging (opt-in, valeurs restaurées)",
