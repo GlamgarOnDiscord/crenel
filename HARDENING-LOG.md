@@ -4,6 +4,17 @@ Audit défensif du code de Crenel lui-même. Base : `065cef4` (origin/main). Ouv
 
 Légende statut : `ouvert` · `en cours` · `corrigé (commit)` · `arbitrage` (décision attendue de Tom) · `accepté` (risque assumé, documenté).
 
+## En pause (2026-11-11) : cibles restantes, à reprendre
+
+Le hardening est suspendu au profit de l'axe benchmark (voir `BENCHMARK-AXIS.md`). Ordre de reprise :
+
+1. Montages docker/wsl (`src/toolbox/docker.ts`, `wsl.ts`) : réseau, volumes en écriture, variables d'environnement transmises.
+2. ReDoS dans les regex de `src/checks/*` (corps jusqu'à 2 Mo contrôlés par la cible).
+3. Intégrations (`src/integrations/*`) : stockage et signature des secrets de webhook, Slack.
+4. `pnpm audit` (réseau requis).
+
+En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèle réseau WSL (rien n'y force le passage par le proxy).
+
 ## Synthèse priorisée
 
 | # | Sévérité | Zone | Fichier:ligne | Statut |
