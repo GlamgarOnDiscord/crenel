@@ -13,6 +13,7 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
+import { isDirectoryListing, listedFiles, LISTING_PATHS } from "./directory-listing.js";
 
 // Where a manifest or lockfile is commonly reachable on a deployed site. Generic
 // conventional names only (no target-specific backup path).
@@ -20,6 +21,15 @@ const MANIFEST_PATHS = [
   "/package.json", "/package-lock.json", "/package.json.bak",
   "/static/package.json", "/assets/package.json",
 ];
+
+// A dependency manifest a directory index might name. Generic filenames, not a
+// target's backup path.
+const MANIFEST_NAME = /^(?:package\.json|package-lock\.json|npm-shrinkwrap\.json)(?:\.bak)?$/i;
+// A file whose extension a static server filters (403/400) can still be read
+// through a poison null byte: a NUL terminator before an allowed extension. A
+// generic, long-documented technique, tried only on a file a directory index
+// already named, and still a read-only GET on the declared host.
+const NULLBYTE_SUFFIXES = ["%2500.md", "%2500.txt", "%2500.pdf"];
 
 // A small, well-known advisory set: package -> the version BELOW which it is
 // vulnerable, with the class. Universal CVEs, not any one target's answer.
@@ -112,6 +122,23 @@ function isManifest(body: string): boolean {
   );
 }
 
+/** Read a manifest at `url`: a plain GET, then, if the extension is filtered or
+ * the body is not a manifest, the same file through a null-byte extension bypass.
+ * Returns the manifest body, or undefined. Read-only GETs on the declared host. */
+async function readManifest(ctx: CheckContext, url: string): Promise<string | undefined> {
+  try {
+    const r = await safeFetch(url, ctx.scope, { headers: { accept: "*/*" }, maxBytes: 1024 * 1024 });
+    if (r.status === 200 && isManifest(r.body)) return r.body;
+  } catch { /* fall through to a bypass */ }
+  for (const suf of NULLBYTE_SUFFIXES) {
+    try {
+      const r = await safeFetch(url + suf, ctx.scope, { headers: { accept: "*/*" }, maxBytes: 1024 * 1024 });
+      if (r.status === 200 && isManifest(r.body)) return r.body;
+    } catch { /* next suffix */ }
+  }
+  return undefined;
+}
+
 export const dependencyExposure: Check = {
   name: "dependency-exposure",
   title: "Dependency manifest served with a known-vulnerable library version",
@@ -140,6 +167,38 @@ export const dependencyExposure: Check = {
         proof: { method: "live read of the served manifest + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -s '${base}${path}'  # exactly-pinned deps with known advisories`, evidence: `served HTTP ${res.status}; vulnerable: ${list}` },
         regressionHint: `After deploy, ${path} must not be served, and these libraries must be upgraded.`,
       }];
+    }
+    // Discovery: a manifest a server actually lists in an open directory index.
+    // The listing is a generic misconfiguration (see directory-listing); here we
+    // read the manifest it exposes and run the same advisory oracle, so any
+    // server that lists a package manifest is covered, never one target's path.
+    const seen = new Set<string>();
+    for (const lp of LISTING_PATHS) {
+      let idx;
+      try { idx = await safeFetch(base + lp, ctx.scope, { headers: { accept: "text/html" }, maxBytes: 256 * 1024 }); } catch { continue; }
+      if (idx.status !== 200 || !isDirectoryListing(idx.body)) continue;
+      for (const name of listedFiles(idx.body).filter((n) => MANIFEST_NAME.test(n)).slice(0, 4)) {
+        const fileUrl = base + lp + name;
+        if (seen.has(fileUrl)) continue;
+        seen.add(fileUrl);
+        const body = await readManifest(ctx, fileUrl);
+        if (!body) continue;
+        const hits = vulnerableDeps(body);
+        if (hits.length === 0) { ctx.log(`dependency-exposure: ${lp}${name} served but no exactly-pinned advisory match`); continue; }
+        const list = hits.slice(0, 8).map((h) => `${h.name}@${h.version}`).join(", ");
+        return [{
+          id: `dependency-exposure:${lp}${name}`,
+          check: "dependency-exposure",
+          title: `Exposed manifest ${lp}${name} pins ${hits.length} vulnerable dependenc${hits.length > 1 ? "ies" : "y"} (${hits[0]!.name})`,
+          severity: "high",
+          state: "proven",
+          location: fileUrl,
+          description: `An open directory listing at ${lp} exposes ${name}, which pins library versions with public advisories: ${list}. For example ${hits[0]!.name}@${hits[0]!.version} — ${hits[0]!.why}.`,
+          remediation: "Disable directory indexing, remove dependency manifests and their backups from the web root, and upgrade the flagged libraries to a patched version.",
+          proof: { method: "manifest named in an open directory listing, read live (a filtered extension bypassed with a null byte where needed) + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -s '${fileUrl}'  # append a %00.<ext> suffix if the extension is filtered`, evidence: `manifest served via ${lp}; vulnerable: ${list}` },
+          regressionHint: `After deploy, ${lp} must not list files and ${name} must not be served.`,
+        }];
+      }
     }
     ctx.log("dependency-exposure: no vulnerable dependency manifest served");
     return [];

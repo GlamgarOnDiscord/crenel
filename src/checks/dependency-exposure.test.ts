@@ -57,3 +57,45 @@ test("dependency-exposure: a patched or ranged manifest is not flagged", async (
 test("dependency-exposure: a JSON soft-404 without a dependency structure is not a manifest", async () => {
   assert.equal((await run("/package.json", '{"error":"not found","dependencies":"nope"}')).length, 0);
 });
+
+// Discovery via an open directory listing + a null-byte extension bypass. The
+// server lists package.json.bak under /ftp/, blocks the plain .bak (extension
+// filter), and serves it only through package.json.bak%2500.md — the generic
+// poison-null-byte, mirroring how a real misconfigured static server behaves.
+// No manifest path is configured, so only discovery can find it.
+async function runListing(opts: { index: boolean; manifest?: string; bypassOnly?: boolean }) {
+  const INDEX = '<html><head><title>listing directory /ftp/</title></head><body><ul>'
+    + '<li><a href="coupons_2013.md.bak">coupons_2013.md.bak</a></li>'
+    + '<li><a href="package.json.bak">package.json.bak</a></li></ul></body></html>';
+  const srv = createServer((req, res) => {
+    const u = req.url ?? "";
+    if (u === "/ftp/" || u === "/ftp") { if (!opts.index) { res.writeHead(404); return res.end("no"); } res.writeHead(200, { "content-type": "text/html" }); return res.end(INDEX); }
+    if (u === "/ftp/package.json.bak") { res.writeHead(403); return res.end("Error: only .md and .pdf allowed"); } // extension filter
+    if (u === "/ftp/package.json.bak%2500.md" && opts.manifest) { res.writeHead(200, { "content-type": "application/json" }); return res.end(opts.manifest); }
+    res.writeHead(404); res.end("no");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  // No "paths" option: the direct-path loop finds nothing, only discovery can.
+  try { return await dependencyExposure.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} }); }
+  finally { srv.close(); }
+}
+test("dependency-exposure: a manifest named in an open listing, served past an extension filter via a null byte, is proven", async () => {
+  const f = await runListing({ index: true, manifest: '{"dependencies":{"sanitize-html":"1.4.2"}}' });
+  assert.equal(f.length, 1);
+  assert.equal(f[0]!.state, "proven");
+  assert.match(f[0]!.location!, /\/ftp\/package\.json\.bak$/); // the discovered file, not a configured path
+  assert.match(f[0]!.title, /sanitize-html/);
+});
+test("dependency-exposure: a listed manifest with only ranges is not proven", async () => {
+  const f = await runListing({ index: true, manifest: '{"dependencies":{"sanitize-html":"~1.4.2","lodash":"^4.0.0"}}' });
+  assert.equal(f.filter((x) => x.state === "proven").length, 0);
+});
+test("dependency-exposure: no proof without an open listing, even if the null-byte file would serve", async () => {
+  const f = await runListing({ index: false, manifest: '{"dependencies":{"sanitize-html":"1.4.2"}}' });
+  assert.equal(f.length, 0);
+});
+test("dependency-exposure: a listed manifest that does not actually serve is not proven", async () => {
+  const f = await runListing({ index: true }); // listing names it, but no variant returns it
+  assert.equal(f.length, 0);
+});
