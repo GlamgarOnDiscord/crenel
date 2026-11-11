@@ -37,6 +37,7 @@ import { bflaOracle } from "./bfla.js";
 import { massAssignOracle, buildBody, fieldRaw, fieldValue, createdId, createAssignOracle } from "./massassign.js";
 import { corsOracle } from "./cors.js";
 import { reuseOracle } from "./reuse.js";
+import { flagOracle } from "./flag.js";
 import { redirectOracle, type RedirectResp } from "./redirect.js";
 import { graphqlSuggestionsOracle, graphqlBatchOracle, SUGGESTION_PROBES } from "./graphql.js";
 import type { Severity } from "../core/types.js";
@@ -1726,7 +1727,32 @@ const exploreJwtForgeValidator: Validator = {
   },
 };
 
-export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator, exploreDataExposureValidator, exploreBflaValidator];
+// Flag capture: the model reached a CTF flag through a vulnerability and submits the
+// request that retrieved it. We replay that request and confirm a flag-format token
+// is in the real response (and was not one we sent): the capture is the exploitation
+// proven end to end. Any read, or an active write when active mode is on; the scoped
+// client enforces the perimeter and the active gate as for every other validator.
+const exploreFlagValidator: Validator = {
+  class: "explore.flag",
+  name: "flag-capture (CTF flag retrieved by replay)",
+  async validate(claim, env) {
+    const no = (reason: string, evidence?: Evidence): ClaimVerdict => ({ claimId: claim.id, state: "unproven", validator: this.name, reason, evidence });
+    const req = parseRequest(claim.detail.request);
+    if (!req) return no("no request to replay");
+    const url = resolveExploreUrl(req.url, env.stagingUrl);
+    if (!url) return no("not an http(s) URL");
+    const actor = req.as ?? "anon";
+    const res = await sendAs(req, actor, env, url);
+    const sent = `${url} ${JSON.stringify(req.headers ?? {})} ${req.body ?? ""}`;
+    const pattern = (env.options.explore as { flagPattern?: string } | undefined)?.flagPattern;
+    const o = flagOracle({ body: res.body, pattern, sent });
+    const evidence: Evidence = { request: reqLine((req.method ?? "GET").toUpperCase(), url, actor), response: `HTTP ${res.status}\n${o.flag ?? "(no flag)"}`, sha256: sha(res.body) };
+    if (o.verdict !== "proven") return no(o.reason, evidence);
+    return { claimId: claim.id, state: "proven", validator: this.name, reason: o.reason, evidence, ceiling: "high" };
+  },
+};
+
+export const GENERIC_VALIDATORS: Validator[] = [exploreReplayValidator, exploreCrossActorValidator, exploreSecretValidator, exploreFileValidator, exploreInjectionValidator, exploreSsrfValidator, exploreStoredXssValidator, exploreDomXssValidator, exploreLfiValidator, exploreJwtNoneValidator, exploreMassAssignValidator, exploreCorsValidator, exploreReuseValidator, exploreRedirectValidator, exploreGraphqlValidator, exploreJwtForgeValidator, exploreCrossWriteValidator, exploreUserEnumValidator, exploreePrivEscValidator, exploreDataExposureValidator, exploreBflaValidator, exploreFlagValidator];
 
 export const VALIDATORS: Validator[] = [authzValidator, baasValidator, headerValidator, replayValidator, fileReplayValidator, plainHttpValidator, ...GENERIC_VALIDATORS];
 

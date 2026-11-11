@@ -1068,3 +1068,25 @@ test("graphql: a REST endpoint that echoes an array body is not query batching",
     assert.equal((await validateClaim(claim("explore.graphql", { url: "/api/items" }), env)).state, "unproven");
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("explore.flag proves a CTF flag retrieved by replay, and refuses an echo of our own input", async () => {
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url!, "http://x");
+    res.writeHead(200, { "content-type": "text/html" });
+    if (u.pathname === "/admin/draft") return res.end("<textarea>flag{5f7d543b-2625-4b62-8373}</textarea>");
+    if (u.pathname === "/echo") return res.end(`you searched: ${u.searchParams.get("q") ?? ""}`);
+    res.end("nothing here");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const env: ValidatorEnv = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }), projectDir: ".", stagingUrl: base, checks: [], options: {} };
+    const proven = await validateClaim(claim("explore.flag", { request: { method: "GET", url: "/admin/draft" } }), env);
+    assert.equal(proven.state, "proven");
+    assert.match(proven.reason, /flag\{5f7d543b/);
+    const echo = await validateClaim(claim("explore.flag", { request: { method: "GET", url: "/echo?q=flag{aaaa-1111-bbbb}" } }), env);
+    assert.equal(echo.state, "unproven");
+    const none = await validateClaim(claim("explore.flag", { request: { method: "GET", url: "/nope" } }), env);
+    assert.equal(none.state, "unproven");
+  } finally { srv.close(); }
+});
