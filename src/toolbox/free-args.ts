@@ -3,7 +3,7 @@
 // A model may pick its own flags for an allowlisted tool, but never the ones
 // that matter for safety: the egress proxy, the rate, where files are written,
 // what code runs locally. Those are refused here, and Crenel's own values are
-// appended last (the proxy, the rate, nuclei's denied tags), so a run with free
+// set before and after them (the proxy, the rate, nuclei's denied tags), so a run with free
 // arguments still leaves only through the scoped proxy, within the budget. Any
 // URL must be on a declared host; any path must be a relative template path or
 // the tool's temp dir, never a file elsewhere on the machine.
@@ -36,8 +36,9 @@ const PER_TOOL_DENY: Record<ToolName, string[]> = {
     "it", "include-templates", "dast", "fuzz", "iserver", "interactsh-server", "interactsh-url", "itoken", "interactsh-token",
     "sf", "secret-file", "tp", "template-profile", "dut", "disable-unsigned-templates", "w", "workflows", "wu", "workflow-url", "tu", "template-url",
     "cloud", "dashboard", "pd", "auth", "ps", "passive",
+    "pt", "type", "ept", "exclude-type", "sresp", "store-resp", "store-resp-dir", "profile-mem",
   ],
-  katana: ["kf", "known-files", "jc", "js-crawl", "jsl", "jsluice", "xhr", "xhr-extraction", "aff", "automatic-form-fill", "ef", "extension-filter", "p", "parallelism"],
+  katana: ["kf", "known-files", "jc", "js-crawl", "jsl", "jsluice", "xhr", "xhr-extraction", "aff", "automatic-form-fill", "ef", "extension-filter", "p", "parallelism", "sf", "store-field", "sfd", "store-field-dir", "cwu", "chrome-ws-url"],
   httpx: ["t", "threads", "pa", "probe-all-ips", "asn", "cdn", "ldv", "list-dsl-variables", "fep", "favicon"],
   trufflehog: [],
 };
@@ -55,6 +56,8 @@ export function freeArgsProblem(tool: ToolName, args: unknown, scope: Scope): st
     const a = args[i];
     if (typeof a !== "string" || !a.length || a.length > 300) return `argument ${i + 1} is not a short string`;
     if (/[\u0000-\u001f]/.test(a)) return `argument ${i + 1} has a control character`;
+    // "--" or "-" ends option parsing in Go's flag package: Crenel's own flags after it would be ignored.
+    if (a === "--" || a === "-") return `argument ${i + 1} (${a}) would end option parsing`;
     if (a.startsWith("-")) {
       const f = flagName(a);
       if (tool === "trufflehog" ? !TRUFFLEHOG_ALLOW.has(f) : deny.has(f)) return `flag ${a.split("=")[0]} is set by Crenel or not allowed (proxy, rate, files, local code)`;
@@ -83,9 +86,12 @@ export function freeArgsProblem(tool: ToolName, args: unknown, scope: Scope): st
 }
 
 /**
- * The argv that runs: the tool, the model's arguments, then Crenel's own flags
- * last (proxy, rate, denied tags, no update check), so nothing the model passed
- * can loosen them. A target is added when the model gave none.
+ * The argv that runs: the tool, Crenel's own flags (proxy, rate, denied tags,
+ * no update check), the model's arguments, then Crenel's flags again. First,
+ * because Go's flag package stops at the first non-flag argument (a stray word,
+ * or a trailing flag that swallows the next one as its value), so flags after
+ * the model's could be dropped; last, so a single-value flag keeps Crenel's
+ * value. A target is added when the model gave none.
  */
 export function freeArgv(tool: ToolName, args: string[], p: { proxy: string; projectRoot: string; templatesDir: string }, o: { ratePerSec: number; target?: string; hosts?: string[] }): string[] {
   const rate = String(Math.max(1, Math.floor(o.ratePerSec)));
@@ -94,8 +100,13 @@ export function freeArgv(tool: ToolName, args: string[], p: { proxy: string; pro
   if (tool === "trufflehog") return ["trufflehog", "filesystem", p.projectRoot, ...args, "--json", "--no-update", "--no-verification"];
   if (tool === "nuclei") {
     const t = args.some((a) => ["t", "templates", "id", "tags"].includes(flagName(a))) ? [] : ["-t", `${p.templatesDir}/http`];
-    return ["nuclei", ...target, ...t, ...args.map((a) => a.replace(/^http\//, `${p.templatesDir}/http/`)), "-etags", DENIED_TAGS.join(","), "-pt", "http", "-proxy", p.proxy, "-rl", rate, "-c", "5", "-jsonl", "-silent", "-nc", "-omit-raw", "-duc", "-ni", "-no-stdin"];
+    const own = ["-etags", DENIED_TAGS.join(","), "-pt", "http", "-proxy", p.proxy, "-rl", rate, "-c", "5", "-jsonl", "-silent", "-nc", "-omit-raw", "-duc", "-ni", "-no-stdin"];
+    return ["nuclei", ...own, ...target, ...t, ...args.map((a) => a.replace(/^http\//, `${p.templatesDir}/http/`)), ...own];
   }
-  if (tool === "katana") return ["katana", ...target, ...args, "-fs", "fqdn", "-proxy", p.proxy, "-rl", rate, "-c", "2", "-p", "1", "-jsonl", "-silent", "-nc", "-duc"];
-  return ["httpx", ...target, ...args, "-http-proxy", p.proxy, "-rl", rate, "-t", "5", "-json", "-silent", "-nc", "-duc"];
+  if (tool === "katana") {
+    const own = ["-fs", "fqdn", "-proxy", p.proxy, "-rl", rate, "-c", "2", "-p", "1", "-jsonl", "-silent", "-nc", "-duc"];
+    return ["katana", ...own, ...target, ...args, ...own];
+  }
+  const own = ["-http-proxy", p.proxy, "-rl", rate, "-t", "5", "-json", "-silent", "-nc", "-duc"];
+  return ["httpx", ...own, ...target, ...args, ...own];
 }

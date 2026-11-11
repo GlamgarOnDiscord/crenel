@@ -149,7 +149,28 @@ test("free toolbox arguments: proxy, output, local code, off-scope URLs and path
   const argv = freeArgv("nuclei", ["-tags", "exposure"], { proxy: "http://px:1", projectRoot: "/project", templatesDir: "/opt/t" }, { ratePerSec: 3, target: "https://staging.acme.test/" });
   assert.equal(argv[argv.indexOf("-proxy") + 1], "http://px:1");
   assert.ok(argv.includes("-etags"));
-  assert.ok(argv.indexOf("-proxy") > argv.indexOf("-tags"));
+  assert.ok(argv.lastIndexOf("-proxy") > argv.indexOf("-tags"));
+});
+
+// Go's flag package stops at "--", "-" or the first non-flag word, and a trailing value flag swallows the next
+// argument: Crenel's flags must also come before the model's, and the terminators are refused.
+test("free toolbox arguments: nothing the model passes can make the tool skip Crenel's flags", () => {
+  const scope = new Scope({ allowedHosts: ["staging.acme.test"] });
+  for (const tool of ["nuclei", "katana", "httpx", "trufflehog"] as const) {
+    assert.ok(freeArgsProblem(tool, ["--"], scope), `${tool} --`);
+    assert.ok(freeArgsProblem(tool, ["-"], scope), `${tool} -`);
+  }
+  for (const bad of [["-pt", "javascript"], ["-type", "code"], ["-store-resp"], ["-profile-mem", "x"]]) assert.ok(freeArgsProblem("nuclei", bad, scope), `nuclei ${bad.join(" ")}`);
+  for (const bad of [["-sf", "url"], ["-store-field", "url"]]) assert.ok(freeArgsProblem("katana", bad, scope), `katana ${bad.join(" ")}`);
+  const paths = { proxy: "http://px:1", projectRoot: "/project", templatesDir: "/opt/t" };
+  for (const [tool, proxyFlag, model] of [["nuclei", "-proxy", ["word", "-H"]], ["katana", "-proxy", ["-H"]], ["httpx", "-http-proxy", ["word"]]] as const) {
+    const argv = freeArgv(tool, [...model], paths, { ratePerSec: 3, target: "https://staging.acme.test/", hosts: ["staging.acme.test"] });
+    const first = argv.indexOf(model[0]!);
+    assert.ok(argv.indexOf(proxyFlag) > 0 && argv.indexOf(proxyFlag) < first, `${tool}: the proxy is set before the model's arguments`);
+    assert.equal(argv[argv.indexOf(proxyFlag) + 1], "http://px:1");
+    assert.ok(argv.indexOf("-rl") < first, `${tool}: the rate is set before the model's arguments`);
+    if (tool === "nuclei") assert.ok(argv.indexOf("-etags") < first && argv.indexOf("-pt") < first);
+  }
 });
 
 // --- explore.injection: a server with a real boolean-SQLi param and a reflected-XSS param ---

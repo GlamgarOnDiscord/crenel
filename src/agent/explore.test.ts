@@ -271,7 +271,8 @@ test("explore: toolbox.run with free arguments keeps the proxy and the budget; u
     assert.equal(argvs.length, 1);
     const argv = argvs[0]!;
     assert.deepEqual(argv.slice(argv.indexOf("-proxy"), argv.indexOf("-proxy") + 2), ["-proxy", "http://proxy:1"]);
-    assert.ok(argv.indexOf("-proxy") > argv.indexOf("-d"), "Crenel's flags come last");
+    assert.ok(argv.lastIndexOf("-proxy") > argv.indexOf("-d"), "Crenel's flags come last");
+    assert.ok(argv.indexOf("-proxy") < argv.indexOf("-d"), "and first, so a non-flag argument cannot make the tool skip them");
   } finally { t.close(); }
 });
 
