@@ -14,6 +14,7 @@
 //     testing is enabled for an owned host, replay each cross-tenant request and
 //     report any that did not return 401/403/404 as PROVEN broken authorization.
 
+import { resolveAccounts, type LoginSpec } from "./session.js";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
@@ -56,6 +57,8 @@ interface AccountSpec {
   owns?: Record<string, string[]>;
   /** A string only B's objects contain (an email, an org id): proof the body is B's. */
   marker?: string;
+  /** A login flow run at the start of the check instead of a pre-obtained token or cookie (src/checks/session.ts). */
+  login?: LoginSpec;
 }
 
 interface AuthzOptions {
@@ -88,7 +91,7 @@ export const authzMatrix: Check = {
   title: "Cross-tenant authorization (an account must never reach another's data)",
   readOnly: true, // matrix generation is read-only; live probes are gated separately
   async run(ctx: CheckContext): Promise<Finding[]> {
-    const cfg = (ctx.options["authz-matrix"] ?? {}) as AuthzOptions;
+    const cfg = { ...((ctx.options["authz-matrix"] ?? {}) as AuthzOptions) };
     const resources = cfg.resources ?? [];
     const findings: Finding[] = [];
     const provenIds = new Set<string>();
@@ -96,6 +99,10 @@ export const authzMatrix: Check = {
     if (resources.length === 0) {
       ctx.log("authz-matrix: no resources declared, nothing to check");
       return findings;
+    }
+    // Declared login flows: a fresh session per run (short-lived tokens, cookie sessions).
+    if (ctx.stagingUrl && cfg.accounts && Object.values(cfg.accounts).some((a) => a?.login)) {
+      cfg.accounts = await resolveAccounts(ctx, cfg.accounts, "authz-matrix") as AuthzOptions["accounts"];
     }
 
     // Build the matrix: account A attempting to touch each id owned by B.

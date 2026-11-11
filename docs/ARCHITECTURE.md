@@ -104,6 +104,18 @@ own scope) and for an object shown to be the owner's: an owner field (`UserId`,
 own account record. An object every account may read (a catalog behind login)
 stays a lead.
 
+**Sessions behind a login.** A test account of `authz-matrix` may declare a
+`login` (`url`, `username` or `usernameEnv`, `passwordEnv`, optional
+`usernameField`, `passwordField`, `format: json|form`, `tokenPath`) instead of a
+pre-obtained `token` or `cookie`: the check logs in at the start of the run
+(`src/checks/session.ts`), so short-lived tokens and cookie sessions are reached.
+The token is the declared path, else a JWT anywhere in the JSON answer, else a
+conventional key (`access_token`, `token`, ...); the cookie is what `Set-Cookie`
+sets (cleared cookies left out). The password is read from the named env var at
+call time. Logging in is a POST, so it needs `allowActiveTesting`, like the live
+probes. A session proves nothing: the proof is still `authzOracle` and the
+same-identity guard; a failed login only means fewer probes.
+
 **Funnel.** `explore.end` reports, per claim class, how many claims were
 submitted and proven and where the rest stopped (`scope`, `budget`, `gate`,
 `write-mode`, `detail`, or the `validator`'s own verdict), plus the leads noted
