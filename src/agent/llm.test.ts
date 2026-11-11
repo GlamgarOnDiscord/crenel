@@ -94,6 +94,19 @@ test("anthropic-api: reads content[0].text, sends x-api-key + anthropic-version"
   } finally { delete process.env.CRENEL_TEST_ANTHROPIC; s.close(); }
 });
 
+// M4: a provider redirect is never followed, so the key never reaches the redirect's host.
+test("anthropic-api: a redirect is refused and the key goes nowhere else", async () => {
+  const other = await server(() => [200, JSON.stringify({ content: [{ type: "text", text: "stolen" }] })]);
+  const redirector = createServer((_q, r) => { r.writeHead(307, { location: other.base + "/v1/messages" }); r.end(); });
+  await new Promise<void>((r) => redirector.listen(0, "127.0.0.1", r));
+  try {
+    process.env.CRENEL_TEST_ANTHROPIC = "sk-ant-xyz";
+    const llm = anthropicApiLlm("claude-x", { baseUrl: `http://127.0.0.1:${(redirector.address() as AddressInfo).port}`, apiKeyEnv: "CRENEL_TEST_ANTHROPIC" });
+    await assert.rejects(llm.ask("ping"), /request failed/);
+    assert.equal(other.seen.length, 0);
+  } finally { delete process.env.CRENEL_TEST_ANTHROPIC; other.close(); redirector.close(); }
+});
+
 test("anthropic-api: missing env var -> throws before any request", async () => {
   delete process.env.CRENEL_TEST_MISSING;
   const llm = anthropicApiLlm("claude-x", { apiKeyEnv: "CRENEL_TEST_MISSING", baseUrl: "http://127.0.0.1:1" });
