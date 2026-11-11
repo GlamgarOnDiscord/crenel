@@ -4,8 +4,11 @@
 //
 //   1. the host is in the Scope allowlist (you declared you own it);
 //   2. the host does not resolve to a private/loopback/link-local address
-//      (blocks SSRF and DNS-rebinding to internal services), unless the target
-//      explicitly opts into private ranges for an internal staging box;
+//      (blocks SSRF to internal services), unless the target explicitly opts
+//      into private ranges for an internal staging box. KNOWN GAP: the address
+//      checked is not pinned (fetch resolves again), so a TTL-0 DNS rebinding
+//      between the check and the connection is not blocked yet; the egress
+//      proxy does pin. See HARDENING-LOG.md H2;
 //   3. every redirect hop is re-validated against the same rules (a 302 cannot
 //      smuggle the agent off scope);
 //   4. the response body is capped, so a hostile target cannot flood context;
@@ -103,17 +106,52 @@ export interface SafeResponse {
 }
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
+// Credentials a redirect must not carry to another origin (fetch drops Authorization the same way).
+const CREDENTIAL_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "apikey", "x-api-key"]);
+
+/** The headers for the next hop: credentials only stay on the same origin, or on an http -> https upgrade of the same host. */
+export function redirectHeaders(headers: Record<string, string> | undefined, from: string, to: string): Record<string, string> | undefined {
+  if (!headers) return headers;
+  const a = new URL(from), b = new URL(to);
+  if (a.origin === b.origin || (a.protocol === "http:" && b.protocol === "https:" && a.hostname === b.hostname)) return headers;
+  return Object.fromEntries(Object.entries(headers).filter(([k]) => !CREDENTIAL_HEADERS.has(k.toLowerCase())));
+}
 // MCP JSON-RPC calls that list or handshake, never call a tool or read a resource's content.
 const MCP_READ = new Set(["initialize", "notifications/initialized", "tools/list", "resources/list", "resources/templates/list", "prompts/list"]);
 
 /** A GraphQL document that can only read: no mutation or subscription anywhere (even as a name: conservative). */
 export function isGraphqlQueryOnly(query: string): boolean {
-  const code = query
-    .replace(/"""[\s\S]*?"""/g, '""')
-    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
-    .replace(/#[^\n]*/g, "");
+  // One left-to-right pass, as GraphQL's lexer reads it: a `"""` inside a comment
+  // or a `#` inside a string is not a token, so it can never hide code.
+  const code = query.replace(/"""(?:\\"""|[\s\S])*?"""|"(?:\\.|[^"\\\n\r])*"|#[^\n\r]*/g, (t) => (t[0] === "#" ? "" : '""'));
   if (/\b(mutation|subscription)\b/i.test(code)) return false;
   return /^\s*(query\b|\{)/.test(code);
+}
+
+/** The keys of a JSON object's top level as written, duplicates kept. Only for text JSON.parse accepted. */
+export function topLevelKeys(json: string): string[] {
+  const keys: string[] = [], colon = /\s*:/y;
+  let depth = 0;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (json[j] !== '"') j += json[j] === "\\" ? 2 : 1;
+      colon.lastIndex = j + 1;
+      if (depth === 1 && colon.test(json)) keys.push(JSON.parse(json.slice(i, j + 1)) as string);
+      i = j;
+    } else if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") depth--;
+  }
+  return keys;
+}
+
+/** A GET whose `query` parameter is a GraphQL document that may write (GraphQL over GET). */
+export function isGraphqlGetWrite(url: string): boolean {
+  let q: string | null;
+  try { q = new URL(url).searchParams.get("query"); } catch { return false; }
+  if (q === null || !/[{}]/.test(q)) return false; // plain search text is not a document
+  return !isGraphqlQueryOnly(q);
 }
 
 /**
@@ -129,6 +167,9 @@ export function readOnlyPost(url: string, body: string | undefined): string | nu
   let j: unknown;
   try { j = JSON.parse(body); } catch { return null; }
   if (!j || typeof j !== "object" || Array.isArray(j)) return null; // batched GraphQL or JSON-RPC: refused
+  // A repeated key is read last-wins here but may be first-wins on the server: refuse it.
+  const keys = topLevelKeys(body);
+  if (new Set(keys).size !== keys.length) return null;
   const o = j as Record<string, unknown>;
   if (o.jsonrpc === "2.0" && typeof o.method === "string" && MCP_READ.has(o.method)) return "mcp-list";
   if (typeof o.query === "string" && Object.keys(o).every((k) => k === "query" || k === "variables" || k === "operationName") && isGraphqlQueryOnly(o.query)) return "graphql-query";
@@ -144,8 +185,10 @@ export async function safeFetch(
   // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
   const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
   let current = url;
+  let carried = init.headers;
   const method = (init.method ?? "GET").toUpperCase();
-  if (!READ_METHODS.has(method) && !scope.allowActiveTesting && !(method === "POST" && readOnlyPost(url, init.body))) {
+  const write = READ_METHODS.has(method) ? isGraphqlGetWrite(url) : !(method === "POST" && readOnlyPost(url, init.body));
+  if (write && !scope.allowActiveTesting) {
     const why = `Refused: ${method} ${url} is not a read and allowActiveTesting is off`;
     scope.onRequest?.({ method, url, refused: why });
     throw new ScopeError(why);
@@ -175,7 +218,7 @@ export async function safeFetch(
     // Service-token headers are recomputed for every hop: only this hop's exact host, only https.
     const access = scope.headersFor(current);
     const tokenSent = Object.keys(access).length > 0;
-    const headers = tokenSent ? { ...init.headers, ...access } : init.headers;
+    const headers = tokenSent ? { ...carried, ...access } : carried;
     try {
       // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
       res = await fetch(current, { method, headers, body: init.body, redirect: "manual", signal });
@@ -196,6 +239,8 @@ export async function safeFetch(
     // followRedirects: false returns the 3xx itself, so a check can read where it points without going there.
     if (res.status >= 300 && res.status < 400 && res.headers.get("location") && init.followRedirects !== false) {
       const next = new URL(res.headers.get("location")!, current).toString();
+      await res.body?.cancel().catch(() => {});
+      carried = redirectHeaders(carried, current, next);
       current = next; // re-validated at the top of the next iteration
       continue;
     }

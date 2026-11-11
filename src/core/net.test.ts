@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlQueryOnly, isPrivateIp, readOnlyPost, safeFetch } from "./net.js";
+import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch, topLevelKeys } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -89,6 +89,16 @@ test("isGraphqlQueryOnly: queries pass, mutations and subscriptions never do", (
   assert.ok(!isGraphqlQueryOnly("fragment F on User { id } query { me { ...F } }"), "anything not starting as a query is refused");
 });
 
+// H1: the document is lexed in one pass, so a token inside a comment or a string cannot hide a mutation.
+test("isGraphqlQueryOnly: a mutation hidden by a block-string quote in a comment is refused", () => {
+  const q = 'query R { a } # """\nmutation Del { deleteAll } # """';
+  assert.equal(isGraphqlQueryOnly(q), false);
+  assert.equal(readOnlyPost("https://app.example.com/graphql", JSON.stringify({ query: q, operationName: "Del" })), null);
+  assert.equal(isGraphqlQueryOnly("query R { a } # x\rmutation Del { deleteAll }"), false, "a CR ends a comment");
+  assert.equal(isGraphqlQueryOnly('query R { a(s: "#") }\nmutation Del { x }'), false);
+  assert.ok(isGraphqlQueryOnly('query R { a(s: """ \\""" mutation """) } # mutation'), "the word in a block string or a comment is fine");
+});
+
 test("readOnlyPost: only GraphQL queries, MCP list calls and OSV lookups", () => {
   const u = "https://app.example.com/graphql";
   assert.equal(readOnlyPost(u, JSON.stringify({ query: "{ me { id } }" })), "graphql-query");
@@ -118,4 +128,49 @@ test("safeFetch refuses writes unless the body is a read or active testing is on
     assert.equal((await safeFetch(url, active, { method: "DELETE" })).status, 200);
     assert.deepEqual(seen, ["POST", "DELETE"]);
   } finally { server.close(); }
+});
+
+// H3: a redirect to another origin, or down to plain http, does not carry the actor's credentials.
+test("redirectHeaders: credentials stay on the same origin only", () => {
+  const h = { Authorization: "Bearer a", cookie: "s=1", apikey: "k", "X-Api-Key": "k", accept: "*/*" };
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://a.example.com/y"), h);
+  assert.deepEqual(redirectHeaders(h, "http://a.example.com/x", "https://a.example.com/y"), h, "an upgrade of the same host keeps them");
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "http://a.example.com/y"), { accept: "*/*" }, "a downgrade drops them");
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://b.example.com/y"), { accept: "*/*" });
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://a.example.com:8443/y"), { accept: "*/*" });
+});
+
+test("safeFetch does not send the Authorization header across a cross-origin redirect", async () => {
+  const http = await import("node:http");
+  const seen: (string | undefined)[] = [];
+  const b = http.createServer((q, s) => { seen.push(q.headers.authorization); s.writeHead(200); s.end("b"); });
+  await new Promise<void>((r) => b.listen(0, "127.0.0.1", r));
+  const bPort = (b.address() as import("node:net").AddressInfo).port;
+  const a = http.createServer((q, s) => { seen.push(q.headers.authorization); s.writeHead(302, { location: `http://localhost:${bPort}/` }); s.end("moved"); });
+  await new Promise<void>((r) => a.listen(0, "127.0.0.1", r));
+  const aPort = (a.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1", "localhost"], allowPrivate: true });
+    const res = await safeFetch(`http://127.0.0.1:${aPort}/`, scope, { headers: { authorization: "Bearer secret-a" } });
+    assert.equal(res.body, "b");
+    assert.deepEqual(seen, ["Bearer secret-a", undefined]);
+  } finally { a.close(); b.close(); }
+});
+
+// M5: a repeated top-level key is read last-wins by JSON.parse but may be first-wins on the server.
+test("readOnlyPost: a body with a duplicated top-level key is refused", () => {
+  const u = "https://app.example.com/graphql";
+  assert.equal(readOnlyPost(u, '{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"tools/list"}'), null);
+  assert.equal(readOnlyPost(u, '{"query":"mutation { x }","\\u0071uery":"{ a }"}'), null, "an escaped spelling is the same key");
+  assert.equal(readOnlyPost(u, '{"query":"{ a(s: \\"query\\") }","variables":{"query":1,"q":{"query":2}}}'), "graphql-query", "nested keys are not top-level");
+  assert.deepEqual(topLevelKeys('{"a":"x:\\"y","b":[{"a":1}],"c" : 2}'), ["a", "b", "c"]);
+});
+
+// M6: GraphQL over GET is a read by method only; a mutation document in `query` needs active mode.
+test("safeFetch refuses a GraphQL mutation sent over GET without active testing", async () => {
+  assert.equal(isGraphqlGetWrite("https://a.example.com/graphql?query=mutation%7Bx%7D"), true);
+  assert.equal(isGraphqlGetWrite("https://a.example.com/graphql?query=%7Bme%7Bid%7D%7D"), false);
+  assert.equal(isGraphqlGetWrite("https://a.example.com/search?query=mutation+testing"), false, "plain search text is a read");
+  const ro = new Scope({ allowedHosts: ["a.example.com"] });
+  await assert.rejects(safeFetch("https://a.example.com/graphql?query=mutation%7Bx%7D", ro), /not a read/);
 });

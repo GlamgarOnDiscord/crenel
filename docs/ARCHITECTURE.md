@@ -23,8 +23,10 @@ A run turns a **config** into a list of **findings**. The pieces:
   action" rule live in code, not in a prompt. This is deliberate: research shows
   agents drift out of a scope that is only an instruction.
 - **Scoped HTTP client** (`core/net.ts`) is the only way out. It enforces the
-  allowlist, refuses hosts that resolve to private/loopback addresses (SSRF and
-  DNS-rebinding), re-validates every redirect hop, and caps the body.
+  allowlist, refuses hosts that resolve to private/loopback addresses (SSRF),
+  re-validates every redirect hop, and caps the body. The checked address is
+  not pinned yet (a DNS rebinding between the check and the connection is an
+  open gap, tracked as H2 in HARDENING-LOG.md); the toolbox egress proxy pins it.
 - **Checks** (`core/types.ts` `Check`) are deterministic and read-only. Each
   returns findings that are either `proven` (a deterministic match or a
   replayable probe) or `unproven` (a lead). The registry (`core/registry.ts`)

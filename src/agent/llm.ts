@@ -121,7 +121,8 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   let res: Response;
   let text = "";
   try {
-    res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal });
+    // Never follow a redirect: it would carry the key (x-api-key is not dropped cross-origin) to another host.
+    res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal, redirect: "error" });
     if (res.body) {
       const reader = res.body.getReader();
       const dec = new TextDecoder();
