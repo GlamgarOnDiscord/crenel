@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 56 checks. Each is deterministic and read-only by default (the
+Crenel runs 57 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -66,6 +66,7 @@ empty list runs every read-only check.
 | live-ssrf | Server-side request forgery proven out-of-band: a unique nonce injected into a declared sink arrives at an ephemeral listener the target reached | yes (OOB callback, opt-in) | **outbound-triggering requests**: allowActiveTesting + `options.live-ssrf.enabled` + a callbackHost the target can reach |
 | command-injection | OS-command / template injection on a declared sink, proven by a computation (nonce next to 7*7 comes back as nonce49) | yes (computed differential, opt-in) | **payloads that run server-side**: allowActiveTesting + `options.command-injection.enabled` |
 | authz-write | Account A changing or deleting account B's objects (IDOR on writes) | yes (B's own read shows the canary) | **writes**: allowActiveTesting + `options.authz-write.enabled` |
+| replay | A single-use token (coupon, voucher, OTP, nonce) accepted more than once | yes (invalid rejected as control, same token accepted twice, effect moves again on the replay) | **writes**: allowActiveTesting + `options.replay.enabled` + declared endpoints; the test consumes the declared token |
 
 ## exposed-secrets
 

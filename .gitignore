@@ -13,3 +13,9 @@ web/shots/
 
 # standalone executable build (scripts/build-sea.mjs)
 /build/
+
+# bench artefacts and ad-hoc configs must never be committed (real tokens)
+/crapi-*.json
+/dvga-*.json
+/juice-*.json
+/vampi-*.json
