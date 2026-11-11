@@ -104,6 +104,16 @@ test("deliver: refused destinations send nothing, redirects are not followed, re
 
 /* ---------------- Slack ---------------- */
 
+test("deliver: reads at most 2 KB of the answer, even an endless one", async () => {
+  let pulled = 0, cancelled = false;
+  const endless = new ReadableStream<Uint8Array>({ pull(c) { pulled++; c.enqueue(new Uint8Array(1024).fill(0x61)); }, cancel() { cancelled = true; } });
+  const f: FetchLike = async () => ({ status: 500, headers: { get: () => null }, text: () => new Promise<string>(() => {}), body: endless });
+  const r = await deliver({ integration: "webhook:x", event: "test", url: "https://hooks.example.test/x", body: "{}", allowedHosts: ["hooks.example.test"], scanHosts: [], fetch: f });
+  assert.equal(r.responseText?.length, 2048);
+  assert.equal(r.record.ok, false);
+  assert.ok(pulled <= 4 && cancelled, `pulled ${pulled} chunks, cancelled ${cancelled}`);
+});
+
 test("slack: Block Kit within the documented limits, mrkdwn escaped, no proof sent", () => {
   const many = Array.from({ length: 14 }, (_, i) => f({ id: `x${i}`, title: `<script> & ${"t".repeat(200)}` }));
   const m = slackFindingsMessage(many, { project: "acme", run: "r-1" });

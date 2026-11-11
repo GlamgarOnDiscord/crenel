@@ -14,7 +14,20 @@
 
 import { redact } from "./secrets.js";
 
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string; redirect: "manual"; signal: AbortSignal }) => Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string> }>;
+export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string; redirect: "manual"; signal: AbortSignal }) => Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string>; body?: ReadableStream<Uint8Array> | null }>;
+
+const MAX_RESPONSE = 2048;
+
+/** The first 2 KB of a response, without reading the rest: a destination could answer with an endless body. */
+async function readCapped(res: Awaited<ReturnType<FetchLike>>): Promise<string> {
+  if (!res.body) return (await res.text().catch(() => "")).slice(0, MAX_RESPONSE);
+  const reader = res.body.getReader(), chunks: Uint8Array[] = [];
+  let n = 0;
+  try {
+    while (n < MAX_RESPONSE) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); n += value.length; }
+  } catch { /* keep what came */ } finally { void reader.cancel().catch(() => {}); }
+  return Buffer.concat(chunks).toString("utf8").slice(0, MAX_RESPONSE);
+}
 
 export interface DeliveryRecord {
   at: string;
@@ -94,7 +107,7 @@ export async function deliver(o: DeliverOptions): Promise<DeliveryResult> {
       redirect: "manual",
       signal: AbortSignal.timeout(o.timeoutMs ?? 10_000),
     });
-    const text = (await res.text().catch(() => "")).slice(0, 2048);
+    const text = await readCapped(res);
     const ok = res.status >= 200 && res.status < 300;
     const error = ok ? undefined : res.status >= 300 && res.status < 400 ? "redirect not followed" : (text.trim().split("\n")[0] ?? "").slice(0, 120) || `HTTP ${res.status}`;
     return { record: rec({ ok, status: res.status, ...(error ? { error: redact(error, o.secrets ?? []) } : {}) }, u.hostname), responseText: text, retryAfter: res.headers.get("retry-after") };
