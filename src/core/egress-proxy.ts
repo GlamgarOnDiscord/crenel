@@ -102,6 +102,15 @@ class Refusal extends Error {}
 
 const HOP_BY_HOP = ["connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade"];
 
+/** Headers that may cross the proxy: the fixed hop-by-hop list and every name the
+ * message lists in its own Connection header (RFC 9110 §7.6.1) are dropped. */
+export function endToEnd(h: Record<string, string | string[] | undefined>): Record<string, string | string[]> {
+  const named = [h.connection ?? [], h["proxy-connection"] ?? []].flat().join(",").split(",").map((n) => n.trim().toLowerCase()).filter(Boolean);
+  const out: Record<string, string | string[]> = {};
+  for (const [k, v] of Object.entries(h)) if (v !== undefined && !HOP_BY_HOP.includes(k) && !named.includes(k)) out[k] = v;
+  return out;
+}
+
 async function defaultResolve(host: string): Promise<string[]> {
   const addrs = await lookup(host, { all: true, verbatim: true });
   return addrs.map((a) => a.address);
@@ -206,8 +215,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
       return deny(res, 403, msg);
     }
     await waitTurn();
-    const headers: Record<string, string | string[]> = {};
-    for (const [k, v] of Object.entries(req.headers)) if (v !== undefined && !HOP_BY_HOP.includes(k)) headers[k] = v;
+    const headers = endToEnd(req.headers);
     headers.host = url.host;
     headers.connection = "close";
     const port = Number(url.port || 80);
@@ -219,8 +227,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
       if (loc && ur.statusCode && ur.statusCode >= 300 && ur.statusCode < 400) {
         try { const next = new URL(loc, url); if (!scope.isHostAllowed(next.toString())) offScopeRedirect = next.toString(); } catch { /* ignore */ }
       }
-      const out: Record<string, string | string[]> = {};
-      for (const [k, v] of Object.entries(ur.headers)) if (v !== undefined && !HOP_BY_HOP.includes(k)) out[k] = v;
+      const out = endToEnd(ur.headers);
       out.connection = "close";
       res.writeHead(ur.statusCode ?? 502, out);
       let truncated = false;

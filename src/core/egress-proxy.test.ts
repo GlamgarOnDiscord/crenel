@@ -71,6 +71,25 @@ test("a declared host is forwarded, pinned to the checked address, and journalle
   } finally { await p.close(); await close(up.server); }
 });
 
+test("headers named in Connection are hop-by-hop: dropped both ways (RFC 9110 §7.6.1)", async () => {
+  let got: Record<string, unknown> = {};
+  const up = await upstream((q, s) => { got = q.headers; s.writeHead(200, { connection: "x-up-hop", "x-up-hop": "1", "x-up-kept": "1" }); s.end("ok"); });
+  const { start } = setup({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+  const p = await start();
+  try {
+    const r = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port: p.port, method: "GET", path: `http://127.0.0.1:${up.port}/`, headers: {
+        "proxy-authorization": "Basic " + Buffer.from(`crenel:${p.token}`).toString("base64"), connection: "X-Hop, keep-alive", "x-hop": "secret", "x-kept": "1",
+      } }, (res) => { res.resume(); res.on("end", () => resolve(res.headers)); });
+      req.on("error", reject); req.end();
+    });
+    assert.equal(got["x-hop"], undefined, "a header the client named in Connection reaches the target");
+    assert.equal(got["x-kept"], "1");
+    assert.equal(r["x-up-hop"], undefined, "a header the target named in Connection reaches the tool");
+    assert.equal(r["x-up-kept"], "1");
+  } finally { await p.close(); await close(up.server); }
+});
+
 test("an undeclared host is refused before any DNS lookup", async () => {
   let resolved = 0;
   const { events, start } = setup({ allowedHosts: ["127.0.0.1"], allowPrivate: true }, { resolve: async () => { resolved++; return ["93.184.215.14"]; } });
