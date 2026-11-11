@@ -66,7 +66,15 @@ export function jwkToPems(jwk: Record<string, unknown>): string[] {
 }
 
 /** Common/weak HMAC secrets to try on an HS* token (generic dictionary, small). */
-export const WEAK_SECRETS = ["secret", "password", "changeme", "jwt_secret", "your-256-bit-secret", "key", "admin", "supersecret", "jwtsecret", "secretkey", "default", "test"];
+// A top-N dictionary of weak/guessable HMAC signing secrets (the same spirit as a
+// top-N password list). Generic, not any one target's answer; extendable via config.
+export const WEAK_SECRETS = [
+  "secret", "password", "changeme", "jwt_secret", "your-256-bit-secret", "key", "admin",
+  "supersecret", "jwtsecret", "secretkey", "default", "test", "random", "secret123",
+  "mysecret", "token", "jwt", "s3cr3t", "qwerty", "123456", "root", "private", "signature",
+  "secret_key", "SECRET_KEY", "app_secret", "appsecret", "secretphrase", "my-secret",
+  "topsecret", "verysecret", "notsosecret", "0000", "letmein", "changeit", "unknown",
+];
 
 export interface Observed { status: number; body: string }
 const DENY = new Set([401, 403, 404]); // protected resources often mask anon access with 404
