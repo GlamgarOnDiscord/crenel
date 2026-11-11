@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlQueryOnly, isPrivateIp, readOnlyPost, safeFetch } from "./net.js";
+import { isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -128,4 +128,31 @@ test("safeFetch refuses writes unless the body is a read or active testing is on
     assert.equal((await safeFetch(url, active, { method: "DELETE" })).status, 200);
     assert.deepEqual(seen, ["POST", "DELETE"]);
   } finally { server.close(); }
+});
+
+// H3: a redirect to another origin, or down to plain http, does not carry the actor's credentials.
+test("redirectHeaders: credentials stay on the same origin only", () => {
+  const h = { Authorization: "Bearer a", cookie: "s=1", apikey: "k", "X-Api-Key": "k", accept: "*/*" };
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://a.example.com/y"), h);
+  assert.deepEqual(redirectHeaders(h, "http://a.example.com/x", "https://a.example.com/y"), h, "an upgrade of the same host keeps them");
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "http://a.example.com/y"), { accept: "*/*" }, "a downgrade drops them");
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://b.example.com/y"), { accept: "*/*" });
+  assert.deepEqual(redirectHeaders(h, "https://a.example.com/x", "https://a.example.com:8443/y"), { accept: "*/*" });
+});
+
+test("safeFetch does not send the Authorization header across a cross-origin redirect", async () => {
+  const http = await import("node:http");
+  const seen: (string | undefined)[] = [];
+  const b = http.createServer((q, s) => { seen.push(q.headers.authorization); s.writeHead(200); s.end("b"); });
+  await new Promise<void>((r) => b.listen(0, "127.0.0.1", r));
+  const bPort = (b.address() as import("node:net").AddressInfo).port;
+  const a = http.createServer((q, s) => { seen.push(q.headers.authorization); s.writeHead(302, { location: `http://localhost:${bPort}/` }); s.end("moved"); });
+  await new Promise<void>((r) => a.listen(0, "127.0.0.1", r));
+  const aPort = (a.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1", "localhost"], allowPrivate: true });
+    const res = await safeFetch(`http://127.0.0.1:${aPort}/`, scope, { headers: { authorization: "Bearer secret-a" } });
+    assert.equal(res.body, "b");
+    assert.deepEqual(seen, ["Bearer secret-a", undefined]);
+  } finally { a.close(); b.close(); }
 });

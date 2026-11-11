@@ -103,6 +103,16 @@ export interface SafeResponse {
 }
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
+// Credentials a redirect must not carry to another origin (fetch drops Authorization the same way).
+const CREDENTIAL_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "apikey", "x-api-key"]);
+
+/** The headers for the next hop: credentials only stay on the same origin, or on an http -> https upgrade of the same host. */
+export function redirectHeaders(headers: Record<string, string> | undefined, from: string, to: string): Record<string, string> | undefined {
+  if (!headers) return headers;
+  const a = new URL(from), b = new URL(to);
+  if (a.origin === b.origin || (a.protocol === "http:" && b.protocol === "https:" && a.hostname === b.hostname)) return headers;
+  return Object.fromEntries(Object.entries(headers).filter(([k]) => !CREDENTIAL_HEADERS.has(k.toLowerCase())));
+}
 // MCP JSON-RPC calls that list or handshake, never call a tool or read a resource's content.
 const MCP_READ = new Set(["initialize", "notifications/initialized", "tools/list", "resources/list", "resources/templates/list", "prompts/list"]);
 
@@ -143,6 +153,7 @@ export async function safeFetch(
   // A caller may raise the cap for one known-large read (registry metadata), never past 16 MB.
   const cap = Math.min(init.maxBytes ?? MAX_BYTES, 16 * 1024 * 1024);
   let current = url;
+  let carried = init.headers;
   const method = (init.method ?? "GET").toUpperCase();
   if (!READ_METHODS.has(method) && !scope.allowActiveTesting && !(method === "POST" && readOnlyPost(url, init.body))) {
     const why = `Refused: ${method} ${url} is not a read and allowActiveTesting is off`;
@@ -174,7 +185,7 @@ export async function safeFetch(
     // Service-token headers are recomputed for every hop: only this hop's exact host, only https.
     const access = scope.headersFor(current);
     const tokenSent = Object.keys(access).length > 0;
-    const headers = tokenSent ? { ...init.headers, ...access } : init.headers;
+    const headers = tokenSent ? { ...carried, ...access } : carried;
     try {
       // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
       res = await fetch(current, { method, headers, body: init.body, redirect: "manual", signal });
@@ -195,6 +206,8 @@ export async function safeFetch(
     // followRedirects: false returns the 3xx itself, so a check can read where it points without going there.
     if (res.status >= 300 && res.status < 400 && res.headers.get("location") && init.followRedirects !== false) {
       const next = new URL(res.headers.get("location")!, current).toString();
+      await res.body?.cancel().catch(() => {});
+      carried = redirectHeaders(carried, current, next);
       current = next; // re-validated at the top of the next iteration
       continue;
     }
