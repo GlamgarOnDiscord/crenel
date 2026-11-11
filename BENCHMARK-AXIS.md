@@ -24,6 +24,13 @@ Mémoire durable de l'axe benchmark. Ouvert le 2026-11-11, base `origin/main` (1
 - Après : même config + `login` pour A (`name1`) et B (`name2`), ids de B déclarés (son propre livre lu au moment de la config, usage prévu : le propriétaire connaît ses objets de staging). Attendu : BOLA `books` prouvé.
 - Limite honnête : les ids de B restent déclarés. La découverte automatique des objets de B via une liste authentifiée est une étape suivante distincte.
 
+## État au 2026-11-11 (avant compactage)
+
+- **Fait, PR #51** (branche `bench/auth-session`, commit `814e0b7`) : `src/checks/session.ts` (login déclaré, extraction JWT/clé/cookie), branchement opt-in dans `authz-matrix` (sans `login`, rien ne change : `resolveAccounts` n'est appelé que si un compte déclare `login`), 9 tests, doc ARCHITECTURE, mesure positive VAmPI.
+- **Fait** : contrôle négatif réel sur VAmPI `vulnerable=0` (conteneur séparé `vampi-safe`, port 5015) : 0 finding. #51 déclarée finale.
+- **Ensuite (accord de l'utilisateur)** : suite n°1, découverte des ids de B via une liste authentifiée (supprime `owns` déclaré). Idée : option de ressource `list: "/books/v1"` ; B lit la liste avec sa session, on garde les ids présents dans la réponse de B (champ id de la ressource ou valeur placée dans `:id`), puis même chemin que les ids découverts existants (B doit lire l'objet en 2xx, l'anonyme ne doit pas avoir le même corps, `authzOracle` + `stableLeak`). Attention : une liste globale (VAmPI `/books/v1` liste les livres de tout le monde) ne prouve pas que l'objet est à B ; la propriété doit venir d'un champ propriétaire égal à l'identité de B ou du marqueur de B dans le corps de l'objet lu par B.
+- VAmPI : bench local jetable, réinitialisable librement (`GET /createdb`), accord donné.
+
 ## Résultat mesuré (2026-11-11, VAmPI local, `checks: [authz-matrix]`, une ressource `book` `/books/v1/:id`)
 
 | Config | Findings |
@@ -31,7 +38,12 @@ Mémoire durable de l'axe benchmark. Ouvert le 2026-11-11, base `origin/main` (1
 | Avant : comptes A/B sans jeton (le JWT de 60 s ne peut pas vivre dans la config) | 1 piste `authz-matrix:offline-plan`, **0 prouvé** |
 | Après : même config + `login` A (`name1`) et B (`name2`), mots de passe via `VAMPI_PW_A` / `VAMPI_PW_B` | **1 prouvé** : `authz-matrix:book:GET:bookTitle86` (A lit le livre de B) |
 
-Le jeton a été trouvé par sa forme JWT (aucune clé ni chemin propre à VAmPI). Id de B déclaré (lu dans `/books/v1` au moment d'écrire la config). Contrôle négatif réel sur VAmPI non fait (il faudrait redémarrer le conteneur avec `vulnerable=0`) ; le contrôle négatif est couvert par le serveur stub qui vérifie la propriété (0 prouvé). Suite complète : 695 tests, 694 réussis, 0 échec (1 non exécuté, préexistant).
+Le jeton a été trouvé par sa forme JWT (aucune clé ni chemin propre à VAmPI). Id de B déclaré (lu dans `/books/v1` au moment d'écrire la config). Rejoué après `/createdb` : prouvé de nouveau (`bookTitle23`).
+
+| Contrôle négatif : même config `login`, VAmPI `vulnerable=0` (`vampi-safe`, port 5015) | **0 finding** |
+|---|---|
+
+La sonde a réellement tourné sur la cible sécurisée : pas de plan hors ligne (donc A s'est connecté), et vérification manuelle B lit son livre (200), A est refusé (404). Le serveur stub qui vérifie la propriété donne aussi 0 prouvé. Suite complète : 695 tests, 694 réussis, 0 échec (1 non exécuté, préexistant).
 
 ## Suites possibles
 
