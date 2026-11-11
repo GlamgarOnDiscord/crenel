@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, statSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, chmodSync, readFileSync, writeFileSync, symlinkSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "../core/config.js";
@@ -52,6 +52,25 @@ test("secrets: written 0600, env var wins, a group-readable file is refused", { 
   assert.equal(withEnv.get("slack.webhookUrl", "CRENEL_SLACK_WEBHOOK_URL").source, "env");
   chmodSync(s.path, 0o644);
   assert.throws(() => s.get("slack.webhookUrl"), /chmod 600/);
+});
+
+test("secrets: a planted link (cloned .crenel/) is never written through nor read", { skip: process.platform === "win32" }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-sec-link-"));
+  const victim = join(dir, "victim.txt");
+  writeFileSync(victim, "precious\n");
+  symlinkSync(victim, join(dir, "secrets.json.tmp"));
+  symlinkSync(victim, join(dir, ".gitignore"));
+  const s = new SecretStore(dir, {});
+  s.set("slack", "https://hooks.slack.com/services/T0/B0/XXXXXXXXXXXX");
+  assert.equal(readFileSync(victim, "utf8"), "precious\n", "the link target is untouched");
+  assert.ok(!lstatSync(join(dir, "secrets.json")).isSymbolicLink());
+  assert.equal((statSync(join(dir, "secrets.json")).mode & 0o777), 0o600);
+  const d2 = mkdtempSync(join(tmpdir(), "crenel-sec-link-"));
+  chmodSync(victim, 0o600);
+  symlinkSync(victim, join(d2, "secrets.json"));
+  assert.throws(() => new SecretStore(d2, {}).get("slack"), /symbolic link/);
+  assert.throws(() => new SecretStore(d2, {}).set("slack", "x"), /symbolic link/);
+  assert.equal(readFileSync(victim, "utf8"), "precious\n");
 });
 
 test("redact and maskUrl never print a webhook path or a known secret", () => {
