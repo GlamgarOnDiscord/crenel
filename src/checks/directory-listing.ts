@@ -10,6 +10,7 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
+import { lastMatch, tagsOf } from "../core/html.js";
 
 export const LISTING_PATHS = [
   "/ftp/", "/files/", "/uploads/", "/upload/", "/backup/", "/backups/",
@@ -30,7 +31,10 @@ export function isDirectoryListing(body: string): boolean {
 /** File names linked in the listing (excluding parent/self links). */
 export function listedFiles(body: string): string[] {
   const names: string[] = [];
-  for (const m of body.matchAll(/<a[^>]+href=["']?([^"'>\s]+)["']?[^>]*>/gi)) {
+  // Was /<a[^>]+href=["']?([^"'>\s]+)["']?[^>]*>/gi: cubic on a body of "<a" repeats (core/html.ts).
+  for (const t of tagsOf(body, /<a/i)) {
+    const m = t.closed ? lastMatch(t.text.slice(3), /href=["']?([^"'>\s]+)/i) : null;
+    if (!m) continue;
     let href = m[1]!;
     try { href = decodeURIComponent(href); } catch { /* keep raw */ }
     href = href.replace(/\/+$/, "");

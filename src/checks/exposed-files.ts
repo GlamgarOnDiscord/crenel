@@ -19,12 +19,20 @@ interface Probe {
   remediation: string;
 }
 
+// A KEY=value line (multiline ^, so leading comment lines need no pattern of
+// their own). Was /^\s*(#.*\n\s*)*…/m: `\s*` crossed newlines from every line
+// start, quadratic on a body of blank lines. [^\S\n] keeps \r, tab and a BOM.
+export const ENV_LINE = /^[^\S\n]*[A-Z][A-Z0-9_]{2,}\s*=\s*\S/m;
+
+// The first [core] only (a lookahead is atomic): /\[core\][\s\S]*…/ rescanned the body from every "[core]".
+export const GIT_CONFIG = /^(?=([\s\S]*?\[core\]))\1[\s\S]*repositoryformatversion/;
+
 const PROBES: Probe[] = [
-  { path: "/.env", what: "environment file with secrets", severity: "critical", signature: /^\s*(#.*\n\s*)*[A-Z][A-Z0-9_]{2,}\s*=\s*\S/m,
+  { path: "/.env", what: "environment file with secrets", severity: "critical", signature: ENV_LINE,
     remediation: "Remove the file from the web root, rotate every secret it holds, and block dotfiles at the edge." },
-  { path: "/.env.production", what: "production environment file", severity: "critical", signature: /^\s*(#.*\n\s*)*[A-Z][A-Z0-9_]{2,}\s*=\s*\S/m,
+  { path: "/.env.production", what: "production environment file", severity: "critical", signature: ENV_LINE,
     remediation: "Remove it from the web root, rotate every secret it holds, and block dotfiles at the edge." },
-  { path: "/.git/config", what: "Git repository metadata (the source can be rebuilt from /.git/)", severity: "high", signature: /\[core\][\s\S]*repositoryformatversion/,
+  { path: "/.git/config", what: "Git repository metadata (the source can be rebuilt from /.git/)", severity: "high", signature: GIT_CONFIG,
     remediation: "Do not deploy the .git directory; block /.git/ at the edge. Treat the source and its history as public." },
   { path: "/.git/HEAD", what: "Git repository metadata", severity: "high", signature: /^ref: refs\/heads\/[\w./-]+\s*$/,
     remediation: "Do not deploy the .git directory; block /.git/ at the edge." },

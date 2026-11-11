@@ -13,7 +13,7 @@
 // .invalid TLD, which never resolves, and the redirect is read, never followed.
 // Pure, so it is tested without a network.
 
-const META_REFRESH = /<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^"'>\s]+)/i;
+import { metaRefreshUrl } from "../core/html.js";
 
 export interface RedirectResp { status: number; location: string | null; body: string }
 
@@ -22,7 +22,7 @@ export interface RedirectResp { status: number; location: string | null; body: s
  * the target does not parse. */
 export function redirectHost(r: RedirectResp, reqUrl: string): string | null {
   const loc = r.status >= 300 && r.status < 400 ? (r.location ?? "").trim() : "";
-  const meta = (META_REFRESH.exec(r.body)?.[1] ?? "").trim();
+  const meta = (metaRefreshUrl(r.body) ?? "").trim();
   const target = loc || meta;
   if (!target) return null;
   try { return new URL(target, reqUrl).hostname.toLowerCase(); } catch { return null; }

@@ -18,6 +18,7 @@ import { safeFetch } from "../core/net.js";
 import { exposedSecrets } from "./exposed-secrets.js";
 import { extractBaas } from "./baas-exposure.js";
 import { osvAdvisories } from "./dependency-risk.js";
+import { lastMatch, scriptBlocks, tagsOf } from "../core/html.js";
 
 const MAX_FILES = 150;
 const BLOCK_WINDOW = 20;
@@ -33,17 +34,22 @@ export function extractAssetUrls(body: string, base: string, kind: "html" | "js"
     try { out.add(new URL(s, base).toString().split("#")[0]!); } catch { /* not a URL */ }
   };
   if (kind === "html") {
-    for (const m of body.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) add(m[1]!);
-    for (const m of body.matchAll(/<link\b[^>]*\brel\s*=\s*["'](?:modulepreload|preload|prefetch)["'][^>]*>/gi)) {
-      const href = /\bhref\s*=\s*["']([^"']+\.m?js(?:\?[^"']*)?)["']/i.exec(m[0]);
+    // Tags are walked once (core/html.ts): a `<script\b[^>]*…` regex is quadratic on a body of "<script" repeats.
+    for (const t of tagsOf(body, /<script\b/i)) { const m = lastMatch(t.text, /\bsrc\s*=\s*["']([^"']+)["']/i); if (m) add(m[1]!); }
+    for (const t of tagsOf(body, /<link\b/i)) {
+      if (!t.closed || !/\brel\s*=\s*["'](?:modulepreload|preload|prefetch)["']/i.test(t.text)) continue;
+      const href = /\bhref\s*=\s*["']([^"']+\.m?js(?:\?[^"']*)?)["']/i.exec(t.text);
       if (href) add(href[1]!);
     }
     // Inline scripts can also import chunks.
-    for (const m of body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) for (const u of extractAssetUrls(m[1]!, base, "js")) out.add(u);
+    for (const s of scriptBlocks(body)) for (const u of extractAssetUrls(s, base, "js")) out.add(u);
     return [...out];
   }
   // JS: import("./x.js"), import "./x.js", from "./x.js", new URL("./x.js", import.meta.url)
-  for (const m of body.matchAll(/\b(?:import\s*\(\s*|import\s+|from\s*)["'`]([^"'`]+\.m?js(?:\?[^"'`]*)?)["'`]/g)) add(m[1]!);
+  // The quoted string is taken whole, then tested: `[^"'`]+\.m?js(?:\?[^"'`]*)?` backtracks quadratically inside one string.
+  for (const re = /\b(?:import\s*\(\s*|import\s+|from\s*)["'`]([^"'`]+)["'`]/g, m0 = { m: null as RegExpExecArray | null }; (m0.m = re.exec(body));) {
+    if (/.\.m?js(?:\?|$)/.test(m0.m[1]!)) add(m0.m[1]!); else re.lastIndex = m0.m.index + 1;
+  }
   for (const m of body.matchAll(/new\s+URL\(\s*["'`]([^"'`]+\.m?js)["'`]\s*,\s*import\.meta\.url/g)) add(m[1]!);
   // Next.js and webpack chunk paths written as plain strings.
   for (const m of body.matchAll(/["'`]((?:\/_next\/)?static\/chunks\/[\w\-./[\]]+\.js)["'`]/g)) {
@@ -97,12 +103,20 @@ export function extractQueryParams(js: string): Record<string, string[]> {
  *    resolved against the runtime's public path (__webpack_require__.p = "/_next/");
  *  - Vite: the __vite__mapDeps array of "assets/x-hash.js" paths.
  */
+/** The Next.js version a bundle states. The quoted string is taken whole, then
+ * tested: a version pattern inside the regex backtracks quadratically. */
+export function nextVersionOf(body: string): string | undefined {
+  const firstQuoted = (re: RegExp, ok: RegExp) => [...body.matchAll(re)].map((m) => m[1]!).find((v) => ok.test(v));
+  return firstQuoted(/\bwindow\.next\s*=\s*\{\s*version\s*:\s*"([\w.-]+)"/g, /^\d+\.\d+\.\d+/) ?? firstQuoted(/next\/dist[^"]{0,200}"([\w.-]+)"/g, /^1[2-9]\.\d+\.\d+/);
+}
+
 export function runtimeChunkUrls(body: string, base: string): string[] {
   const out: string[] = [];
   const origin = (() => { try { return new URL(base).origin; } catch { return ""; } })();
   if (!origin) return out;
   const publicPath = /\.p\s*=\s*"([^"]*)"/.exec(body)?.[1] ?? "/";
-  const table = (s: string) => Object.fromEntries([...s.matchAll(/(?:"?)([\w-]+)"?\s*:\s*"([^"]+)"/g)].map((m) => [m[1]!, m[2]!]));
+  // (?<![\w-]): a key starts at a word start only; retrying inside every word was quadratic.
+  const table = (s: string) => Object.fromEntries([...s.matchAll(/"?(?<![\w-])([\w-]+)"?\s*:\s*"([^"]+)"/g)].map((m) => [m[1]!, m[2]!]));
   const re = /"([\w./-]*\/)"\s*\+\s*(?:\(\s*\{([^{}]*)\}\s*\[\s*\w+\s*\]\s*\|\|\s*\w+\s*\)|\w+)\s*\+\s*"\."\s*\+\s*\{([^{}]*)\}\s*\[\s*\w+\s*\]\s*\+\s*"(\.[\w.]*js)"/g;
   for (const m of body.matchAll(re)) {
     const names = m[2] ? table(m[2]) : {};
@@ -239,7 +253,7 @@ export const liveBundle: Check = {
       }
       // Next.js version served (window.next = { version: "15.1.0" }): with OSV on,
       // its advisories come back as leads, the same way the lockfile's do.
-      const nextVersion = fetched.map((f) => /\bwindow\.next\s*=\s*\{\s*version\s*:\s*"(\d+\.\d+\.\d+[\w.-]*)"/.exec(f.body)?.[1] ?? /next\/dist[^"]{0,200}?"(1[2-9]\.\d+\.\d+[\w.-]*)"/.exec(f.body)?.[1]).find(Boolean);
+      const nextVersion = fetched.map((f) => nextVersionOf(f.body)).find(Boolean);
       if (nextVersion) {
         const osvOn = !!((ctx.options["dependency-risk"] ?? {}) as { osv?: boolean }).osv && ctx.scope.isHostAllowed("https://api.osv.dev/");
         const adv = osvOn ? await osvAdvisories(new Set([`next@${nextVersion}`]), ctx, ctx.stagingUrl) : [];
