@@ -14,9 +14,10 @@
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
 import type { CheckContext, Finding } from "../core/types.js";
+import type { LoginSpec } from "./session.js";
 
 /** A test account as declared in the config (staging tokens only). */
-export interface ActiveAccount { token?: string }
+export interface ActiveAccount { token?: string; cookie?: string; login?: LoginSpec }
 export interface ActiveAccounts { a?: ActiveAccount; b?: ActiveAccount }
 
 export const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

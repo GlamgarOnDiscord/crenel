@@ -157,3 +157,41 @@ test("authz-matrix: listing discovery on an app that checks ownership proves not
   const { base, srv } = await app(true);
   try { assert.equal(proven(await run(base, listOptions())).length, 0); } finally { srv.close(); }
 });
+
+// The other account-based checks log in too: each one's requests carry the session the login returned.
+test("nested-authz, authz-write, mass-assignment and data-exposure send the session of a declared login", async () => {
+  const { nestedAuthz } = await import("./nested-authz.js");
+  const { authzWrite } = await import("./authz-write.js");
+  const { massAssignment } = await import("./mass-assignment.js");
+  const { dataExposure } = await import("./data-exposure.js");
+  const subs: string[] = [];
+  const srv = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => { raw += d; });
+    req.on("end", () => {
+      res.writeHead(req.url === "/login" || req.method === "GET" ? 200 : 404, { "content-type": "application/json" });
+      if (req.url === "/login") { const b = JSON.parse(raw || "{}"); return res.end(JSON.stringify({ token: b.password === `pw-${b.username}` ? jwt(b.username) : "" })); }
+      const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+      if (t) subs.push(JSON.parse(Buffer.from(t.split(".")[1]!, "base64url").toString()).sub);
+      res.end(JSON.stringify({ id: "x", name: "n" }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const login = (u: string) => ({ url: "/login", username: u, passwordEnv: `CRENEL_TEST_PW_${u.toUpperCase()}` });
+  Object.assign(process.env, { CRENEL_TEST_PW_ALICE: "pw-alice", CRENEL_TEST_PW_BOBBIE: "pw-bobbie" });
+  const ctx = (options: Record<string, unknown>): CheckContext => ({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: "/tmp/x", stagingUrl: base, options, log: () => {} });
+  try {
+    const cases: [string, { run(c: CheckContext): Promise<unknown> }, Record<string, unknown>][] = [
+      ["nested-authz", nestedAuthz, { "nested-authz": { accounts: { a: { login: login("alice") }, b: { login: login("bobbie"), marker: "bobbie-marker" } }, resources: [{ name: "p", path: "/orgs/:org/projects/:id", segments: { org: { b: "org-b" }, id: { b: "proj-b" } } }] } }],
+      ["authz-write", authzWrite, { "authz-write": { enabled: true, accounts: { a: { login: login("alice") }, b: { login: login("bobbie") } }, targets: [{ name: "project", path: "/api/projects/:id", method: "PATCH", field: "name", victimId: "p_b", ownId: "p_a" }] } }],
+      ["mass-assignment", massAssignment, { "mass-assignment": { enabled: true, accounts: { a: { login: login("alice") } }, targets: [{ name: "profile", path: "/api/me", method: "PATCH", fields: { role: "admin" } }] } }],
+      ["data-exposure", dataExposure, { "data-exposure": { endpoints: ["/_debug"], as: "a" }, "authz-matrix": { accounts: { a: { login: login("alice") } } } }],
+    ];
+    for (const [name, check, options] of cases) {
+      subs.length = 0;
+      await check.run(ctx(options));
+      assert.ok(subs.includes("alice"), `${name}: a request carried A's fresh session (saw ${JSON.stringify(subs)})`);
+    }
+  } finally { delete process.env.CRENEL_TEST_PW_ALICE; delete process.env.CRENEL_TEST_PW_BOBBIE; srv.close(); }
+});

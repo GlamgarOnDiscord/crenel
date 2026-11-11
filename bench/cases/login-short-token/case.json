@@ -1,0 +1,24 @@
+{
+  "title": "Login-gated API with 30 s JWTs: any logged-in customer reads another customer's invoice",
+  "type": "live",
+  "config": {
+    "env": { "BENCH_PW_ANA": "fixture-pw-ana", "BENCH_PW_BEN": "fixture-pw-ben" },
+    "options": { "authz-matrix": {
+      "resources": [
+        { "name": "invoice", "path": "/api/invoices/:id", "methods": ["GET"] },
+        { "name": "payment-method", "path": "/api/payment-methods/:id", "methods": ["GET"] }
+      ],
+      "accounts": {
+        "a": { "label": "customer A", "login": { "url": "/auth/login", "username": "ana@acme.example", "usernameField": "email", "passwordEnv": "BENCH_PW_ANA" } },
+        "b": { "label": "customer B", "marker": "ben@globex.example", "login": { "url": "/auth/login", "username": "ben@globex.example", "usernameField": "email", "passwordEnv": "BENCH_PW_BEN" },
+               "owns": { "invoice": ["inv_9c1d"], "payment-method": ["pm_77bb"] } }
+      }
+    } }
+  },
+  "mustFind": [
+    { "id": "invoice-bola", "check": "authz", "text": "inv_9c1d", "state": "proven", "minSeverity": "high", "why": "Logged in as A (a fresh 30 s JWT), A reads B's invoice carrying B's email, while an anonymous caller gets 401 and a non-existent id 404." }
+  ],
+  "mustNotFlag": [
+    { "id": "payment-method-owned", "check": "authz", "text": "pm_77bb", "forbid": "any", "why": "The server checks ownership: A gets 404 on B's payment method." }
+  ]
+}

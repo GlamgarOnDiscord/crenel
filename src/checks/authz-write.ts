@@ -22,6 +22,7 @@
 // disposable, and is never restored (the report says so).
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { resolveAccounts } from "./session.js";
 import { ActiveClient, activeOptions, canary, getField, MAX_TARGETS, ok2xx, same, sameIdentity, setField, urlOf, writesFinding, type ActiveBase, type WriteRecord } from "./active-common.js";
 
 export interface WriteTarget {
@@ -67,6 +68,7 @@ export const authzWrite: Check = {
   async run(ctx: CheckContext): Promise<Finding[]> {
     const o = activeOptions<Opts>(ctx, "authz-write");
     if (!o) return [];
+    if (ctx.stagingUrl) o.accounts = await resolveAccounts(ctx, o.accounts, "authz-write"); // declared logins (src/checks/session.ts)
     const targets = (o.targets ?? []).slice(0, MAX_TARGETS);
     if (!ctx.stagingUrl || targets.length === 0) { ctx.log("authz-write: needs a stagingUrl and options.authz-write.targets"); return []; }
     const base = ctx.stagingUrl.replace(/\/+$/, "");

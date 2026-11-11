@@ -71,3 +71,12 @@ La sonde a réellement tourné sur la cible sécurisée : pas de plan hors ligne
 ## Questions d'arbitrage
 
 - (aucune pour l'instant ; le login sous `allowActiveTesting` suit la règle existante des sondes live)
+
+## Étape 3 : login branché sur les autres checks + cas de bench (branche `bench/auth-session-checks`, depuis main avec #51)
+
+- #52 (découverte `list`/`idField`) : rebasée sur main après le squash de #51 (un seul commit), repointée vers `main`, MERGEABLE, 698/699 tests. Prête à merger.
+- `resolveAccounts` branché dans `nested-authz`, `authz-write`, `mass-assignment` (via `activeOptions`, jeton Bearer seulement : leur client n'envoie que le jeton) et `data-exposure` (seul le compte `as` se connecte ; cookie désormais envoyé aussi). Typage générique de `resolveAccounts`.
+- Test de câblage (`session.test.ts`) : les 4 checks envoient le jeton issu du login déclaré.
+- Cas neutre `bench/cases/login-short-token` : API de facturation, login JSON (`email`), JWT 30 s, BOLA sur les factures, leurre `payment-methods` qui vérifie la propriété. Mots de passe de fixture passés par `config.env` du cas ; l'adaptateur `bench/adapters/crenel.mjs` les met dans l'environnement du sous-processus (jamais dans la config Crenel). Scorer inchangé.
+- **Mesure du cas** : code d'avant #51 (`0b1a87b`) : 0/1 faille, 0/1 leurre ; branche : **1/1 faille (prouvée), 0/1 leurre**. Limite honnête : ce cas a été écrit en même temps que la capacité ; la mesure sur une cible jamais vue reste VAmPI (0 vers 1, contrôle négatif 0).
+- Pas de mesure live de gain pour les 4 checks branchés : VAmPI n'a ni ressource imbriquée ni écriture croisée relevant de ces checks. Seul le câblage est testé.
