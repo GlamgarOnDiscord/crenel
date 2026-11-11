@@ -12,6 +12,7 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
+import { resolveAccounts, type LoginSpec, type Session } from "./session.js";
 
 interface Opts { endpoints?: string[]; as?: string; pii?: boolean }
 
@@ -59,9 +60,13 @@ export const dataExposure: Check = {
     if (!ctx.stagingUrl || endpoints.length === 0) { if (endpoints.length) ctx.log("data-exposure: no staging URL"); return []; }
     const base = ctx.stagingUrl.replace(/\/+$/, "");
     ctx.scope.assertUrlAllowed(base);
-    const accounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string }> }).accounts ?? {};
-    const token = o.as ? accounts[o.as]?.token : undefined;
-    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    const rawAccounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, Session & { login?: LoginSpec }> }).accounts ?? {};
+    // A declared login becomes a fresh session (a pre-set token/cookie wins), like
+    // the other account-based checks (src/checks/session.ts).
+    const accounts = await resolveAccounts(ctx, rawAccounts, "data-exposure");
+    const sess = o.as ? accounts[o.as] : undefined;
+    const token = sess?.token;
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : sess?.cookie ? { cookie: sess.cookie } : {};
     const findings: Finding[] = [];
     for (const ep of endpoints.slice(0, 40)) {
       const url = ep.startsWith("http") ? ep : base + (ep.startsWith("/") ? ep : "/" + ep);
