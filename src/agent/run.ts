@@ -70,11 +70,13 @@ const TOOL_CHECKS: Record<string, string[]> = {
 // Active mode: checks that write to staging, each opt-in in its own options.
 // They are their own validator (a write cannot be replayed without writing
 // again): the proof is the owner's read before and after, with a control.
+import { plannedStoredXss } from "../checks/stored-xss.js";
 const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: string) => PlannedRequest[]> = {
   "authz-write": plannedWrites,
   "mass-assignment": plannedMass,
   race: plannedRace,
   replay: plannedReplays,
+  "stored-xss": plannedStoredXss,
 };
 const LABEL: Record<string, string> = {
   "active.writes": "Écritures actives sur staging (opt-in, valeurs restaurées)",
