@@ -12,9 +12,21 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
-import { resolveAccounts, type LoginSpec } from "./session.js";
 
-interface Opts { endpoints?: string[]; as?: string }
+interface Opts { endpoints?: string[]; as?: string; pii?: boolean }
+
+// A plausible real email address. Placeholders (noreply@, no-reply@, a bare
+// example.com with no local part) are not someone's personal data.
+const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+const PLACEHOLDER_EMAIL = /^(?:no-?reply|postmaster|mailer-daemon|do-?not-?reply|admin|support|info|example)@/i;
+/** Distinct, real-looking email addresses anywhere in the JSON (PII). */
+function leakedEmails(json: unknown, out: Set<string>, depth = 0): void {
+  if (depth > 8 || json == null) return;
+  if (typeof json === "string") { for (const m of json.matchAll(EMAIL)) { const e = m[0].toLowerCase(); if (!PLACEHOLDER_EMAIL.test(e)) out.add(e); } return; }
+  if (typeof json !== "object") return;
+  if (Array.isArray(json)) { for (const v of json) leakedEmails(v, out, depth + 1); return; }
+  for (const v of Object.values(json as Record<string, unknown>)) leakedEmails(v, out, depth + 1);
+}
 
 const PASSWORD_KEY = /^(?:password|passwd|pwd|pass|user_?password|plainpassword)$/i;
 // Values that are NOT a plaintext secret: a known hash, a mask, or a trivial blank.
@@ -47,11 +59,9 @@ export const dataExposure: Check = {
     if (!ctx.stagingUrl || endpoints.length === 0) { if (endpoints.length) ctx.log("data-exposure: no staging URL"); return []; }
     const base = ctx.stagingUrl.replace(/\/+$/, "");
     ctx.scope.assertUrlAllowed(base);
-    const declared = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string; cookie?: string; login?: LoginSpec }> }).accounts ?? {};
-    // Only the account this check reads as logs in (declared login, src/checks/session.ts).
-    const accounts = o.as && declared[o.as]?.login ? await resolveAccounts(ctx, { [o.as]: declared[o.as] }, "data-exposure") : declared;
-    const token = o.as ? accounts[o.as]?.token : undefined, cookie = o.as ? accounts[o.as]?.cookie : undefined;
-    const headers: Record<string, string> = { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(cookie ? { cookie } : {}) };
+    const accounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string }> }).accounts ?? {};
+    const token = o.as ? accounts[o.as]?.token : undefined;
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
     const findings: Finding[] = [];
     for (const ep of endpoints.slice(0, 40)) {
       const url = ep.startsWith("http") ? ep : base + (ep.startsWith("/") ? ep : "/" + ep);
@@ -65,8 +75,8 @@ export const dataExposure: Check = {
         leakedPasswords(json, found);
         // Two or more DISTINCT plaintext passwords: an API handing back real
         // credentials, not a lone schema field. One is a lead, not a proof.
-        if (found.size < 2) { if (found.size === 1) ctx.log(`data-exposure: ${ep} exposes one password-shaped value; a single value is a lead, not proof`); continue; }
-        findings.push({
+        if (found.size === 1) ctx.log(`data-exposure: ${ep} exposes one password-shaped value; a single value is a lead, not proof`);
+        if (found.size >= 2) findings.push({
           id: `data-exposure:${ep}`,
           check: "data-exposure",
           title: `Endpoint ${ep} returns plaintext passwords (${found.size} exposed)`,
@@ -82,6 +92,35 @@ export const dataExposure: Check = {
           },
           regressionHint: `After the fix, GET ${ep} must not return any password field.`,
         });
+        if (o.pii) {
+          const emails = new Set<string>();
+          leakedEmails(json, emails);
+          // >=2 distinct personal emails = a directory/feed of several accounts, not one
+          // user's own record. Control: an anonymous read must be REFUSED, so the endpoint
+          // is gated yet still hands every authenticated caller other accounts' PII
+          // (excessive data exposure, OWASP API3). A publicly readable one stays a lead.
+          if (emails.size >= 2) {
+            const anon = await safeFetch(url, ctx.scope, { method: "GET", maxBytes: 4096 }).catch(() => null);
+            if (anon && (anon.status === 401 || anon.status === 403)) {
+              findings.push({
+                id: `data-exposure:pii:${ep}`,
+                check: "data-exposure",
+                title: `Excessive data exposure: ${ep} returns other accounts' PII (${emails.size} personal emails) to any authenticated user`,
+                severity: "high",
+                state: "proven",
+                location: url,
+                description: `GET ${ep}, read with one ordinary account's token, returns ${emails.size} distinct personal email addresses belonging to other accounts, while an anonymous request is refused (HTTP ${anon.status}). Any authenticated user harvests the whole user base's PII (OWASP API3, excessive data exposure): a privacy breach and a phishing / credential-stuffing seed.`,
+                remediation: `Return only the caller's own data, or scope the response to resources they own; never include other accounts' email, phone or vehicle in a list a normal user can read. Filter at the data layer, not the client.`,
+                proof: {
+                  method: "live GET on staging with one account's token: the JSON lists several distinct real email addresses of other accounts, and the same request without a token is refused",
+                  replay: `curl -s ${JSON.stringify(url)} -H 'authorization: Bearer <A_TOKEN>' | grep -oiE '[a-z0-9._%+-]+@[a-z0-9.-]+' | sort -u`,
+                  evidence: `${emails.size} distinct personal emails exposed at ${ep}; anonymous request refused (HTTP ${anon.status}) (addresses redacted)`,
+                },
+                regressionHint: `After the fix, GET ${ep} with a normal account must not return another account's email address.`,
+              });
+            } else ctx.log(`data-exposure: ${ep} returns ${emails.size} emails but an anonymous read is not refused (HTTP ${anon?.status ?? "n/a"}): public endpoint, kept a lead`);
+          }
+        }
       } catch (err) {
         ctx.log(`data-exposure: ${ep} failed: ${(err as Error).message}`);
       }
