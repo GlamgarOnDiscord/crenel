@@ -47,3 +47,28 @@ test("data-exposure: no endpoints declared yields nothing", async () => {
   const found = await dataExposure.run({ scope: new Scope({ allowedHosts: [] }), projectDir: "/tmp", stagingUrl: "http://127.0.0.1:1", options: {}, log: () => {} });
   assert.equal(found.length, 0);
 });
+
+function serveAuth(authBody: string, anonStatus: number): Server {
+  return createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(anonStatus); res.end("{}"); return; }
+    res.writeHead(200, { "content-type": "application/json" }); res.end(authBody);
+  });
+}
+const PII_OPTS = { options: { "data-exposure": { endpoints: ["/_debug"], pii: true, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
+
+test("data-exposure PII: >=2 other accounts' emails to an authed user while anon is refused is proven, emails redacted", async () => {
+  const found = await run(serveAuth(JSON.stringify({ posts: [{ author: { email: "alice@corp.io" } }, { author: { email: "bob@corp.io" } }] }), 401), PII_OPTS);
+  const proven = found.filter((f) => f.state === "proven" && /excessive data exposure/i.test(f.title));
+  assert.equal(proven.length, 1, "a gated endpoint returning several accounts' emails is proven");
+  assert.doesNotMatch(JSON.stringify(proven[0]!), /alice@corp\.io|bob@corp\.io/, "the email addresses are never written into the finding");
+});
+
+test("data-exposure PII: a publicly readable endpoint (anonymous not refused) is not proven", async () => {
+  const found = await run(serveAuth(JSON.stringify({ posts: [{ author: { email: "alice@corp.io" } }, { author: { email: "bob@corp.io" } }] }), 200), PII_OPTS);
+  assert.equal(found.filter((f) => f.state === "proven" && /excessive data/i.test(f.title)).length, 0, "a public endpoint is a lead, not a proof");
+});
+
+test("data-exposure PII: a single email (the caller's own record) is not a finding", async () => {
+  const found = await run(serveAuth(JSON.stringify({ email: "me@corp.io", name: "Me" }), 401), PII_OPTS);
+  assert.equal(found.filter((f) => /excessive data/i.test(f.title)).length, 0, "one email is not a cross-account leak");
+});
