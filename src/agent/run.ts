@@ -72,6 +72,7 @@ const TOOL_CHECKS: Record<string, string[]> = {
 // again): the proof is the owner's read before and after, with a control.
 import { plannedStoredXss } from "../checks/stored-xss.js";
 import { plannedSignup } from "../checks/signup-privilege.js";
+import { plannedTakeover } from "../checks/password-takeover.js";
 const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: string) => PlannedRequest[]> = {
   "authz-write": plannedWrites,
   "mass-assignment": plannedMass,
@@ -79,6 +80,7 @@ const ACTIVE_PLANS: Record<string, (options: Record<string, unknown>, base: stri
   replay: plannedReplays,
   "stored-xss": plannedStoredXss,
   "signup-privilege": plannedSignup,
+  "password-takeover": plannedTakeover,
 };
 const LABEL: Record<string, string> = {
   "active.writes": "Écritures actives sur staging (opt-in, valeurs restaurées)",
