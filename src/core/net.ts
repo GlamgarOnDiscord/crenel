@@ -4,8 +4,11 @@
 //
 //   1. the host is in the Scope allowlist (you declared you own it);
 //   2. the host does not resolve to a private/loopback/link-local address
-//      (blocks SSRF and DNS-rebinding to internal services), unless the target
-//      explicitly opts into private ranges for an internal staging box;
+//      (blocks SSRF to internal services), unless the target explicitly opts
+//      into private ranges for an internal staging box. KNOWN GAP: the address
+//      checked is not pinned (fetch resolves again), so a TTL-0 DNS rebinding
+//      between the check and the connection is not blocked yet; the egress
+//      proxy does pin. See HARDENING-LOG.md H2;
 //   3. every redirect hop is re-validated against the same rules (a 302 cannot
 //      smuggle the agent off scope);
 //   4. the response body is capped, so a hostile target cannot flood context;
