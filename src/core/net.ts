@@ -108,10 +108,9 @@ const MCP_READ = new Set(["initialize", "notifications/initialized", "tools/list
 
 /** A GraphQL document that can only read: no mutation or subscription anywhere (even as a name: conservative). */
 export function isGraphqlQueryOnly(query: string): boolean {
-  const code = query
-    .replace(/"""[\s\S]*?"""/g, '""')
-    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
-    .replace(/#[^\n]*/g, "");
+  // One left-to-right pass, as GraphQL's lexer reads it: a `"""` inside a comment
+  // or a `#` inside a string is not a token, so it can never hide code.
+  const code = query.replace(/"""(?:\\"""|[\s\S])*?"""|"(?:\\.|[^"\\\n\r])*"|#[^\n\r]*/g, (t) => (t[0] === "#" ? "" : '""'));
   if (/\b(mutation|subscription)\b/i.test(code)) return false;
   return /^\s*(query\b|\{)/.test(code);
 }

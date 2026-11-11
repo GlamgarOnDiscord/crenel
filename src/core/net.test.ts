@@ -89,6 +89,16 @@ test("isGraphqlQueryOnly: queries pass, mutations and subscriptions never do", (
   assert.ok(!isGraphqlQueryOnly("fragment F on User { id } query { me { ...F } }"), "anything not starting as a query is refused");
 });
 
+// H1: the document is lexed in one pass, so a token inside a comment or a string cannot hide a mutation.
+test("isGraphqlQueryOnly: a mutation hidden by a block-string quote in a comment is refused", () => {
+  const q = 'query R { a } # """\nmutation Del { deleteAll } # """';
+  assert.equal(isGraphqlQueryOnly(q), false);
+  assert.equal(readOnlyPost("https://app.example.com/graphql", JSON.stringify({ query: q, operationName: "Del" })), null);
+  assert.equal(isGraphqlQueryOnly("query R { a } # x\rmutation Del { deleteAll }"), false, "a CR ends a comment");
+  assert.equal(isGraphqlQueryOnly('query R { a(s: "#") }\nmutation Del { x }'), false);
+  assert.ok(isGraphqlQueryOnly('query R { a(s: """ \\""" mutation """) } # mutation'), "the word in a block string or a comment is fine");
+});
+
 test("readOnlyPost: only GraphQL queries, MCP list calls and OSV lookups", () => {
   const u = "https://app.example.com/graphql";
   assert.equal(readOnlyPost(u, JSON.stringify({ query: "{ me { id } }" })), "graphql-query");
