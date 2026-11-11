@@ -12,6 +12,7 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
+import { resolveAccounts, type LoginSpec } from "./session.js";
 
 interface Opts { endpoints?: string[]; as?: string }
 
@@ -46,9 +47,11 @@ export const dataExposure: Check = {
     if (!ctx.stagingUrl || endpoints.length === 0) { if (endpoints.length) ctx.log("data-exposure: no staging URL"); return []; }
     const base = ctx.stagingUrl.replace(/\/+$/, "");
     ctx.scope.assertUrlAllowed(base);
-    const accounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string }> }).accounts ?? {};
-    const token = o.as ? accounts[o.as]?.token : undefined;
-    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    const declared = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, { token?: string; cookie?: string; login?: LoginSpec }> }).accounts ?? {};
+    // Only the account this check reads as logs in (declared login, src/checks/session.ts).
+    const accounts = o.as && declared[o.as]?.login ? await resolveAccounts(ctx, { [o.as]: declared[o.as] }, "data-exposure") : declared;
+    const token = o.as ? accounts[o.as]?.token : undefined, cookie = o.as ? accounts[o.as]?.cookie : undefined;
+    const headers: Record<string, string> = { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(cookie ? { cookie } : {}) };
     const findings: Finding[] = [];
     for (const ep of endpoints.slice(0, 40)) {
       const url = ep.startsWith("http") ? ep : base + (ep.startsWith("/") ? ep : "/" + ep);

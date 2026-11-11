@@ -17,9 +17,10 @@ import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
 import { authzOracle } from "../agent/validators.js";
 import { sameIdentity } from "./authz-matrix.js";
+import { resolveAccounts, type LoginSpec } from "./session.js";
 
 type Auth = { token?: string; cookie?: string; headers?: Record<string, string> };
-interface AccountSpec extends Auth { marker?: string }
+interface AccountSpec extends Auth { marker?: string; login?: LoginSpec }
 interface NestedResource {
   /** e.g. "project" */
   name: string;
@@ -57,9 +58,10 @@ export const nestedAuthz: Check = {
   async run(ctx: CheckContext): Promise<Finding[]> {
     const cfg = (ctx.options["nested-authz"] ?? {}) as Opts;
     const resources = cfg.resources ?? [];
-    const accounts = cfg.accounts ?? {};
+    let accounts = cfg.accounts ?? {};
     const findings: Finding[] = [];
     if (resources.length === 0) { ctx.log("nested-authz: no nested resources declared"); return findings; }
+    if (ctx.stagingUrl) accounts = await resolveAccounts(ctx, accounts, "nested-authz"); // declared logins (src/checks/session.ts)
     if (!ctx.stagingUrl || !hasAuth(accounts.a) || !hasAuth(accounts.b)) {
       ctx.log("nested-authz: needs a staging URL and two authenticated accounts (a, b)");
       return findings;

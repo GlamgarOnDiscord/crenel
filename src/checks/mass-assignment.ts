@@ -12,6 +12,7 @@
 // value and read again; what could not be restored is reported.
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
+import { resolveAccounts } from "./session.js";
 import { ActiveClient, activeOptions, getField, MAX_TARGETS, ok2xx, same, setField, urlOf, writesFinding, type ActiveBase } from "./active-common.js";
 
 export interface MassTarget {
@@ -49,6 +50,7 @@ export const massAssignment: Check = {
   async run(ctx: CheckContext): Promise<Finding[]> {
     const o = activeOptions<Opts>(ctx, "mass-assignment");
     if (!o) return [];
+    if (ctx.stagingUrl) o.accounts = await resolveAccounts(ctx, o.accounts, "mass-assignment"); // declared logins (src/checks/session.ts)
     const targets = (o.targets ?? []).slice(0, MAX_TARGETS);
     if (!ctx.stagingUrl || targets.length === 0) { ctx.log("mass-assignment: needs a stagingUrl and options.mass-assignment.targets"); return []; }
     const base = ctx.stagingUrl.replace(/\/+$/, "");

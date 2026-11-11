@@ -105,9 +105,9 @@ export async function login(ctx: CheckContext, spec: LoginSpec, env: NodeJS.Proc
  * Accounts with a `login` get a fresh session (a declared token or cookie wins).
  * Logging in is a POST, so it needs active testing, like the live probes it serves.
  */
-export async function resolveAccounts<A extends Session & { login?: LoginSpec }>(ctx: CheckContext, accounts: Record<string, A | undefined>, check: string, env?: NodeJS.ProcessEnv): Promise<Record<string, A | undefined>> {
-  const out: Record<string, A | undefined> = { ...accounts };
-  for (const [key, a] of Object.entries(accounts)) {
+export async function resolveAccounts<R extends { [K in keyof R]?: Session & { login?: LoginSpec } }>(ctx: CheckContext, accounts: R, check: string, env?: NodeJS.ProcessEnv): Promise<R> {
+  const out: Record<string, unknown> = { ...accounts };
+  for (const [key, a] of Object.entries(accounts) as [string, (Session & { login?: LoginSpec }) | undefined][]) {
     if (!a?.login || a.token || a.cookie) continue;
     ctx.scope.assertActiveAllowed(`${check} (login of account ${key})`);
     try {
@@ -118,7 +118,7 @@ export async function resolveAccounts<A extends Session & { login?: LoginSpec }>
       ctx.log(`${check}: account ${key} could not log in: ${(err as Error).message}`);
     }
   }
-  return out;
+  return out as R;
 }
 
 /** The `sub` claim of a JWT (the account's identity), or undefined. */

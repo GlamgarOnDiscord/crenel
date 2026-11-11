@@ -115,6 +115,9 @@ sets (cleared cookies left out). The password is read from the named env var at
 call time. Logging in is a POST, so it needs `allowActiveTesting`, like the live
 probes. A session proves nothing: the proof is still `authzOracle` and the
 same-identity guard; a failed login only means fewer probes.
+The same `login` works for the accounts of `nested-authz`, `authz-write`,
+`mass-assignment` (bearer token only, as their client sends) and the account
+`data-exposure` reads as (`as`).
 
 **B's objects from a listing.** A resource may declare `list` (a listing path)
 and `idField` (default `id`) instead of ids under `accounts.b.owns`. B reads the
