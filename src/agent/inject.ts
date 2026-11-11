@@ -32,7 +32,7 @@ export function nonce(seed = ""): string {
 const SQL_ERRORS = [
   "you have an error in your sql syntax", "warning: mysql", "mysql_fetch",
   "unclosed quotation mark", "quoted string not properly terminated",
-  "pg_query", "postgresql", "psql:", "sqlite3.operationalerror", "sqlite error",
+  "pg_query", "postgresql", "psql:", "sqlite3.operationalerror", "sqlite error", "sqlite_error",
   "ora-0", "odbc", "sqlstate", "syntax error at or near", "unterminated quoted string",
   "operationalerror", "programmingerror", // Python DB-API 2.0 (PEP 249) SQL execution/syntax errors, any driver
 ];
