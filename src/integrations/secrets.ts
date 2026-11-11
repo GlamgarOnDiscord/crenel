@@ -7,7 +7,7 @@
 // response or the terminal: callers show `maskUrl()` or "configured" instead,
 // and `redact()` scrubs any known value from an error message.
 
-import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 export type SecretSource = "env" | "file" | null;
@@ -19,7 +19,10 @@ export class SecretStore {
   }
 
   private read(): Record<string, string> {
-    if (!existsSync(this.path)) return {};
+    if (!existsSync(this.path) && !isLink(this.path)) return {};
+    // .crenel/ can come from a cloned repository: a planted link must not make
+    // Crenel read (or later write through) a file of the attacker's choosing.
+    if (isLink(this.path)) throw new Error(`${this.path} is a symbolic link: Crenel refuses to use it`);
     if (process.platform !== "win32" && (statSync(this.path).mode & 0o077) !== 0) {
       throw new Error(`${this.path} is readable by other users: run chmod 600 on it (Crenel refuses to use it until then)`);
     }
@@ -37,10 +40,15 @@ export class SecretStore {
     // .crenel/ may sit inside a repository: keep the secrets out of git even
     // when the project's own .gitignore does not list .crenel/.
     const ignore = join(dir, ".gitignore");
-    if (!existsSync(ignore)) writeFileSync(ignore, "# written by Crenel: never commit integration secrets\nsecrets.json\nsecrets.json.tmp\n");
+    // "wx" (O_CREAT|O_EXCL) never follows a planted link: it fails instead.
+    if (!existsSync(ignore) && !isLink(ignore)) { try { writeFileSync(ignore, "# written by Crenel: never commit integration secrets\nsecrets.json\nsecrets.json.tmp\n", { flag: "wx" }); } catch { /* exists: leave it */ } }
     const tmp = this.path + ".tmp";
-    writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-    chmodSync(tmp, 0o600); // the umask cannot widen it
+    rmSync(tmp, { force: true }); // a leftover or a planted link: unlink the entry itself, never its target
+    const fd = openSync(tmp, "wx", 0o600);
+    try {
+      fchmodSync(fd, 0o600); // the umask cannot widen it
+      writeSync(fd, JSON.stringify(data, null, 2) + "\n");
+    } finally { closeSync(fd); }
     renameSync(tmp, this.path);
   }
 
@@ -70,6 +78,10 @@ export class SecretStore {
   values(): string[] {
     try { return Object.values(this.read()).filter((v) => typeof v === "string" && v.length >= 8); } catch { return []; }
   }
+}
+
+function isLink(p: string): boolean {
+  try { return lstatSync(p).isSymbolicLink(); } catch { return false; }
 }
 
 /** Only the scheme and host of a URL, e.g. https://hooks.slack.com/… */
