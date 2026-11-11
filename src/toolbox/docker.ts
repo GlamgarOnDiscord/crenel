@@ -151,7 +151,8 @@ export async function runConfined(o: ConfinedOptions): Promise<ConfinedResult> {
 
   if (!o.scope) {
     const r = await docker(["run", "--rm", "--name", toolName, "--network", "none", ...hardeningFlags(limits), ...ep, ...mount, image, ...o.argv], { timeoutMs: limits.timeoutMs, signal: o.signal });
-    if (r.timedOut) await docker(["rm", "-f", toolName], { timeoutMs: 15_000 });
+    // Killing the docker client (timeout or abort) does not stop the container.
+    if (r.timedOut || o.signal?.aborted) await docker(["rm", "-f", toolName], { timeoutMs: 15_000 });
     return { ...r, network: "none" };
   }
 
