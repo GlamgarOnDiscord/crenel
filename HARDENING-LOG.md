@@ -17,6 +17,10 @@ Légende statut : `ouvert` · `en cours` · `corrigé (commit)` · `arbitrage` (
 | L7 | Faible | Corps d'une réponse 3xx non consommé avant le saut suivant | `src/core/net.ts:197-200` | corrigé (`b4e2b15`) |
 | L8 | Faible | Proxy : en-têtes nommés dans `Connection` non retirés | `src/core/egress-proxy.ts:103`, `:210` | ouvert |
 | I9 | Info | `cmd /c start` sous Windows : échappement partiel de l'URL | `src/cli.ts:586` | accepté (URL interne) |
+| T1 | Élevée | Toolbox : un argument du modèle fait ignorer les options de sécurité de Crenel | `src/toolbox/free-args.ts:90-101` | corrigé (`7ee6910`, PR #50) |
+| T2 | Moyenne | Toolbox : alias d'écriture et de protocole absents des listes de refus | `src/toolbox/free-args.ts:33-43` | corrigé (`7ee6910`, PR #50) |
+| T3 | Faible | Toolbox : une cible sans schéma (`-u evil.example`) n'est pas vérifiée par `freeArgsProblem` | `src/toolbox/free-args.ts:70` | ouvert (le proxy la refuse ; défense en profondeur seulement) |
+| T4 | À vérifier | nuclei : un template choisi par `-id` / `-t` respecte-t-il `-etags` ? | `src/toolbox/free-args.ts:61-65` | ouvert (comportement du binaire à confirmer) |
 
 ## Pour Tom : décision H2 (DNS rebinding)
 
@@ -92,6 +96,20 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 
 - `src/cli.ts:586` : seul `&` est échappé, mais l'URL est construite par Crenel (`http://127.0.0.1:<port>/?token=<base64url>`), jamais par une entrée externe. Pas de correctif ; à revoir si l'URL devient paramétrable.
 
+### T1. Fin d'analyse des options : les options de sécurité sautent (Élevée, PR #50)
+
+- **Où** : `freeArgv` plaçait `-proxy`, `-rl`, `-etags <refusés>`, `-pt http`, `-ni` **après** les arguments du modèle.
+- **Problème** : nuclei, katana et httpx analysent leurs options avec le paquet `flag` de Go (via goflags), qui s'arrête à `--`, à `-` ou au premier mot qui n'est pas une option ; une option à valeur placée en dernier (`-H`) avale l'argument suivant.
+- **Scénario** : le modèle passe `["--"]`, `["mot"]` ou `["-H"]`. Sous Docker, les templates intrusifs et les protocoles non http passent par les tunnels HTTPS (méthode invisible pour le proxy), sans limite de débit. Sous WSL (pas de réseau isolé), sans `-proxy`, l'outil sort directement vers n'importe quel hôte.
+- **Correctif** : options de Crenel placées avant ET après celles du modèle ; `--` et `-` refusés.
+- **Test** : `explore-validators.test.ts` (« nothing the model passes can make the tool skip Crenel's flags ») ; l'assertion existante « Crenel's flags come last » de `explore.test.ts` passe à `lastIndexOf` et vérifie aussi la position en tête.
+- **Limite** : non vérifié contre les vrais binaires (aucun outil Go dans cet environnement) ; repose sur la sémantique documentée de `flag`.
+
+### T2. Alias manquants (Moyenne, PR #50)
+
+- nuclei : `-pt`, `-type`, `-ept`, `-exclude-type` (choix du protocole, ex. `javascript`), `-sresp`, `-store-resp`, `-store-resp-dir`, `-profile-mem`. katana : `-sf`, `-store-field`, `-sfd`, `-store-field-dir`, `-cwu`, `-chrome-ws-url`.
+- Vérifié sans problème : casse (`flagName` met en minuscules ; Go est sensible à la casse, donc le refus est plus large que nécessaire), `--flag=valeur` et `-flag=valeur` (découpés sur `=`), options courtes groupées (non supportées par `flag` de Go ; trufflehog/kingpin est en liste blanche, `-jx` y est refusé).
+
 ## Vérifié sans problème (pour mémoire)
 
 - Console locale `src/server/http.ts` : jeton aléatoire comparé en temps constant, contrôle du `Host` (anti DNS rebinding), contrôle d'`Origin` sur les écritures, cookie `HttpOnly; SameSite=Strict`, redirection post-jeton limitée aux chemins locaux, service statique confiné à `web/dist` (`resolve` + préfixe `root + sep`).
@@ -104,7 +122,6 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 
 ## Reste à auditer
 
-- `src/toolbox/free-args.ts` (liste de refus des options des outils : complétude, formes `--flag=valeur`, alias courts).
 - `src/toolbox/docker.ts` / `wsl.ts` (montages, réseau du conteneur, variables d'environnement transmises).
 - `src/integrations/*` (stockage des secrets de webhook, signature, Slack).
 - Regex des checks `src/checks/*` (ReDoS sur corps de 2 Mo).
@@ -114,3 +131,4 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 
 - 2026-11-11 : audit initial (v1). PoC H1 reproduit localement (`isGraphqlQueryOnly` renvoie `true` sur un document contenant une mutation).
 - 2026-11-11 : H1, H3 (+L7), M4, M5, M6 corrigés, chacun avec test de non-régression ; `tsc --noEmit` vert ; suite complète 633/634 (1 test non exécuté, préexistant), 0 échec. H3 retire aussi `apikey` / `x-api-key` (en-têtes BaaS utilisés par les checks Supabase) sur changement d'origine ; une montée `http:` vers `https:` du même hôte les conserve. M5 ne regarde que les clés de premier niveau (celles qui décident de l'opération). H2 : doc corrigée, décision pour Tom.
+- 2026-11-11 : famille toolbox, `free-args.ts` audité : T1 et T2 corrigés (PR #50, branche `security/toolbox-free-args`), T3 et T4 notés. Suite complète 628/629, 0 échec.
