@@ -45,9 +45,16 @@ Le jeton a été trouvé par sa forme JWT (aucune clé ni chemin propre à VAmPI
 
 La sonde a réellement tourné sur la cible sécurisée : pas de plan hors ligne (donc A s'est connecté), et vérification manuelle B lit son livre (200), A est refusé (404). Le serveur stub qui vérifie la propriété donne aussi 0 prouvé. Suite complète : 695 tests, 694 réussis, 0 échec (1 non exécuté, préexistant).
 
+## Suite n°1 : objets de B découverts depuis une liste (branche `bench/auth-discover`, empilée sur #51)
+
+- Ressource : `list: <chemin>`, `idField` (défaut `id`). B lit la liste avec sa session ; un id n'est gardé que si B lit l'objet (2xx) ET que le corps nomme B comme mot entier (`marker` de B, sinon `sub` de son JWT ; `mentions` refuse « name2 » dans « name20 ») ET ne nomme pas A. Plafond 25 ids par liste. Ensuite, matrice inchangée.
+- Tests : `session.test.ts` (+3) : pièces pures, stub à liste GLOBALE avec leurres (`bobbie2`, note de A qui mentionne B) : seul l'objet de B est prouvé ; stub sécurisé : 0.
+- **Mesure live (VAmPI, sans `owns` ni `marker`)** : vulnérable 5014 : **1 prouvé** (`book:GET:bookTitle3`, le livre de name2 uniquement, alors que `/books/v1` liste les 3 livres) ; sécurisé 5015 : **0 finding**, sans plan hors ligne (la découverte a trouvé `bookTitle17` et la sonde a tourné). Suite complète 697/698, 0 échec.
+- Incident : le conteneur `vampi` (5014) s'est arrêté (code 0) pendant une mesure, pas de mon fait ; relancé avec `docker start vampi` (accord donné).
+
 ## Suites possibles
 
-1. Découverte des ids de B via une liste authentifiée (ex. `/books/v1` filtré par B) : retire l'id déclaré, même oracle.
+1. ~~Découverte des ids de B via une liste authentifiée~~ : faite (voir plus haut).
 2. Brancher `resolveAccounts` dans les autres consommateurs des comptes (`active-common.activeOptions` : authz-write, mass-assignment, race ; nested-authz, function-authz).
 3. Ajouter un cas `bench/cases/` login-gated neutre (jeton court) pour que le scorer le mesure en continu.
 

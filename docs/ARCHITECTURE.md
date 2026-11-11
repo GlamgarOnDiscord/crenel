@@ -116,6 +116,13 @@ call time. Logging in is a POST, so it needs `allowActiveTesting`, like the live
 probes. A session proves nothing: the proof is still `authzOracle` and the
 same-identity guard; a failed login only means fewer probes.
 
+**B's objects from a listing.** A resource may declare `list` (a listing path)
+and `idField` (default `id`) instead of ids under `accounts.b.owns`. B reads the
+listing with its session; an id is kept only when B reads the object (2xx) and
+its body names B as a whole token (B's `marker`, else the `sub` of B's JWT) and
+does not name A. Being listed proves nothing (a listing can be global); the
+proof is the same matrix as for declared ids.
+
 **Funnel.** `explore.end` reports, per claim class, how many claims were
 submitted and proven and where the rest stopped (`scope`, `budget`, `gate`,
 `write-mode`, `detail`, or the `validator`'s own verdict), plus the leads noted

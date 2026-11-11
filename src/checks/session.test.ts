@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { extractSession, isJwt } from "./session.js";
+import { extractSession, isJwt, jwtSub, listedIds, mentions } from "./session.js";
 import { authzMatrix } from "./authz-matrix.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext } from "../core/types.js";
@@ -40,8 +40,9 @@ test("extractSession: a failed login, or an answer with no token and no cookie, 
 // A login-gated API: JWTs from POST /login (or a cookie session from /login-form), notes owned per user.
 // `safe` checks ownership; otherwise any logged-in user reads any note (BOLA). Anonymous is always refused.
 function app(safe: boolean): Promise<{ base: string; srv: Server }> {
-  const users: Record<string, string> = { alice: "pw-alice", bob: "pw-bob" };
-  const notes: Record<string, { owner: string; text: string }> = { "note_a_1": { owner: "alice", text: "alice-private" }, "note_b_1": { owner: "bob", text: "bob-secret-canary" } };
+  const users: Record<string, string> = { alice: "pw-alice", bobbie: "pw-bob" };
+  const notes: Record<string, { owner: string; text: string }> = { "note_a_1": { owner: "alice", text: "alice-private" }, "note_b_1": { owner: "bobbie", text: "bob-secret-canary" },
+    "note_c_1": { owner: "bobbie2", text: "another tenant" }, "note_a_2": { owner: "alice", text: "shared with bobbie" } };
   const sessions: Record<string, string> = {};
   const srv = createServer((req, res) => {
     let raw = "";
@@ -57,6 +58,9 @@ function app(safe: boolean): Promise<{ base: string; srv: Server }> {
         sessions[sid] = body.username;
         return send(302, {}, { location: "/", "set-cookie": `sid=${sid}; Path=/; HttpOnly` });
       }
+      const authed = /^Bearer /.test(req.headers.authorization ?? "") || /sid=/.test(req.headers.cookie ?? "");
+      // A global listing (every tenant's ids): being listed says nothing about ownership.
+      if (req.method === "GET" && u.pathname === "/api/notes") return authed ? send(200, { notes: Object.keys(notes).map((id) => ({ id, title: "note" })) }) : send(401, {});
       const m = /^\/api\/notes\/([^/]+)$/.exec(u.pathname);
       if (req.method === "GET" && m) {
         const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
@@ -80,7 +84,7 @@ function options(loginPath: string, format: "json" | "form", pwA = "CRENEL_TEST_
       resources: [{ name: "note", path: "/api/notes/:id" }],
       accounts: {
         a: { label: "A", login: { url: loginPath, username: "alice", passwordEnv: pwA, format } },
-        b: { label: "B", login: { url: loginPath, username: "bob", passwordEnv: "CRENEL_TEST_PW_B", format }, owns: { note: ["note_b_1"] }, marker: "bob-secret-canary" },
+        b: { label: "B", login: { url: loginPath, username: "bobbie", passwordEnv: "CRENEL_TEST_PW_B", format }, owns: { note: ["note_b_1"] }, marker: "bob-secret-canary" },
       },
     },
   };
@@ -91,7 +95,7 @@ async function run(base: string, opts: Record<string, unknown>): Promise<{ id: s
   Object.assign(process.env, env);
   try { return await authzMatrix.run(ctx); } finally { for (const k of Object.keys(env)) delete process.env[k]; }
 }
-const proven = (f: { state: string }[]) => f.filter((x) => x.state === "proven");
+const proven = <F extends { state: string }>(f: F[]) => f.filter((x) => x.state === "proven");
 
 test("authz-matrix behind a login: a fresh JWT session per account proves the BOLA", async () => {
   const { base, srv } = await app(false);
@@ -116,4 +120,40 @@ test("authz-matrix behind a login: a failed login of A sends no probe as A and p
 test("authz-matrix: a declared login needs active testing (it is a POST)", async () => {
   const ctx: CheckContext = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: "/tmp/x", stagingUrl: "http://127.0.0.1:9", options: options("/login", "json"), log: () => {} };
   await assert.rejects(authzMatrix.run(ctx), /allowActiveTesting is off/);
+});
+
+test("listedIds, jwtSub, mentions: the pieces of listing discovery", () => {
+  assert.deepEqual(listedIds(JSON.stringify({ Books: [{ book_title: "t1" }, { book_title: "t2", nested: { book_title: 3 } }, { book_title: "t1" }] }), "book_title"), ["t1", "t2", "3"]);
+  assert.deepEqual(listedIds("not json", "id"), []);
+  assert.equal(jwtSub(jwt("bobbie")), "bobbie");
+  assert.equal(jwtSub("opaque-token"), undefined);
+  assert.ok(mentions('{"owner":"bobbie"}', "bobbie"));
+  assert.ok(!mentions('{"owner":"bobbie2"}', "bobbie"), "a longer name is not the account");
+  assert.ok(!mentions('{"email":"x.bobbie@y"}', "bobbie"));
+});
+
+// B's objects are found from the listing B reads, with no declared owns and no marker: the identity is B's JWT sub.
+function listOptions() {
+  return {
+    "authz-matrix": {
+      resources: [{ name: "note", path: "/api/notes/:id", list: "/api/notes", idField: "id" }],
+      accounts: {
+        a: { label: "A", login: { url: "/login", username: "alice", passwordEnv: "CRENEL_TEST_PW_A" } },
+        b: { label: "B", login: { url: "/login", username: "bobbie", passwordEnv: "CRENEL_TEST_PW_B" } },
+      },
+    },
+  };
+}
+
+test("authz-matrix: B's objects discovered from a global listing prove the BOLA on B's object only", async () => {
+  const { base, srv } = await app(false);
+  try {
+    const p = proven(await run(base, listOptions()));
+    assert.deepEqual(p.map((f) => f.id), ["authz-matrix:note:GET:note_b_1"], "not bobbie2's note, not A's note that mentions B");
+  } finally { srv.close(); }
+});
+
+test("authz-matrix: listing discovery on an app that checks ownership proves nothing (negative control)", async () => {
+  const { base, srv } = await app(true);
+  try { assert.equal(proven(await run(base, listOptions())).length, 0); } finally { srv.close(); }
 });

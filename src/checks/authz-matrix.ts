@@ -14,7 +14,7 @@
 //     testing is enabled for an owned host, replay each cross-tenant request and
 //     report any that did not return 401/403/404 as PROVEN broken authorization.
 
-import { resolveAccounts, type LoginSpec } from "./session.js";
+import { jwtSub, listedIds, mentions, resolveAccounts, type LoginSpec } from "./session.js";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
@@ -42,6 +42,12 @@ interface ResourceSpec {
    * to `path` (the GraphQL endpoint) and the owner field is taken from the object
    * under `data`. Lets the same validated oracle cover a GraphQL API. */
   gql?: string;
+  /** A listing B reads with its own session (e.g. "/api/projects"): B's objects are discovered there
+   * instead of declared under owns. An id counts as B's only when B reads the object and its body
+   * names B (B's marker, else the sub of B's JWT) and not A. */
+  list?: string;
+  /** The field holding the id in the listing's objects (default "id"). */
+  idField?: string;
 }
 
 interface AccountSpec {
@@ -103,6 +109,30 @@ export const authzMatrix: Check = {
     // Declared login flows: a fresh session per run (short-lived tokens, cookie sessions).
     if (ctx.stagingUrl && cfg.accounts && Object.values(cfg.accounts).some((a) => a?.login)) {
       cfg.accounts = await resolveAccounts(ctx, cfg.accounts, "authz-matrix") as AuthzOptions["accounts"];
+    }
+
+    // B's objects from a listing B reads with its session. Being listed proves nothing (a listing can
+    // be global): an id is kept only when B reads the object and its body names B, and not A.
+    const listed = resources.filter((r) => !r.public && r.list);
+    const bAcc = cfg.accounts?.b, bWho = bAcc?.marker || jwtSub(bAcc?.token), aWho = cfg.accounts?.a?.marker || jwtSub(cfg.accounts?.a?.token);
+    if (ctx.stagingUrl && listed.length && hasAuth(bAcc) && bWho && bWho.length >= 4) {
+      ctx.scope.assertActiveAllowed("authz-matrix (live probe)");
+      const root = ctx.stagingUrl.replace(/\/$/, "");
+      const owns = { ...(bAcc!.owns ?? {}) };
+      for (const r of listed) {
+        try {
+          const list = await safeFetch(root + r.list, ctx.scope, { headers: authHeaders(bAcc) });
+          if (list.status < 200 || list.status >= 300) continue;
+          const mine: string[] = [];
+          for (const id of listedIds(list.body, r.idField ?? "id").slice(0, MAX_LISTED)) {
+            const o = await safeFetch(root + r.path.replace(":id", encodeURIComponent(id)), ctx.scope, { headers: authHeaders(bAcc) });
+            if (o.status >= 200 && o.status < 300 && mentions(o.body, bWho) && !(aWho && mentions(o.body, aWho))) mine.push(id);
+          }
+          ctx.log(`authz-matrix: ${mine.length} object(s) of B found in ${r.list}`);
+          if (mine.length) owns[r.name] = [...new Set([...(owns[r.name] ?? []), ...mine])];
+        } catch (err) { ctx.log(`authz-matrix: listing ${r.list} failed: ${(err as Error).message}`); }
+      }
+      cfg.accounts = { ...cfg.accounts, b: { ...bAcc!, owns } };
     }
 
     // Build the matrix: account A attempting to touch each id owned by B.
@@ -399,6 +429,8 @@ export const authzMatrix: Check = {
 };
 
 const MAX_DISCOVERED = 25;
+/** Ids read from one listing to look for B's objects. */
+const MAX_LISTED = 25;
 
 /** Two more attacker replays must also be leaks for the finding to be proven. */
 async function stableLeak(replay: () => Promise<{ status: number; body: string }>, owner: { status: number; body: string } | undefined, control: { status: number; body: string }, markers: string[]): Promise<boolean> {

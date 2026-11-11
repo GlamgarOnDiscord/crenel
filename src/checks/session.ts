@@ -120,3 +120,28 @@ export async function resolveAccounts<A extends Session & { login?: LoginSpec }>
   }
   return out;
 }
+
+/** The `sub` claim of a JWT (the account's identity), or undefined. */
+export function jwtSub(token?: string): string | undefined {
+  if (!token || !isJwt(token)) return undefined;
+  try { const sub = (JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8")) as { sub?: unknown }).sub; return typeof sub === "string" || typeof sub === "number" ? String(sub) : undefined; } catch { return undefined; }
+}
+
+/** The values of `idField` on every object of a JSON listing (any depth), in order, deduplicated. */
+export function listedIds(body: string, idField: string): string[] {
+  let json: unknown;
+  try { json = JSON.parse(body); } catch { return []; }
+  const out = new Set<string>();
+  const walk = (v: unknown, depth: number) => {
+    if (depth > 6 || !v || typeof v !== "object") return;
+    if (!Array.isArray(v)) { const id = (v as Record<string, unknown>)[idField]; if ((typeof id === "string" && id) || typeof id === "number") out.add(String(id)); }
+    for (const x of Object.values(v as Record<string, unknown>)) walk(x, depth + 1);
+  };
+  walk(json, 0);
+  return [...out];
+}
+
+/** True when `who` appears in `body` as a whole token (not inside a longer name: "name2" is not in "name20"). */
+export function mentions(body: string, who: string): boolean {
+  return new RegExp(`(?<![\\w.@-])${who.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(body);
+}
