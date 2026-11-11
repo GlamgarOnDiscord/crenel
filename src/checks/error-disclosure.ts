@@ -16,6 +16,18 @@ interface Ep { url: string; method?: string }
 // Generic, non-mutating endpoints only: a benign JSON probe to any of these fails
 // auth or validation without creating or changing anything (no /signup, /register
 // or /api/users, which a benign body could affect), and none is one target's route.
+/** Up to 5 distinct source paths (`/a/b.ts:12`) in a body. Each path-like run is
+ * cut once, then searched: the path regex run over the whole body backtracks
+ * quadratically on a long run of "/a/a/a…". */
+export function sourcePaths(body: string): string[] {
+  const out = new Set<string>();
+  for (const c of body.matchAll(/(?<![\w./-])[\w./-]{1,512}:\d+/g)) {
+    for (const m of c[0].matchAll(/(?:\/[\w.-]+){2,}\.(?:js|ts|mjs|cjs|py|rb|php|go):\d+/g)) out.add(m[0]);
+    if (out.size >= 5) break;
+  }
+  return [...out].slice(0, 5);
+}
+
 export const ERR_ENDPOINTS: Ep[] = [
   { url: "/api/login" }, { url: "/login" }, { url: "/auth/login" },
   { url: "/api/auth/login" }, { url: "/graphql" }, { url: "/api" }, { url: "/rest" },
@@ -68,7 +80,7 @@ export const errorDisclosure: Check = {
       const malformed = await post(ep.url, '{"x":', method);
       if (!hasStackTrace(malformed.body)) continue;
       if (findings.length > 0) continue; // already proven once (global handler): decoy probed, not re-reported
-      const paths = [...new Set([...malformed.body.matchAll(/(?:\/[\w.-]+){2,}\.(?:js|ts|mjs|cjs|py|rb|php|go):\d+/g)].map((m) => m[0]))].slice(0, 5);
+      const paths = sourcePaths(malformed.body);
       findings.push({
         id: `error-disclosure:${ep.url}`,
         check: "error-disclosure",

@@ -8,6 +8,7 @@
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
 import { randomBytes } from "node:crypto";
+import { metaRefreshUrl } from "../core/html.js";
 
 const PATHS = ["/", "/login", "/signin", "/logout", "/auth/callback", "/redirect"];
 const PARAMS = ["redirect", "redirect_uri", "redirectTo", "next", "returnTo", "return_to", "callbackUrl", "continue", "url", "to"];
@@ -31,7 +32,7 @@ export const openRedirect: Check = {
           const url = `${base}${path}?${param}=${encodeURIComponent(sentinel)}`;
           const res = await safeFetch(url, ctx.scope, { followRedirects: false });
           const loc = res.headers.get("location") ?? "";
-          const meta = /<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^"'>\s]+)/i.exec(res.body)?.[1] ?? "";
+          const meta = metaRefreshUrl(res.body) ?? "";
           const target = (res.status >= 300 && res.status < 400 ? loc : "") || meta;
           return { url, res, target };
         };

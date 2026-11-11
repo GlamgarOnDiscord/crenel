@@ -4,16 +4,14 @@ Audit défensif du code de Crenel lui-même. Base : `065cef4` (origin/main). Ouv
 
 Légende statut : `ouvert` · `en cours` · `corrigé (commit)` · `arbitrage` (décision attendue de Tom) · `accepté` (risque assumé, documenté).
 
-## En pause (2026-11-11) : cibles restantes, à reprendre
+## État (2026-11-11, reprise) : les quatre familles restantes sont auditées
 
-Le hardening est suspendu au profit de l'axe benchmark (voir `BENCHMARK-AXIS.md`). Ordre de reprise :
+- docker/wsl : D1 corrigé (PR #54) ; W1 à W3 en arbitrage (modèle WSL).
+- Intégrations : I1 corrigé (PR #55) ; I2 et I3 notés.
+- ReDoS : R1 corrigé (PR ReDoS) sur tout ce qui lit un corps de la cible ; R2 noté (entrées courtes ou locales).
+- `pnpm audit` et `pnpm audit --prod` : « No known vulnerabilities found ».
 
-1. Montages docker/wsl (`src/toolbox/docker.ts`, `wsl.ts`) : réseau, volumes en écriture, variables d'environnement transmises.
-2. ReDoS dans les regex de `src/checks/*` (corps jusqu'à 2 Mo contrôlés par la cible).
-3. Intégrations (`src/integrations/*`) : stockage et signature des secrets de webhook, Slack.
-4. `pnpm audit` (réseau requis).
-
-En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèle réseau WSL (rien n'y force le passage par le proxy).
+En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèle WSL (W1 à W3).
 
 ## Synthèse priorisée
 
@@ -32,6 +30,15 @@ En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèl
 | T2 | Moyenne | Toolbox : alias d'écriture et de protocole absents des listes de refus | `src/toolbox/free-args.ts:33-43` | corrigé (`7ee6910`, PR #50) |
 | T3 | Faible | Toolbox : une cible sans schéma (`-u evil.example`) n'est pas vérifiée par `freeArgsProblem` | `src/toolbox/free-args.ts:70` | ouvert (le proxy la refuse ; défense en profondeur seulement) |
 | T4 | À vérifier | nuclei : un template choisi par `-id` / `-t` respecte-t-il `-etags` ? | `src/toolbox/free-args.ts:61-65` | ouvert (comportement du binaire à confirmer) |
+| D1 | Faible | Docker sans réseau : une annulation laisse tourner le conteneur | `src/toolbox/docker.ts:150` | corrigé (PR #54) |
+| W1 | Moyenne | WSL : l'interop Windows reste active (un outil compromis lance `cmd.exe`, `wsl.exe -u root`) | `src/toolbox/wsl.ts` | **arbitrage Tom** (avec le modèle réseau WSL) |
+| W2 | Moyenne | WSL : `/mnt/<lecteur>` monté en écriture pour l'outil | `src/toolbox/wsl.ts` | **arbitrage Tom** (déjà documenté) |
+| W3 | Info | WSL : en NAT, le proxy écoute sur la passerelle du commutateur virtuel (jeton par exécution) | `src/toolbox/wsl.ts:140` | accepté |
+| I1 | Moyenne | Secrets : écriture à travers un lien symbolique planté dans `.crenel/` | `src/integrations/secrets.ts:40-44` | corrigé (PR #55) |
+| I2 | Faible | `.crenel/` lui-même peut être un lien (tout l'état de Crenel, pas seulement les secrets) | `src/integrations/cli.ts` (`stateDirOf`) | ouvert (décision globale) |
+| I3 | Faible | `deliver` lit tout le corps de la réponse avant de le couper à 2 Ko | `src/integrations/deliver.ts:104` | ouvert (destination déjà en liste blanche) |
+| R1 | Moyenne | ReDoS sur des corps de la cible (2 Mo) : meta refresh, `<a href>`, `<script>`, `<link>`, imports JS, table de chunks, version Next, `.env`, `.git/config`, chemins de pile | `src/core/html.ts` + 6 fichiers | corrigé (PR ReDoS) |
+| R2 | Faible | Regex polynomiales sur entrées courtes ou locales (motif du modèle, extrait, Dockerfile, fichiers du projet, en-tête `Proxy-Authorization`) | voir détail | accepté (taille bornée) |
 
 ## Pour Tom : décision H2 (DNS rebinding)
 
@@ -131,15 +138,9 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 - Lancement de processus : `spawn` sans shell, argv en tableau (toolbox, docker, wsl).
 - Dépendances runtime : 3, versions exactes épinglées (`picocolors`, `yaml`, `zod`).
 
-## Reste à auditer
-
-- `src/toolbox/docker.ts` / `wsl.ts` (montages, réseau du conteneur, variables d'environnement transmises).
-- `src/integrations/*` (stockage des secrets de webhook, signature, Slack).
-- Regex des checks `src/checks/*` (ReDoS sur corps de 2 Mo).
-- `pnpm audit` (réseau requis).
-
 ## Journal
 
 - 2026-11-11 : audit initial (v1). PoC H1 reproduit localement (`isGraphqlQueryOnly` renvoie `true` sur un document contenant une mutation).
 - 2026-11-11 : H1, H3 (+L7), M4, M5, M6 corrigés, chacun avec test de non-régression ; `tsc --noEmit` vert ; suite complète 633/634 (1 test non exécuté, préexistant), 0 échec. H3 retire aussi `apikey` / `x-api-key` (en-têtes BaaS utilisés par les checks Supabase) sur changement d'origine ; une montée `http:` vers `https:` du même hôte les conserve. M5 ne regarde que les clés de premier niveau (celles qui décident de l'opération). H2 : doc corrigée, décision pour Tom.
 - 2026-11-11 : famille toolbox, `free-args.ts` audité : T1 et T2 corrigés (PR #50, branche `security/toolbox-free-args`), T3 et T4 notés. Suite complète 628/629, 0 échec.
+- 2026-11-11 : reprise. D1 (PR #54), I1 (PR #55), R1 (PR ReDoS) corrigés avec tests de non-régression ; `pnpm audit` propre ; W1 à W3, I2, I3, R2 notés. Suite complète 712/713, 0 échec.
