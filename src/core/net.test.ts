@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch } from "./net.js";
+import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch, topLevelKeys } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -155,4 +155,22 @@ test("safeFetch does not send the Authorization header across a cross-origin red
     assert.equal(res.body, "b");
     assert.deepEqual(seen, ["Bearer secret-a", undefined]);
   } finally { a.close(); b.close(); }
+});
+
+// M5: a repeated top-level key is read last-wins by JSON.parse but may be first-wins on the server.
+test("readOnlyPost: a body with a duplicated top-level key is refused", () => {
+  const u = "https://app.example.com/graphql";
+  assert.equal(readOnlyPost(u, '{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"tools/list"}'), null);
+  assert.equal(readOnlyPost(u, '{"query":"mutation { x }","\\u0071uery":"{ a }"}'), null, "an escaped spelling is the same key");
+  assert.equal(readOnlyPost(u, '{"query":"{ a(s: \\"query\\") }","variables":{"query":1,"q":{"query":2}}}'), "graphql-query", "nested keys are not top-level");
+  assert.deepEqual(topLevelKeys('{"a":"x:\\"y","b":[{"a":1}],"c" : 2}'), ["a", "b", "c"]);
+});
+
+// M6: GraphQL over GET is a read by method only; a mutation document in `query` needs active mode.
+test("safeFetch refuses a GraphQL mutation sent over GET without active testing", async () => {
+  assert.equal(isGraphqlGetWrite("https://a.example.com/graphql?query=mutation%7Bx%7D"), true);
+  assert.equal(isGraphqlGetWrite("https://a.example.com/graphql?query=%7Bme%7Bid%7D%7D"), false);
+  assert.equal(isGraphqlGetWrite("https://a.example.com/search?query=mutation+testing"), false, "plain search text is a read");
+  const ro = new Scope({ allowedHosts: ["a.example.com"] });
+  await assert.rejects(safeFetch("https://a.example.com/graphql?query=mutation%7Bx%7D", ro), /not a read/);
 });

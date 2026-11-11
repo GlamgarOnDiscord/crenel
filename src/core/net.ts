@@ -125,6 +125,32 @@ export function isGraphqlQueryOnly(query: string): boolean {
   return /^\s*(query\b|\{)/.test(code);
 }
 
+/** The keys of a JSON object's top level as written, duplicates kept. Only for text JSON.parse accepted. */
+export function topLevelKeys(json: string): string[] {
+  const keys: string[] = [], colon = /\s*:/y;
+  let depth = 0;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (json[j] !== '"') j += json[j] === "\\" ? 2 : 1;
+      colon.lastIndex = j + 1;
+      if (depth === 1 && colon.test(json)) keys.push(JSON.parse(json.slice(i, j + 1)) as string);
+      i = j;
+    } else if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") depth--;
+  }
+  return keys;
+}
+
+/** A GET whose `query` parameter is a GraphQL document that may write (GraphQL over GET). */
+export function isGraphqlGetWrite(url: string): boolean {
+  let q: string | null;
+  try { q = new URL(url).searchParams.get("query"); } catch { return false; }
+  if (q === null || !/[{}]/.test(q)) return false; // plain search text is not a document
+  return !isGraphqlQueryOnly(q);
+}
+
 /**
  * Why a POST to `url` with `body` only reads, or null. Three shapes, checked on
  * the bytes that would be sent: a single GraphQL query, an MCP list or
@@ -138,6 +164,9 @@ export function readOnlyPost(url: string, body: string | undefined): string | nu
   let j: unknown;
   try { j = JSON.parse(body); } catch { return null; }
   if (!j || typeof j !== "object" || Array.isArray(j)) return null; // batched GraphQL or JSON-RPC: refused
+  // A repeated key is read last-wins here but may be first-wins on the server: refuse it.
+  const keys = topLevelKeys(body);
+  if (new Set(keys).size !== keys.length) return null;
   const o = j as Record<string, unknown>;
   if (o.jsonrpc === "2.0" && typeof o.method === "string" && MCP_READ.has(o.method)) return "mcp-list";
   if (typeof o.query === "string" && Object.keys(o).every((k) => k === "query" || k === "variables" || k === "operationName") && isGraphqlQueryOnly(o.query)) return "graphql-query";
@@ -155,7 +184,8 @@ export async function safeFetch(
   let current = url;
   let carried = init.headers;
   const method = (init.method ?? "GET").toUpperCase();
-  if (!READ_METHODS.has(method) && !scope.allowActiveTesting && !(method === "POST" && readOnlyPost(url, init.body))) {
+  const write = READ_METHODS.has(method) ? isGraphqlGetWrite(url) : !(method === "POST" && readOnlyPost(url, init.body));
+  if (write && !scope.allowActiveTesting) {
     const why = `Refused: ${method} ${url} is not a read and allowActiveTesting is off`;
     scope.onRequest?.({ method, url, refused: why });
     throw new ScopeError(why);
