@@ -7,11 +7,19 @@ Légende statut : `ouvert` · `en cours` · `corrigé (commit)` · `arbitrage` (
 ## État (2026-11-11, reprise) : les quatre familles restantes sont auditées
 
 - docker/wsl : D1 corrigé (PR #54) ; W1 à W3 en arbitrage (modèle WSL).
-- Intégrations : I1 corrigé (PR #55) ; I2 et I3 notés.
-- ReDoS : R1 corrigé (PR ReDoS) sur tout ce qui lit un corps de la cible ; R2 noté (entrées courtes ou locales).
+- Intégrations : I1 (PR #55) et I3 (PR #58) corrigés ; I2 noté.
+- Proxy : L8 corrigé (PR #57).
+- ReDoS : R1 corrigé (PR #56) sur tout ce qui lit un corps de la cible ; R2 noté (entrées courtes ou locales).
 - `pnpm audit` et `pnpm audit --prod` : « No known vulnerabilities found ».
 
-En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèle WSL (W1 à W3).
+Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont corrigés et mergés (#49, #50, #54 à #58).
+
+**Restant pour Tom (décision requise) :**
+- H2 : DNS rebinding dans `safeFetch` (options (a)/(b) plus bas ; recommandation (a)).
+- W1, W2 : isolation WSL (interop Windows, `/mnt/<lecteur>` en écriture) ; seul levier : `/etc/wsl.conf` de la distribution, à proposer dans `crenel tools install --wsl` avec confirmation.
+- I2 : `.crenel/` lui-même peut être un lien (tout l'état de Crenel) ; refuser un lien ou résoudre et vérifier qu'il reste dans le projet.
+
+**Restant, faible, sans urgence :** T3 (cible sans schéma dans `freeArgsProblem`, déjà refusée par le proxy), T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales sur entrées courtes ou locales, dont `vercel-preview.ts:13`).
 
 ## Synthèse priorisée
 
@@ -24,7 +32,7 @@ En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèl
 | M5 | Moyenne | Clés JSON dupliquées : différentiel de parseur sur `readOnlyPost` | `src/core/net.ts:129-134` | corrigé (`2acbe53`) |
 | M6 | Faible | Mutation GraphQL en GET acceptée comme lecture | `src/core/net.ts:148` | corrigé (`2acbe53`) |
 | L7 | Faible | Corps d'une réponse 3xx non consommé avant le saut suivant | `src/core/net.ts:197-200` | corrigé (`b4e2b15`) |
-| L8 | Faible | Proxy : en-têtes nommés dans `Connection` non retirés | `src/core/egress-proxy.ts:103`, `:210` | ouvert |
+| L8 | Faible | Proxy : en-têtes nommés dans `Connection` non retirés | `src/core/egress-proxy.ts:103`, `:210` | corrigé (PR #57) |
 | I9 | Info | `cmd /c start` sous Windows : échappement partiel de l'URL | `src/cli.ts:586` | accepté (URL interne) |
 | T1 | Élevée | Toolbox : un argument du modèle fait ignorer les options de sécurité de Crenel | `src/toolbox/free-args.ts:90-101` | corrigé (`7ee6910`, PR #50) |
 | T2 | Moyenne | Toolbox : alias d'écriture et de protocole absents des listes de refus | `src/toolbox/free-args.ts:33-43` | corrigé (`7ee6910`, PR #50) |
@@ -36,8 +44,8 @@ En attente de Tom : H2 (DNS rebinding, options chiffrées plus bas) et le modèl
 | W3 | Info | WSL : en NAT, le proxy écoute sur la passerelle du commutateur virtuel (jeton par exécution) | `src/toolbox/wsl.ts:140` | accepté |
 | I1 | Moyenne | Secrets : écriture à travers un lien symbolique planté dans `.crenel/` | `src/integrations/secrets.ts:40-44` | corrigé (PR #55) |
 | I2 | Faible | `.crenel/` lui-même peut être un lien (tout l'état de Crenel, pas seulement les secrets) | `src/integrations/cli.ts` (`stateDirOf`) | ouvert (décision globale) |
-| I3 | Faible | `deliver` lit tout le corps de la réponse avant de le couper à 2 Ko | `src/integrations/deliver.ts:104` | ouvert (destination déjà en liste blanche) |
-| R1 | Moyenne | ReDoS sur des corps de la cible (2 Mo) : meta refresh, `<a href>`, `<script>`, `<link>`, imports JS, table de chunks, version Next, `.env`, `.git/config`, chemins de pile | `src/core/html.ts` + 6 fichiers | corrigé (PR ReDoS) |
+| I3 | Faible | `deliver` lit tout le corps de la réponse avant de le couper à 2 Ko | `src/integrations/deliver.ts:104` | corrigé (PR #58) |
+| R1 | Moyenne | ReDoS sur des corps de la cible (2 Mo) : meta refresh, `<a href>`, `<script>`, `<link>`, imports JS, table de chunks, version Next, `.env`, `.git/config`, chemins de pile | `src/core/html.ts` + 6 fichiers | corrigé (PR #56) |
 | R2 | Faible | Regex polynomiales sur entrées courtes ou locales (motif du modèle, extrait, Dockerfile, fichiers du projet, en-tête `Proxy-Authorization`) | voir détail | accepté (taille bornée) |
 
 ## Pour Tom : décision H2 (DNS rebinding)
@@ -143,4 +151,5 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 - 2026-11-11 : audit initial (v1). PoC H1 reproduit localement (`isGraphqlQueryOnly` renvoie `true` sur un document contenant une mutation).
 - 2026-11-11 : H1, H3 (+L7), M4, M5, M6 corrigés, chacun avec test de non-régression ; `tsc --noEmit` vert ; suite complète 633/634 (1 test non exécuté, préexistant), 0 échec. H3 retire aussi `apikey` / `x-api-key` (en-têtes BaaS utilisés par les checks Supabase) sur changement d'origine ; une montée `http:` vers `https:` du même hôte les conserve. M5 ne regarde que les clés de premier niveau (celles qui décident de l'opération). H2 : doc corrigée, décision pour Tom.
 - 2026-11-11 : famille toolbox, `free-args.ts` audité : T1 et T2 corrigés (PR #50, branche `security/toolbox-free-args`), T3 et T4 notés. Suite complète 628/629, 0 échec.
-- 2026-11-11 : reprise. D1 (PR #54), I1 (PR #55), R1 (PR ReDoS) corrigés avec tests de non-régression ; `pnpm audit` propre ; W1 à W3, I2, I3, R2 notés. Suite complète 712/713, 0 échec.
+- 2026-11-11 : reprise. D1 (PR #54), I1 (PR #55), R1 (PR #56) corrigés avec tests de non-régression ; `pnpm audit` propre ; W1 à W3, I2, I3, R2 notés. Suite complète 712/713, 0 échec.
+- 2026-11-11 : L8 (PR #57) et I3 (PR #58) corrigés et mergés. Fin de la passe ; restant listé en tête.
