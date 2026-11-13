@@ -73,7 +73,21 @@ test("data-exposure PII: an explicit owner-only contract proves a foreign-owner 
     const proof = found.find((f) => f.state === "proven" && /owner-only/i.test(f.title));
     assert.ok(proof);
     assert.doesNotMatch(JSON.stringify(proof), /me@corp\.io|other@corp\.io|user-a|user-b/);
+    assert.match(proof!.proof?.replay ?? "", /jq --arg owner "\$CRENEL_TEST_OWNER"/);
+    assert.match(proof!.proof?.replay ?? "", /--arg field 'ownerId'/);
   } finally { delete process.env.CRENEL_TEST_OWNER; }
+});
+
+test("data-exposure PII: a declared canary has a contract-specific replay", async () => {
+  process.env.CRENEL_TEST_PII_CANARY = "private-canary-value";
+  try {
+    const options = { options: { "data-exposure": { endpoints: ["/_debug"], pii: { policy: "canary", canaryEnv: "CRENEL_TEST_PII_CANARY" }, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
+    const found = await run(serveAuth(JSON.stringify({ nested: { value: "private-canary-value" } }), 401), options);
+    const proof = found.find((f) => f.state === "proven" && /canary/i.test(f.title));
+    assert.ok(proof);
+    assert.match(proof!.proof?.replay ?? "", /jq --arg canary "\$CRENEL_TEST_PII_CANARY"/);
+    assert.doesNotMatch(JSON.stringify(proof), /private-canary-value/);
+  } finally { delete process.env.CRENEL_TEST_PII_CANARY; }
 });
 
 test("data-exposure PII: a publicly readable endpoint (anonymous not refused) is not proven", async () => {
@@ -101,12 +115,15 @@ test("data-exposure resolves only the selected account's login", async () => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ users: [{ password: "pass-one" }, { password: "pass-two" }] }));
   });
-  const found = await run(server, { options: {
-    "data-exposure": { endpoints: ["/_debug"], as: "a" },
-    "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { login: { url: "/login-b", username: "b", passwordEnv: "UNSET_B_PASSWORD" } } } },
-  } });
-  assert.ok(found.some((f) => f.state === "proven"));
-  assert.equal(unwantedLogins, 0);
+  process.env.CRENEL_TEST_B_PASSWORD = "b-password";
+  try {
+    const found = await run(server, { options: {
+      "data-exposure": { endpoints: ["/_debug"], as: "a" },
+      "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { login: { url: "/login-b", username: "b", passwordEnv: "CRENEL_TEST_B_PASSWORD" } } } },
+    } });
+    assert.ok(found.some((f) => f.state === "proven"));
+    assert.equal(unwantedLogins, 0);
+  } finally { delete process.env.CRENEL_TEST_B_PASSWORD; }
 });
 
 test("data-exposure PII: a single email (the caller's own record) is not a finding", async () => {

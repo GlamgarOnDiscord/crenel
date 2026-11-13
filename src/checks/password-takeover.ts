@@ -45,6 +45,13 @@ interface TakeoverTarget {
 interface Opts extends ActiveBase { targets?: TakeoverTarget[] }
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 
+/** Put a password into a JSON string template without replacement-string or
+ * JSON escaping surprises. `{{PW}}` is documented inside a JSON string. */
+export function passwordBody(template: string, password: string): unknown {
+  const escaped = JSON.stringify(password).slice(1, -1);
+  return JSON.parse(template.replace(/\{\{PW\}\}/g, () => escaped));
+}
+
 function loginOk(res: { status: number; body: string }, s?: Login["success"]): boolean {
   const statusOk = s?.statuses?.length ? s.statuses.includes(res.status) : ok2xx(res.status);
   if (!statusOk) return false;
@@ -59,7 +66,13 @@ export function plannedTakeover(options: Record<string, unknown>, base: string):
   return (o.targets ?? []).flatMap((t) => {
     const m = (t.method ?? "PUT").toUpperCase();
     const cp = u(t.changePath.replace(":id", encodeURIComponent(t.victimId)));
-    return [{ method: m, url: cp }, { method: "POST", url: u(t.login.path) }, { method: m, url: cp }];
+    return [
+      { method: m, url: u(t.changePath.replace(":id", "crenel-nonexistent-control")) },
+      { method: "POST", url: u(t.login.path) },
+      { method: m, url: cp },
+      { method: "POST", url: u(t.login.path) },
+      { method: m, url: cp },
+    ];
   });
 }
 
@@ -82,7 +95,7 @@ export const passwordTakeover: Check = {
     const u = (p: string) => base + (p.startsWith("/") ? p : "/" + p);
     for (const t of targets) {
       const method = (t.method ?? "PUT").toUpperCase();
-      if (!t.name || !t.changePath?.includes(":id") || !t.victimId || !t.body || !t.login?.path || !t.login.victimUser || !ENV_NAME.test(t.restorePasswordEnv ?? "")) {
+      if (!t.name || !t.changePath?.includes(":id") || !t.victimId || !t.body?.includes("{{PW}}") || !t.login?.path || !t.login.victimUser || !ENV_NAME.test(t.restorePasswordEnv ?? "")) {
         notes.push(`${t.name ?? "(unnamed)"}: skipped, needs name, changePath with :id, victimId, body, login.path, login.victimUser and restorePasswordEnv (an environment variable name).`);
         continue;
       }
@@ -100,33 +113,42 @@ export const passwordTakeover: Check = {
         };
         // 1. Control: attacker changes a NON-existent victim's password. Must be rejected.
         const bogus = `crenel-nonexistent-${nonce()}`;
-        const ctl = await client.send(method, changeUrl(bogus), attacker, JSON.parse(t.body.replace(/\{\{PW\}\}/g, canary)), { actor: "a", purpose: "control: change a non-existent account's password", restore: "nothing to restore" });
+        const ctl = await client.send(method, changeUrl(bogus), attacker, passwordBody(t.body, canary), { actor: "a", purpose: "control: change a non-existent account's password", restore: "nothing to restore" });
         if (ok2xx(ctl.status)) { notes.push(`${t.name}: changing a non-existent account's password was accepted (HTTP ${ctl.status}); the endpoint validates nothing, no proof.`); continue; }
         // A random password must fail before the mutation, or this login oracle accepts everything.
         const before = await login(canary, t.login, "control: victim login with the random password before any change");
         if (loginOk(before, t.login.success)) { notes.push(`${t.name}: login accepted the random control password before any change; login oracle is not discriminating, no proof.`); continue; }
-        // 2. Attacker sets the victim's password to the canary.
-        const w = await client.send(method, changeUrl(t.victimId), attacker, JSON.parse(t.body.replace(/\{\{PW\}\}/g, canary)), { actor: "a", purpose: `attacker (A) sets the victim (${t.victimId}) password`, restore: `the victim's password is reset to its declared value` });
-        if (!ok2xx(w.status)) { notes.push(`${t.name}: the attacker could not change the victim's password (HTTP ${w.status}) — good, the boundary holds.`); continue; }
-        // 3. Confirm, then ALWAYS attempt restore in finally: a failed/throwing
-        // login must never leave the disposable victim on the canary password.
-        let asVictim = { status: 0, body: "" }, taken = false, confirmError: Error | undefined;
+        // 2. Attempt the mutation, then ALWAYS restore in finally. A server can
+        // apply a write and drop the connection before the client sees a status;
+        // that indeterminate write must be treated as possibly applied.
+        let w: Awaited<ReturnType<ActiveClient["send"]>> | undefined;
+        let attackRecord = undefined as (typeof client.writes)[number] | undefined;
+        let asVictim = { status: 0, body: "" }, taken = false, flowError: Error | undefined;
         let restored = "restore not attempted";
+        const beforeAttackWrites = client.writes.length;
         try {
-          asVictim = await login(canary, t.login, "confirmation: victim login with A's canary password");
-          taken = loginOk(asVictim, t.login.success);
+          w = await client.send(method, changeUrl(t.victimId), attacker, passwordBody(t.body, canary), { actor: "a", purpose: `attacker (A) sets the victim (${t.victimId}) password`, restore: `the victim's password is reset to its declared value` });
+          attackRecord = w.record;
+          if (ok2xx(w.status)) {
+            // 3. Confirm only an accepted write, while restoration remains
+            // guaranteed whether this login succeeds, fails or throws.
+            asVictim = await login(canary, t.login, "confirmation: victim login with A's canary password");
+            taken = loginOk(asVictim, t.login.success);
+          }
         } catch (err) {
-          confirmError = err as Error;
+          flowError = err as Error;
+          attackRecord = client.writes[beforeAttackWrites];
         } finally {
           try {
-            const rb = JSON.parse(t.body.replace(/\{\{PW\}\}/g, restorePassword));
+            const rb = passwordBody(t.body, restorePassword);
             const rr = await client.send(method, changeUrl(t.victimId), victim, rb, { actor: "b", purpose: "restore: the victim resets its own password", restore: "the restore itself" });
             restored = ok2xx(rr.status) ? "victim password restored" : `restore returned HTTP ${rr.status}; reset ${t.login.victimUser} by hand`;
           } catch (e) { restored = `restore failed (${(e as Error).message}); reset ${t.login.victimUser} by hand`; }
         }
-        if (w.record) w.record.restore = restored === "victim password restored" ? "restored" : `not restored: ${restored}`;
+        if (attackRecord) attackRecord.restore = restored === "victim password restored" ? "restored" : `not restored: ${restored}`;
         notes.push(`${t.name}: ${restored}.`);
-        if (confirmError) { notes.push(`${t.name}: confirmation login failed (${confirmError.message}); no proof.`); continue; }
+        if (flowError) { notes.push(`${t.name}: mutation or confirmation became indeterminate (${flowError.message}); restore was still attempted; no proof.`); continue; }
+        if (!w || !ok2xx(w.status)) { notes.push(`${t.name}: the attacker could not change the victim's password (HTTP ${w?.status ?? "unknown"}) — no proof.`); continue; }
         if (!taken) { notes.push(`${t.name}: the attacker's write was accepted but login as the victim with the new password failed — the change may not have applied; no proof.`); continue; }
         findings.push({
           id: `password-takeover:${t.name}`,

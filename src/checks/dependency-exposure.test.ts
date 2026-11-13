@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { dependencyExposure, vulnerableDeps, exactVersion } from "./dependency-exposure.js";
+import { dependencyExposure, vulnerableDeps, exactVersion, shellQuote } from "./dependency-exposure.js";
 import { Scope } from "../core/scope.js";
 
 test("exactVersion accepts only exact pins, rejects ranges and non-registry specs", () => {
@@ -15,6 +15,9 @@ test("exactVersion accepts only exact pins, rejects ranges and non-registry spec
   assert.equal(exactVersion("4.17"), undefined); // partial, not a full semver
   assert.equal(exactVersion("git+https://x"), undefined);
   assert.equal(exactVersion("github:user/lodash"), undefined);
+});
+test("dependency replay URLs are shell quoted", () => {
+  assert.equal(shellQuote("https://app.example/a'$(touch nope)`id`"), `'https://app.example/a'"'"'$(touch nope)\`id\`'`);
 });
 test("vulnerableDeps flags only exactly-pinned below-patch versions", () => {
   // exact pin below the bound -> flagged

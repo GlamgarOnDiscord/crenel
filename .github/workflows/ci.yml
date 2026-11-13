@@ -32,11 +32,10 @@ jobs:
       # Ground truth is part of merge governance: every known flaw must be found,
       # every decoy preserved, and replayed exploration is reported separately.
       - run: pnpm benchmark -- --seed ci-${{ github.sha }} --json benchmark-result.json
-        if: runner.os == 'Linux'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && runner.os == 'Linux'
+        if: always()
         with:
-          name: benchmark-${{ github.sha }}
+          name: benchmark-${{ runner.os }}-${{ github.sha }}
           path: benchmark-result.json
       # The web console: its own install, tests (SSR smoke + data layer) and build.
       - run: pnpm install --frozen-lockfile --ignore-scripts

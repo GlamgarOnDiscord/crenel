@@ -35,6 +35,7 @@ export async function run({ projectDir, baseUrl, caseConfig, tmp, signal }) {
   const result = JSON.parse(out.stdout.slice(start));
   const findings = result.findings ?? [];
   const errors = result.errors ?? [];
+  let explorationRequests = 0;
   // A case with a recorded exploration (explore.script) also runs `crenel explore`
   // on it, replaying the model's moves: the validators decide, as with a live model.
   if (caseConfig.explore?.script) {
@@ -43,9 +44,14 @@ export async function run({ projectDir, baseUrl, caseConfig, tmp, signal }) {
     const ex = await exec(process.execPath, ["--import", "tsx", join(REPO, "src/cli.ts"), "explore", "--config", cfgPath, "--json", "--llm-script", script, "--state", join(tmp, "state")], REPO, env, signal);
     const at = ex.stdout.indexOf("{");
     if (at < 0) errors.push({ check: "explore", message: `no JSON (exit ${ex.code}): ${ex.stderr.slice(0, 300)}` });
-    else findings.push(...(JSON.parse(ex.stdout.slice(at)).findings ?? []));
+    else {
+      const explored = JSON.parse(ex.stdout.slice(at));
+      findings.push(...(explored.findings ?? []));
+      explorationRequests = explored.requests ?? 0;
+    }
   }
-  return { findings, errors, metadata: { durationMs: Date.now() - started, scanDurationMs: result.durationMs, requests: result.requests, checksRun: result.checksRun?.length } };
+  const scanRequests = result.requests ?? 0;
+  return { findings, errors, metadata: { durationMs: Date.now() - started, scanDurationMs: result.durationMs, requests: scanRequests + explorationRequests, scanRequests, explorationRequests, checksRun: result.checksRun?.length } };
 }
 
 function exec(cmd, args, cwd, env = {}, signal) {

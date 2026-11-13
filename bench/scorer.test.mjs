@@ -15,10 +15,14 @@ test("closed-world cases penalize unknown proven high findings, not review leads
   const c = { mustFind: [], mustNotFlag: [], maxUnknownHigh: 0 };
   assert.equal(score([finding()], c).rows[0].ok, false);
   assert.equal(score([finding({ state: "unproven", severity: "medium" })], c).rows[0].ok, true);
+  assert.equal(score([finding({ state: "lead", severity: "high" })], c).rows[0].ok, true, "LLM adapters use the external lead state");
 });
 
 test("seeded order is reproducible and replay validation is outside discovery recall", () => {
-  assert.deepEqual(seededOrder(["a", "b", "c", "d"], "seed"), seededOrder(["d", "c", "b", "a"], "seed"));
+  const seeded = seededOrder(["a", "b", "c", "d"], "seed");
+  assert.deepEqual(seeded, seededOrder(["d", "c", "b", "a"], "seed"));
+  assert.notDeepEqual(seeded, ["a", "b", "c", "d"], "the implementation must not fall back to alphabetical order");
+  assert.notDeepEqual(seeded, seededOrder(["a", "b", "c", "d"], "other"), "the seed must affect order");
   const s = summarize([
     { name: "direct", replayed: false, rows: [{ kind: "find", ok: true }] },
     { name: "script", replayed: true, rows: [{ kind: "find", ok: true }] },

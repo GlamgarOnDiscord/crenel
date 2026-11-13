@@ -21,7 +21,7 @@ and publish the comparison, misses included. The cases must stay neutral: they
 model flaws seen in real SaaS apps, not Crenel's own checks.
 
 The runner randomizes case order from a recorded seed, applies a per-case
-timeout, and records duration/request metadata. Ground-truth matching is 1:1:
+timeout, and records duration plus any request metadata the adapter provides. Ground-truth matching is 1:1:
 one broad finding cannot satisfy two flaws. Cases may set `maxUnknownHigh` when
 their truth is closed, which penalizes high/critical proven spam outside the
 declared truth. Recorded model scripts are reported as **replay validation**,

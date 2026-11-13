@@ -96,14 +96,14 @@ export interface WriteRecord {
 }
 
 export interface Answer { status: number; body: string; json: unknown }
-const SECRET_FIELD = /(password|passwd|pwd|secret|token|authorization|cookie|api[_-]?key|session)/i;
+const SECRET_FIELD = /(password|passwd|pwd|passphrase|secret|token|authorization|cookie|credentials?|private[_-]?key|api[_-]?key|session|otp|mfa)/i;
 
 /** Redact secrets by key before a write payload reaches receipts/evidence. */
-export function redactWriteBody(value: unknown, key = "", depth = 0): unknown {
+export function redactWriteBody(value: unknown, key = ""): unknown {
   if (SECRET_FIELD.test(key)) return "<redacted>";
-  if (depth > 8 || value == null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((v) => redactWriteBody(v, "", depth + 1));
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactWriteBody(v, k, depth + 1)]));
+  if (value == null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => redactWriteBody(v));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactWriteBody(v, k)]));
 }
 
 /**

@@ -28,6 +28,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 import { Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { AccessGateError, Scope, ScopeError } from "./scope.js";
 import { detectAccessGate } from "./access.js";
 
@@ -119,13 +120,21 @@ async function fetchPinned(url: string, targets: LookupAddress[], init: { method
   const request = u.protocol === "https:" ? httpsRequest : httpRequest;
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new ScopeError(`Refused: unsupported protocol ${u.protocol}`);
   return new Promise<Response>((resolve, reject) => {
-    const req = request(u, { method: init.method, headers: init.headers, signal: init.signal, lookup: pinnedLookup(targets) }, (res) => {
+    // `agent: false` gives this request an isolated one-shot socket. A global
+    // keep-alive agent could otherwise reuse a connection created before this
+    // DNS validation and bypass the pinned lookup entirely.
+    const req = request(u, { method: init.method, headers: init.headers, signal: init.signal, lookup: pinnedLookup(targets), agent: false }, (res) => {
       const headers = new Headers();
       for (let i = 0; i < res.rawHeaders.length; i += 2) headers.append(res.rawHeaders[i]!, res.rawHeaders[i + 1]!);
       const status = res.statusCode ?? 502;
       const noBody = init.method === "HEAD" || status === 204 || status === 205 || status === 304;
       if (noBody) res.resume();
-      resolve(new Response(noBody ? null : Readable.toWeb(res) as ReadableStream, { status, statusText: res.statusMessage, headers }));
+      let stream: Readable = res;
+      const encoding = String(res.headers["content-encoding"] ?? "").trim().toLowerCase();
+      if (!noBody && encoding === "gzip") stream = res.pipe(createGunzip());
+      else if (!noBody && encoding === "deflate") stream = res.pipe(createInflate());
+      else if (!noBody && encoding === "br") stream = res.pipe(createBrotliDecompress());
+      resolve(new Response(noBody ? null : Readable.toWeb(stream) as ReadableStream, { status, statusText: res.statusMessage, headers }));
     });
     req.on("error", reject);
     req.end(init.body);
@@ -222,6 +231,11 @@ export async function safeFetch(
   let current = url;
   let carried = init.headers;
   const method = (init.method ?? "GET").toUpperCase();
+  if (READ_METHODS.has(method) && init.body !== undefined) {
+    const why = `Refused: ${method} ${url} cannot carry a request body`;
+    scope.onRequest?.({ method, url, refused: why });
+    throw new ScopeError(why);
+  }
   const write = READ_METHODS.has(method) ? isGraphqlGetWrite(url) : !(method === "POST" && readOnlyPost(url, init.body));
   if (write && !scope.allowActiveTesting) {
     const why = `Refused: ${method} ${url} is not a read and allowActiveTesting is off`;
@@ -239,7 +253,7 @@ export async function safeFetch(
       // leaves the rest of the host reachable.
       const known = scope.accessGates.get(new URL(current).hostname.toLowerCase());
       if (known && new URL(known.url).pathname === "/") throw new AccessGateError(known);
-      targets = await resolveTarget(new URL(current).hostname, scope.allowPrivate, scope.testTransport?.resolve ?? lookup);
+      targets = await resolveTarget(new URL(current).hostname, scope.allowPrivate, scope.testResolver ?? scope.testTransport?.resolve ?? lookup);
       await scope.pace();
     } catch (err) {
       // Not a refusal of the scope: the host is known to be gated and nothing was sent.

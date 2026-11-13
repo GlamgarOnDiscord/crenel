@@ -64,25 +64,27 @@ export function permissionArgs(env = process.env) {
 
 // Asynchronous: the live targets are served by this same process, so a blocking
 // spawn would leave the model's curl probes without an answer.
-function spawnAsync(cmd, args, { cwd, timeout, env, maxBuffer }) {
+function spawnAsync(cmd, args, { cwd, timeout, env, maxBuffer, signal }) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false, size = 0;
     const take = (which) => (d) => { size += d.length; if (size > maxBuffer) { child.kill("SIGKILL"); return; } if (which === "out") stdout += d; else stderr += d; };
     child.stdout.on("data", take("out"));
     child.stderr.on("data", take("err"));
+    const abort = () => { child.kill("SIGTERM"); setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 1_000).unref(); };
+    if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
     const t = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeout);
-    child.on("error", (e) => { clearTimeout(t); resolve({ stdout, stderr: stderr + String(e.message), status: null, timedOut }); });
-    child.on("close", (status) => { clearTimeout(t); resolve({ stdout, stderr, status, timedOut }); });
+    child.on("error", (e) => { clearTimeout(t); signal?.removeEventListener("abort", abort); resolve({ stdout, stderr: stderr + String(e.message), status: null, timedOut }); });
+    child.on("close", (status) => { clearTimeout(t); signal?.removeEventListener("abort", abort); resolve({ stdout, stderr, status, timedOut }); });
   });
 }
 
-export async function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool }) {
+export async function runClaude({ prompt, cwd, timeoutMs = 240000, tmp, tool, signal }) {
   const started = Date.now();
   const r = await spawnAsync(
     "claude",
     ["-p", "--output-format", "json", "--model", MODEL, ...permissionArgs(), prompt],
-    { cwd, timeout: timeoutMs, maxBuffer: 48 * 1024 * 1024, env: { ...process.env, CLAUDE_CONFIG_DIR: ISO, NO_COLOR: "1" } }
+    { cwd, timeout: timeoutMs, maxBuffer: 48 * 1024 * 1024, env: { ...process.env, CLAUDE_CONFIG_DIR: ISO, NO_COLOR: "1" }, signal }
   );
   const ms = Date.now() - started;
   let text = r.stdout ?? "", sessionId = "", isError = false, subtype = "";

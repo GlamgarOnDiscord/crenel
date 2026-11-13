@@ -290,6 +290,24 @@ test("explicit public contract is a trust-boundary decoy and is never flagged", 
   } finally { server.close(); }
 });
 
+test("an imported authentication requirement still tests cross-tenant ownership", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    res.writeHead(200, { "content-type": "application/json" }); res.end('{"id":"invoice-b","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "invoice", path: "/invoices/:id", authentication: "required" }], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { invoice: ["invoice-b"] } } } } },
+    });
+    assert.ok(found.some((f) => f.state === "proven" && f.severity === "critical" && /Account A/.test(f.title)), "OpenAPI auth must not imply shared access");
+  } finally { server.close(); }
+});
+
 test("public route guard: a one-off anonymous leak (stale cache, race) does not hide a real cross-tenant break", async () => {
   const http = await import("node:http");
   // The first anonymous read of B's record leaks (a shared cache entry), every

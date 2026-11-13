@@ -95,7 +95,7 @@ const ok2xx = (s: number) => s >= 200 && s < 300;
 /* ---------------- authz.cross-tenant ---------------- */
 
 export interface AuthzAccount { token?: string; owns?: Record<string, string[]>; marker?: string; privileged?: boolean }
-export interface AuthzResource { name: string; path: string; methods?: string[]; public?: boolean; ownerField?: string }
+export interface AuthzResource { name: string; path: string; methods?: string[]; public?: boolean; access?: "private" | "authenticated" | "public"; ownerField?: string }
 export interface AuthzOptions {
   resources?: AuthzResource[];
   /** a: test account of another tenant than b; c: optional third tenant; b: the owner. */
@@ -206,7 +206,7 @@ export function authzUrl(base: string, r: AuthzResource, id: string): string {
 }
 
 function isPublicByDesign(opts: AuthzOptions, r: AuthzResource): boolean {
-  return !!r.public || (opts.publicByDesign ?? []).some((p) => p === r.path || p === r.name);
+  return r.public === true || r.access === "public" || (opts.publicByDesign ?? []).some((p) => p === r.path || p === r.name);
 }
 
 const authzValidator: Validator = {
@@ -590,7 +590,7 @@ const exploreCrossActorValidator: Validator = {
     }
     const path = pathOnly(url);
     const templ = (p: string) => new RegExp("^" + p.split("?")[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/:id/g, "[^/]+") + "$");
-    if ((opts.publicByDesign ?? []).some((p) => p.startsWith("/") && templ(p).test(new URL(url).pathname)) || (opts.resources ?? []).some((r) => r.public && templ(r.path).test(new URL(url).pathname))) {
+    if ((opts.publicByDesign ?? []).some((p) => p.startsWith("/") && templ(p).test(new URL(url).pathname)) || (opts.resources ?? []).some((r) => (r.public === true || r.access === "public") && templ(r.path).test(new URL(url).pathname))) {
       return no(`${path} is public by design (trust boundary in the config)`);
     }
     const req: ExploreRequest = { url };

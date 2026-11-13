@@ -31,6 +31,11 @@ const MANIFEST_NAME = /^(?:package\.json|package-lock\.json|npm-shrinkwrap\.json
 // already named, and still a read-only GET on the declared host.
 const NULLBYTE_SUFFIXES = ["%2500.md", "%2500.txt", "%2500.pdf"];
 const MANIFEST_MAX_BYTES = 16 * 1024 * 1024;
+const MAX_LISTED_MANIFESTS = 12;
+
+/** POSIX-shell single quoting for copy/paste replay commands. Redirect targets
+ * are target-controlled and must never get a chance to expand `$()` or ticks. */
+export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
 // A small, well-known advisory set: package -> the version BELOW which it is
 // vulnerable, with the class. Universal CVEs, not any one target's answer.
@@ -148,7 +153,7 @@ function tooLarge(path: string, response: SafeResponse): Finding {
     severity: "info", state: "unproven", location: response.url,
     description: `${path} answered HTTP 200 but exceeded the ${MANIFEST_MAX_BYTES / 1024 / 1024} MiB read cap. Crenel did not parse an incomplete lockfile and makes no vulnerability claim from it.`,
     remediation: "Do not publish dependency manifests or lockfiles from the web root. Review this file manually, then remove it from the deployment.",
-    proof: { method: "bounded live GET (validation stopped before parsing truncated JSON)", replay: `curl -I ${JSON.stringify(response.url)}`, evidence: `HTTP 200; response exceeded ${MANIFEST_MAX_BYTES / 1024 / 1024} MiB and was truncated` },
+    proof: { method: "bounded live GET (validation stopped before parsing truncated JSON)", replay: `curl -sS ${shellQuote(response.url)} -o /dev/null`, evidence: `HTTP 200; response exceeded ${MANIFEST_MAX_BYTES / 1024 / 1024} MiB and was truncated` },
   };
 }
 
@@ -178,7 +183,7 @@ export const dependencyExposure: Check = {
         location: res.url,
         description: `${path} is served and pins library versions with public advisories: ${list}. For example ${hits[0]!.name}@${hits[0]!.version} — ${hits[0]!.why}.`,
         remediation: "Do not serve dependency manifests or their backups from the web root, and upgrade the flagged libraries to a patched version.",
-        proof: { method: "live read of the served manifest + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -s ${JSON.stringify(res.url)}  # exactly-pinned deps with known advisories`, evidence: `served HTTP ${res.status} from ${res.url}; vulnerable: ${list}` },
+        proof: { method: "live read of the served manifest + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -sS ${shellQuote(res.url)}  # exactly-pinned deps with known advisories`, evidence: `served HTTP ${res.status} from ${res.url}; vulnerable: ${list}` },
         regressionHint: `After deploy, ${path} must not be served, and these libraries must be upgraded.`,
       }];
     }
@@ -191,7 +196,7 @@ export const dependencyExposure: Check = {
       let idx;
       try { idx = await readDirectoryIndex(ctx, base + lp); } catch { continue; }
       if (idx.status !== 200 || !isDirectoryListing(idx.body)) continue;
-      for (const name of listedFiles(idx.body).filter((n) => MANIFEST_NAME.test(n))) {
+      for (const name of listedFiles(idx.body).filter((n) => MANIFEST_NAME.test(n)).slice(0, MAX_LISTED_MANIFESTS)) {
         const fileUrl = base + lp + name;
         if (seen.has(fileUrl)) continue;
         seen.add(fileUrl);
@@ -210,7 +215,7 @@ export const dependencyExposure: Check = {
           location: served.url,
           description: `An open directory listing at ${lp} exposes ${name}, which pins library versions with public advisories: ${list}. For example ${hits[0]!.name}@${hits[0]!.version} — ${hits[0]!.why}.`,
           remediation: "Disable directory indexing, remove dependency manifests and their backups from the web root, and upgrade the flagged libraries to a patched version.",
-          proof: { method: "manifest named in an open directory listing, read live (an encoded null-byte extension bypass where needed) + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -s ${JSON.stringify(served.url)}`, evidence: `manifest served via ${served.url}; vulnerable: ${list}` },
+          proof: { method: "manifest named in an open directory listing, read live (an encoded null-byte extension bypass where needed) + an exactly-pinned version below a documented-vulnerable bound (no model)", replay: `curl -sS ${shellQuote(served.url)}`, evidence: `manifest served via ${served.url}; vulnerable: ${list}` },
           regressionHint: `After deploy, ${lp} must not list files and ${name} must not be served.`,
         }];
       }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { passwordTakeover } from "./password-takeover.js";
+import { passwordBody, passwordTakeover, plannedTakeover } from "./password-takeover.js";
 import { redactWriteBody } from "./active-common.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext, Finding } from "../core/types.js";
@@ -17,9 +17,17 @@ const opts = {
 };
 
 test("active receipts redact nested passwords, tokens, cookies and secrets", () => {
-  assert.deepEqual(redactWriteBody({ password: "p", nested: { apiKey: "k", cookie: "c", safe: "shown" }, token: "t" }), {
-    password: "<redacted>", nested: { apiKey: "<redacted>", cookie: "<redacted>", safe: "shown" }, token: "<redacted>",
+  assert.deepEqual(redactWriteBody({ password: "p", nested: { apiKey: "k", cookie: "c", privateKey: "pk", credentials: "creds", otp: "123", safe: "shown" }, token: "t" }), {
+    password: "<redacted>", nested: { apiKey: "<redacted>", cookie: "<redacted>", privateKey: "<redacted>", credentials: "<redacted>", otp: "<redacted>", safe: "shown" }, token: "<redacted>",
   });
+  let deep: unknown = { password: "never-visible" };
+  for (let i = 0; i < 12; i++) deep = { next: deep };
+  assert.doesNotMatch(JSON.stringify(redactWriteBody(deep)), /never-visible/);
+});
+
+test("password templates preserve JSON-special and replacement-token characters", () => {
+  assert.deepEqual(passwordBody('{"password":"{{PW}}"}', 'quote" slash\\ $& $`'), { password: 'quote" slash\\ $& $`' });
+  assert.equal(plannedTakeover(opts, "https://staging.example").length, 5);
 });
 
 function run(server: Server, options: Record<string, unknown>): Promise<Finding[]> {
@@ -66,7 +74,8 @@ test("password-takeover: A changing B's password, confirmed by login as B, is pr
   assert.equal(proven.length, 1, "the account takeover is the one proof");
   assert.match(proven[0]!.title, /Account takeover/i);
   assert.equal(proven[0]!.severity, "critical");
-  assert.doesNotMatch(JSON.stringify(found), /"password":"(?:orig|Crenel-)/, "probe and restore passwords are redacted from the receipt");
+  const serialized = JSON.stringify(found);
+  assert.doesNotMatch(serialized, /orig|Crenel-[a-f0-9]+-Aa1!/, "probe and restore passwords are redacted from the receipt");
 });
 
 test("password-takeover: a properly-gated endpoint (A gets 403 on B) proves nothing", async () => {
@@ -107,6 +116,27 @@ test("password-takeover: restoration still runs when the confirmation login conn
       if (loginCalls === 2) return req.socket.destroy();
       res.writeHead(200); return res.end('{"status":"fail"}');
     }
+    res.writeHead(404); res.end();
+  });
+  const found = await run(server, opts);
+  assert.equal(restored, true);
+  assert.equal(loginCalls, 2, "the second login is the failing confirmation path");
+  assert.ok(!found.some((f) => f.state === "proven"));
+  assert.ok(found.some((f) => f.id === "password-takeover:writes" && /every change restored/i.test(f.title)));
+});
+
+test("password-takeover: restoration runs when the mutation applies then the socket drops", async () => {
+  let restored = false;
+  const server = createServer(async (req, res) => {
+    const m = /^\/users\/([^/]+)\/password$/.exec(req.url ?? "");
+    if (m && req.method === "PUT") {
+      if (m[1] !== "victim") { res.writeHead(404); return res.end(); }
+      const value = JSON.parse(await body(req)).password;
+      if (req.headers.authorization === "Bearer A") return req.socket.destroy();
+      if (req.headers.authorization === "Bearer B" && value === "orig") restored = true;
+      res.writeHead(200); return res.end("{}");
+    }
+    if (req.url === "/login") { await body(req); res.writeHead(200); return res.end('{"status":"fail"}'); }
     res.writeHead(404); res.end();
   });
   const found = await run(server, opts);

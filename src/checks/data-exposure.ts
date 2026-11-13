@@ -19,6 +19,7 @@ type PiiContract =
   | { policy: "canary"; canaryEnv: string };
 interface Opts { endpoints?: string[]; as?: string; pii?: boolean | PiiContract }
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
 // A plausible real email address. Placeholders (noreply@, no-reply@, a bare
 // example.com with no local part) are not someone's personal data.
@@ -131,6 +132,12 @@ export const dataExposure: Check = {
           if (emails.size >= 2 || foreign > 0 || canarySeen) {
             const anon = await safeFetch(url, ctx.scope, { method: "GET", maxBytes: 4096 }).catch(() => null);
             const contractProof = foreign > 0 || canarySeen;
+            const replayBase = `curl -sS ${shellQuote(url)}${sessionReplayHeaders(sess, "A")}`;
+            const piiReplay = contractProof && contract?.policy === "canary"
+              ? `${replayBase} | jq --arg canary "$${contract.canaryEnv}" '.. | scalars | select(tostring == $canary)'`
+              : contractProof && contract?.policy === "owner-only"
+                ? `${replayBase} | jq --arg owner "$${contract.ownerValueEnv}" --arg field ${shellQuote(contract.ownerField)} '.. | objects | select(has($field)) | select((.[$field] | tostring) != $owner)'`
+                : `${replayBase} | grep -oiE '[a-z0-9._%+-]+@[a-z0-9.-]+' | sort -u`;
             findings.push({
                 id: `data-exposure:pii:${ep}`,
                 check: "data-exposure",
@@ -146,7 +153,7 @@ export const dataExposure: Check = {
                 remediation: `Return only the caller's own data, or scope the response to resources they own; never include other accounts' email, phone or vehicle in a list a normal user can read. Filter at the data layer, not the client.`,
                 proof: {
                   method: contractProof ? `live authenticated GET checked against the declared ${contract!.policy} privacy contract` : "live authenticated GET; multiple PII values observed, authorization not established",
-                  replay: `curl -s ${JSON.stringify(url)}${sessionReplayHeaders(sess, "A")} | grep -oiE '[a-z0-9._%+-]+@[a-z0-9.-]+' | sort -u`,
+                  replay: piiReplay,
                   evidence: contractProof ? `${canarySeen ? "declared canary present" : `${foreign} foreign-owner PII record(s)`}; values redacted` : `${emails.size} distinct personal emails; values redacted; no owner/canary proof`,
                 },
                 regressionHint: `After the fix, GET ${ep} with a normal account must not return another account's email address.`,

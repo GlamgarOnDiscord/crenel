@@ -44,6 +44,9 @@ export interface ScopeConfig {
     resolve: (host: string, options: { all: true }) => Promise<{ address: string; family: number }[]>;
     fetch: (url: string, init: RequestInit) => Promise<Response>;
   };
+  /** Resolver-only injection for an actual-socket integration test. Unlike
+   * testTransport this still exercises the production pinned transport. */
+  testResolver?: (host: string, options: { all: true }) => Promise<{ address: string; family: number }[]>;
 }
 
 /** One request seen by the scoped client: sent (with a status or an error) or refused. */
@@ -83,6 +86,7 @@ export class Scope {
   readonly ratePerSec?: number;
   readonly maxRequests?: number;
   readonly testTransport?: ScopeConfig["testTransport"];
+  readonly testResolver?: ScopeConfig["testResolver"];
   /** Requests reserved so far (budget and pacing). */
   private sent = 0;
   private nextAt = 0;
@@ -102,6 +106,7 @@ export class Scope {
     this.allowActiveTesting = config.allowActiveTesting ?? false;
     this.allowPrivate = config.allowPrivate ?? false;
     this.testTransport = config.testTransport;
+    this.testResolver = config.testResolver;
     if (config.ratePerSec !== undefined && config.ratePerSec > 0) this.ratePerSec = config.ratePerSec;
     if (config.maxRequests !== undefined && config.maxRequests > 0) this.maxRequests = config.maxRequests;
     if (config.access && Object.keys(config.access).length) {

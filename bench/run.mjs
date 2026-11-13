@@ -38,27 +38,40 @@ for (const name of cases) {
   let server, baseUrl;
   const caseStarted = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error(`benchmark case timed out after ${timeoutMs} ms`)), c.timeoutMs ?? timeoutMs);
+  const caseTimeoutMs = c.timeoutMs ?? timeoutMs;
+  const timeout = setTimeout(() => controller.abort(new Error(`benchmark case timed out after ${caseTimeoutMs} ms`)), caseTimeoutMs);
   try {
-    if (c.type === "live") {
-      const mod = await import(pathToFileURL(join(dir, "server.mjs")).href);
-      server = mod.default();
-      await new Promise((r) => server.listen(0, "127.0.0.1", r));
-      baseUrl = `http://127.0.0.1:${server.address().port}`;
-    }
-    // Copy the project so {{BASE}} can point at this run's live target.
-    const projectDir = join(tmp, "project");
-    if (existsSync(join(dir, "project"))) {
-      cpSync(join(dir, "project"), projectDir, { recursive: true });
-      if (baseUrl) for (const f of walk(projectDir)) {
-        const t = readFileSync(f, "utf8");
-        if (t.includes("{{BASE}}")) writeFileSync(f, t.replaceAll("{{BASE}}", baseUrl));
+    // Setup is inside the deadline too. Adapters receive the same signal and
+    // must resolve after terminating children; on timeout we briefly await that
+    // cleanup before deleting their temporary directory.
+    const operation = (async () => {
+      if (c.type === "live") {
+        const mod = await import(pathToFileURL(join(dir, "server.mjs")).href);
+        server = mod.default();
+        await new Promise((r) => server.listen(0, "127.0.0.1", r));
+        baseUrl = `http://127.0.0.1:${server.address().port}`;
       }
-    } else cpSync(join(HERE, "empty"), projectDir, { recursive: true });
-    const result = await Promise.race([
-      tool.run({ projectDir, baseUrl, caseConfig: c.config ?? {}, tmp, signal: controller.signal }),
-      new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true })),
-    ]);
+      const projectDir = join(tmp, "project");
+      if (existsSync(join(dir, "project"))) {
+        cpSync(join(dir, "project"), projectDir, { recursive: true });
+        if (baseUrl) for (const f of walk(projectDir)) {
+          const t = readFileSync(f, "utf8");
+          if (t.includes("{{BASE}}")) writeFileSync(f, t.replaceAll("{{BASE}}", baseUrl));
+        }
+      } else cpSync(join(HERE, "empty"), projectDir, { recursive: true });
+      return tool.run({ projectDir, baseUrl, caseConfig: c.config ?? {}, tmp, signal: controller.signal });
+    })();
+    let result;
+    try {
+      result = await Promise.race([
+        operation,
+        new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true })),
+      ]);
+    } catch (err) {
+      controller.abort(err);
+      await Promise.race([operation.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 1_500))]);
+      throw err;
+    }
     const { findings, errors, metadata } = result;
     // A recorded exploration replays an answer the case's author wrote: it checks
     // that the harness turns those moves into a proof, not that anything was
@@ -74,7 +87,7 @@ for (const name of cases) {
   } finally {
     clearTimeout(timeout);
     controller.abort();
-    server?.close();
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
     rmSync(tmp, { recursive: true, force: true });
   }
 }

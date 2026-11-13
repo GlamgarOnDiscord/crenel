@@ -15,7 +15,6 @@ empty list runs every read-only check.
 | dependency-risk | Malicious locked versions, install scripts, non-registry deps, no lockfile | yes (denylist) | no |
 | ci-hardening | `pull_request_target`, unpinned actions, install without `--ignore-scripts` | no (leads) | no |
 | headers | Missing security headers and cookie flags | yes (live response) | yes (stagingUrl) |
-| cloudflare-access | Not a check: one info lead per declared host that answered with Cloudflare Access's login instead of the app (every live check treats it as not reached). Service tokens: [USAGE.md](USAGE.md#hosts-behind-cloudflare-access) | no (info lead) | from any live check |
 | cloudflare-audit | Normalised output of Cloudflare's security-audit-skill | passes its verdict through | no |
 | mcp-surface | Committed agent/MCP config and the servers it declares | no (leads) | no |
 | dockerfile | Container hardening in your Dockerfile(s) | no (leads) | no |
@@ -39,6 +38,8 @@ empty list runs every read-only check.
 | default-creds | A login accepts a well-known default/weak password for a declared account | yes (a dictionary password accepted while a random wrong password on the same account is rejected — the control rules out accept-all) | **login attempts**: a `stagingUrl` + declared `options.default-creds.endpoints` + allowActiveTesting + `options.default-creds.enabled` |
 | reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (our exact nonce-bearing markup reflected unescaped in an HTML response vs a benign control; an escaped reflection is not flagged) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
+| metrics-exposed | Prometheus metrics endpoint exposed without authentication | yes (Prometheus HELP/TYPE signature in a live response) | GETs on the declared host |
+| jwt-verification | JWT verification code that accepts unsigned or weakly verified tokens | no (leads) | no |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
 | subdomain-takeover | Declared host with a CNAME to a hosting service where nothing is deployed | yes (CNAME + service's not-found page) | DNS + one GET per declared host |
@@ -245,9 +246,11 @@ is proven just as a bearer API would be.
 **From an OpenAPI file.** `options.authz-matrix.openapi: api.yaml` (path relative
 to the config) adds every GET route with exactly one path parameter as a
 resource (`/projects/{projectId}` becomes `/projects/:id`, with the server's
-path prefix). An operation with `security: []` is imported as `public`; a
-non-empty operation/global security requirement is imported as `authenticated`.
-Hand-declared resources win on a name clash. You still list
+path prefix). `security: []` or an empty requirement alternative (`[{}]`) is
+imported as public. A non-empty operation/global security requirement records
+only `authentication: required`: OpenAPI cannot tell whether signed-in access
+is shared or owner-scoped, so cross-tenant probes still run. Hand-declared
+resources win on a name clash. You still list
 the ids account B owns: the matrix never guesses objects.
 
 **Ids found in B's own responses.** With `accounts.b.token` set, ids shaped like

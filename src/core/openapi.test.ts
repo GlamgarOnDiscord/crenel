@@ -21,8 +21,17 @@ const spec = {
 
 test("imports GET routes with one path parameter, with the server prefix; public ones are marked", () => {
   assert.deepEqual(resourcesFromOpenApi(spec), [
-    { name: "projects", path: "/v1/projects/:id", methods: ["GET"], access: "authenticated" },
-    { name: "status", path: "/v1/status/:id", methods: ["GET"], access: "public" },
+    { name: "projects", path: "/v1/projects/:id", methods: ["GET"], authentication: "required" },
+    { name: "status", path: "/v1/status/:id", methods: ["GET"], access: "public", public: true, authentication: "none" },
+  ]);
+});
+
+test("keeps unspecified security ambiguous and treats an empty requirement object as anonymous", () => {
+  assert.deepEqual(resourcesFromOpenApi({ paths: { "/objects/{id}": { get: {} } } }), [
+    { name: "objects", path: "/objects/:id", methods: ["GET"] },
+  ]);
+  assert.deepEqual(resourcesFromOpenApi({ security: [{ bearer: [] }], paths: { "/objects/{id}": { get: { security: [{}] } } } }), [
+    { name: "objects", path: "/objects/:id", methods: ["GET"], access: "public", public: true, authentication: "none" },
   ]);
 });
 

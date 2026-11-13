@@ -61,7 +61,8 @@ test("directory listing reconnaissance is fetched once and shared with dependenc
   const context = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: { "directory-listing": { paths: ["/ftp/"] } }, recon: new Map(), log: () => {} };
   try {
     await directoryListing.run(context);
-    await dependencyExposure.run(context);
+    const dependencies = await dependencyExposure.run(context);
     assert.equal(indexReads, 1);
+    assert.ok(dependencies.some((f) => f.state === "proven" && f.location.endsWith("/ftp/package.json")));
   } finally { srv.close(); }
 });

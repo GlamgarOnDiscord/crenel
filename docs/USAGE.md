@@ -31,7 +31,7 @@ options:
       - { name: project, path: /api/projects/:id, methods: [GET], access: private }
     accounts:
       a: { token: "<staging token for account A>" }
-      b: { owns: { project: ["<id owned by B>"] } }
+      b: { token: "<staging token for account B>", owns: { project: ["<id owned by B>"] } }
 ```
 
 Older setups with `bastion.config.yaml` still work.

@@ -32,6 +32,9 @@ interface ResourceSpec {
    * is a decoy/trust boundary and is never reported. Unset keeps the legacy
    * private matrix, but anonymous access remains a lead until declared. */
   access?: "private" | "authenticated" | "public";
+  /** Authentication-only contract imported from an API definition. It does
+   * not imply whether authenticated access is owner-scoped or shared. */
+  authentication?: "required" | "none";
   /** @deprecated Use `access: "public"`. */
   public?: boolean;
   /** Owner-id field in the object body (e.g. "UserId", "owner_id"). Enables the
@@ -85,7 +88,8 @@ const authHeaders = (a?: Auth): Record<string, string> =>
   a ? { ...(a.token ? { authorization: `Bearer ${a.token}` } : {}), ...(a.cookie ? { cookie: a.cookie } : {}), ...(a.headers ?? {}) } : {};
 const hasAuth = (a?: Auth): boolean => !!(a && (a.token || a.cookie || (a.headers && Object.keys(a.headers).length > 0)));
 const accessOf = (r: ResourceSpec): "private" | "authenticated" | "public" => r.access ?? (r.public ? "public" : "private");
-const hasAccessContract = (r: ResourceSpec): boolean => r.access !== undefined || r.public === true;
+const hasAccessContract = (r: ResourceSpec): boolean => r.access !== undefined || r.public === true || r.authentication === "required";
+const requiresAuthentication = (r: ResourceSpec): boolean => r.authentication === "required" || r.access === "private" || r.access === "authenticated";
 /** Two accounts carry the SAME custom auth headers (same non-empty key/value set):
  * then A and B are one identity, so a "cross-tenant" read is just B reading its own
  * object and proves nothing. Mirrors the token/cookie same-identity guard. */
@@ -260,8 +264,8 @@ export const authzMatrix: Check = {
         // route counts as public only when a second anonymous read leaks again.
         const anonAgain = anonLeak.verdict === "leak" ? authzOracle({ attacker: await anonGet(url), owner, control: anonCtl, ownerMarkers: markers }) : anonLeak;
         if (anonLeak.verdict === "leak" && anonAgain.verdict === "leak") {
-          const contract = accessOf(c.resource);
-          const provenAnonymous = hasAccessContract(c.resource) && contract !== "public";
+          const contract = c.resource.authentication === "required" && c.resource.access === undefined ? "authentication-required" : accessOf(c.resource);
+          const provenAnonymous = requiresAuthentication(c.resource);
           findings.push({
             id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}:${provenAnonymous ? "anonymous" : "public"}`,
             check: "authz-matrix",
