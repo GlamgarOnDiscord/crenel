@@ -95,7 +95,7 @@ export const passwordTakeover: Check = {
     const u = (p: string) => base + (p.startsWith("/") ? p : "/" + p);
     for (const t of targets) {
       const method = (t.method ?? "PUT").toUpperCase();
-      if (!t.name || !t.changePath?.includes(":id") || !t.victimId || !t.body?.includes("{{PW}}") || !t.login?.path || !t.login.victimUser || !ENV_NAME.test(t.restorePasswordEnv ?? "")) {
+      if (!t.name || typeof t.changePath !== "string" || !t.changePath.includes(":id") || !t.victimId || typeof t.body !== "string" || !t.body.includes("{{PW}}") || !t.login?.path || !t.login.victimUser || !ENV_NAME.test(t.restorePasswordEnv ?? "")) {
         notes.push(`${t.name ?? "(unnamed)"}: skipped, needs name, changePath with :id, victimId, body, login.path, login.victimUser and restorePasswordEnv (an environment variable name).`);
         continue;
       }

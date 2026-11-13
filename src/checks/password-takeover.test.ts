@@ -21,8 +21,11 @@ test("active receipts redact nested passwords, tokens, cookies and secrets", () 
     password: "<redacted>", nested: { apiKey: "<redacted>", cookie: "<redacted>", privateKey: "<redacted>", credentials: "<redacted>", otp: "<redacted>", safe: "shown" }, token: "<redacted>",
   });
   let deep: unknown = { password: "never-visible" };
-  for (let i = 0; i < 12; i++) deep = { next: deep };
+  for (let i = 0; i < 10_000; i++) deep = { next: deep };
   assert.doesNotMatch(JSON.stringify(redactWriteBody(deep)), /never-visible/);
+  const cyclic: { safe: string; nested?: unknown; password: string } = { safe: "shown", password: "never-visible" };
+  cyclic.nested = cyclic;
+  assert.deepEqual(redactWriteBody(cyclic), { safe: "shown", password: "<redacted>", nested: "<redacted circular value>" });
 });
 
 test("password templates preserve JSON-special and replacement-token characters", () => {
@@ -143,12 +146,13 @@ test("password-takeover: restoration still runs when the confirmation login conn
 });
 
 test("password-takeover: restoration runs when the mutation applies then the socket drops", async () => {
-  let restored = false;
+  let restored = false, currentPassword = "orig";
   const server = createServer(async (req, res) => {
     const m = /^\/users\/([^/]+)\/password$/.exec(req.url ?? "");
     if (m && req.method === "PUT") {
       if (m[1] !== "victim") { res.writeHead(404); return res.end(); }
       const value = JSON.parse(await body(req)).password;
+      currentPassword = value;
       if (req.headers.authorization === "Bearer A") return req.socket.destroy();
       if (req.headers.authorization === "Bearer B" && value === "orig") restored = true;
       res.writeHead(200); return res.end("{}");
@@ -158,8 +162,15 @@ test("password-takeover: restoration runs when the mutation applies then the soc
   });
   const found = await run(server, opts);
   assert.equal(restored, true);
+  assert.equal(currentPassword, "orig", "the victim restore replaces the attacker's applied password after the dropped response");
   assert.ok(!found.some((f) => f.state === "proven"));
   assert.ok(found.some((f) => f.id === "password-takeover:writes" && /every change restored/i.test(f.title)));
+});
+
+test("password-takeover: a malformed non-string body is skipped without aborting the check", async () => {
+  const malformed = { "password-takeover": { ...opts["password-takeover"], targets: [{ ...opts["password-takeover"].targets[0], body: { password: "{{PW}}" } }] } } as unknown as Record<string, unknown>;
+  const found = await run(createServer((_req, res) => { res.writeHead(500); res.end(); }), malformed);
+  assert.ok(found.some((f) => f.id === "password-takeover:writes" && /skipped/i.test(f.description)));
 });
 
 test("password-takeover: off unless active testing is enabled (scope gate holds)", async () => {

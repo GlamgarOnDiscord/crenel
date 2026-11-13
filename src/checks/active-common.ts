@@ -98,12 +98,39 @@ export interface WriteRecord {
 export interface Answer { status: number; body: string; json: unknown }
 const SECRET_FIELD = /(password|passwd|pwd|passphrase|secret|token|authorization|cookie|credentials?|private[_-]?key|api[_-]?key|session|otp|mfa)/i;
 
-/** Redact secrets by key before a write payload reaches receipts/evidence. */
+/** Redact secrets by key before a write payload reaches receipts/evidence.
+ * Iterative and bounded so an adversarially deep object cannot overflow the
+ * stack or delay an active check after its request body was serialized. */
 export function redactWriteBody(value: unknown, key = ""): unknown {
   if (SECRET_FIELD.test(key)) return "<redacted>";
   if (value == null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((v) => redactWriteBody(v));
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactWriteBody(v, k)]));
+  const root: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
+  const seen = new WeakSet<object>([value]);
+  const pending: { source: object; target: Record<string, unknown> | unknown[]; depth: number }[] = [
+    { source: value, target: root, depth: 0 },
+  ];
+  let visited = 0;
+  const assign = (target: Record<string, unknown> | unknown[], childKey: string, child: unknown) => {
+    if (Array.isArray(target)) target[Number(childKey)] = child;
+    else target[childKey] = child;
+  };
+  while (pending.length) {
+    const { source, target, depth } = pending.pop()!;
+    const entries = Array.isArray(source)
+      ? source.map((child, index) => [String(index), child] as const)
+      : Object.entries(source as Record<string, unknown>);
+    for (const [childKey, child] of entries) {
+      if (SECRET_FIELD.test(childKey)) { assign(target, childKey, "<redacted>"); continue; }
+      if (child == null || typeof child !== "object") { assign(target, childKey, child); continue; }
+      if (seen.has(child)) { assign(target, childKey, "<redacted circular value>"); continue; }
+      if (depth >= 32 || visited++ >= 10_000) { assign(target, childKey, "<redacted nested value>"); continue; }
+      const copy: Record<string, unknown> | unknown[] = Array.isArray(child) ? [] : {};
+      assign(target, childKey, copy);
+      seen.add(child);
+      pending.push({ source: child, target: copy, depth: depth + 1 });
+    }
+  }
+  return root;
 }
 
 /**

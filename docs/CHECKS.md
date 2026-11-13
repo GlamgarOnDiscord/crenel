@@ -39,7 +39,7 @@ empty list runs every read-only check.
 | reflected-xss | A request parameter echoed unescaped into an HTML response (reflected XSS), proven without a browser | yes (our exact nonce-bearing markup reflected unescaped in an HTML response vs a benign control; an escaped reflection is not flagged) | GETs on the declared host |
 | graphql | Introspection answered without credentials | yes (__schema in the response) | one GET query per usual path, then the same query as a POST |
 | metrics-exposed | Prometheus metrics endpoint exposed without authentication | yes (Prometheus HELP/TYPE signature in a live response) | GETs on the declared host |
-| jwt-verification | JWT verification code that accepts unsigned or weakly verified tokens | no (leads) | no |
+| jwt-verification | A declared API endpoint accepts a forged variant of an ordinary account's JWT (including RS256 -> HS256 confusion) | yes (forged token accepted while its corrupt-signature control is rejected) | GETs on declared staging endpoints; needs a configured account token |
 | open-redirect | Redirect to any URL named by a parameter | yes (Location points at the sentinel) | GETs on the declared host, redirect not followed |
 | next-middleware | Next.js middleware skipped with x-middleware-subrequest (CVE-2025-29927) | yes (denied without, served with) | GETs on the declared host |
 | subdomain-takeover | Declared host with a CNAME to a hosting service where nothing is deployed | yes (CNAME + service's not-found page) | DNS + one GET per declared host |

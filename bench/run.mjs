@@ -87,9 +87,25 @@ for (const name of cases) {
   } finally {
     clearTimeout(timeout);
     controller.abort();
-    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    await closeServer(server);
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Stop accepting requests, destroy any request an aborted adapter left open,
+ * and never let fixture cleanup stall the rest of the benchmark. */
+async function closeServer(server) {
+  if (!server?.listening) return;
+  const closed = new Promise((resolve) => server.close(resolve));
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
+  let timer;
+  await Promise.race([
+    closed,
+    new Promise((resolve) => { timer = setTimeout(resolve, 1_000); }),
+  ]);
+  clearTimeout(timer);
+  server.closeAllConnections?.();
 }
 
 function* walk(d) {
