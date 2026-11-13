@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { directoryListing, isDirectoryListing, listedFiles } from "./directory-listing.js";
+import { dependencyExposure } from "./dependency-exposure.js";
 import { Scope } from "../core/scope.js";
 
 test("isDirectoryListing: autoindex pages match, an SPA does not", () => {
@@ -45,5 +46,22 @@ test("directory-listing: a 404 folder and an SPA produce nothing", async () => {
   try {
     const found = await directoryListing.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: { "directory-listing": { paths: ["/ftp/", "/files/"] } }, log: () => {} });
     assert.equal(found.length, 0);
+  } finally { srv.close(); }
+});
+
+test("directory listing reconnaissance is fetched once and shared with dependency-exposure", async () => {
+  let indexReads = 0;
+  const srv = createServer((req, res) => {
+    if (req.url === "/ftp/") { indexReads++; res.writeHead(200); return res.end('<title>Index of /ftp/</title><a href="package.json">package.json</a>'); }
+    if (req.url === "/ftp/package.json") { res.writeHead(200); return res.end('{"dependencies":{"lodash":"4.17.4"}}'); }
+    res.writeHead(404); res.end("no");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const context = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: { "directory-listing": { paths: ["/ftp/"] } }, recon: new Map(), log: () => {} };
+  try {
+    await directoryListing.run(context);
+    await dependencyExposure.run(context);
+    assert.equal(indexReads, 1);
   } finally { srv.close(); }
 });

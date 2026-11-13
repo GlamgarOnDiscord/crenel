@@ -15,9 +15,11 @@ options:
       - name: project
         path: /api/projects/:id
         methods: [GET]
+        access: private
       - name: render
         path: /api/renders/:id
         methods: [GET]
+        access: private
     accounts:
       a: { token: "" }
       b: { owns: { project: ["proj_b_1"], render: ["rnd_b_1"] } }

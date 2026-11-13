@@ -156,7 +156,8 @@ test("ai-infra: a Langflow version is checked against OSV (PyPI) when osv is on;
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
   try {
-    const scope = new Scope({ allowedHosts: ["lf.acme.test", "fw.acme.test", "api.osv.dev"], allowPrivate: true });
+    const scope = new Scope({ allowedHosts: ["lf.acme.test", "fw.acme.test", "api.osv.dev"], allowPrivate: true,
+      testTransport: { resolve: async () => [{ address: "127.0.0.1", family: 4 }], fetch: globalThis.fetch } });
     const c = (u: string) => ({ scope, projectDir: ".", stagingUrl: u, options: { "dependency-risk": { osv: true } }, log: () => {} });
     const f = (await aiInfra.run(c("https://lf.acme.test"))).filter((x) => x.id.startsWith("ai-infra:advisory:"));
     assert.equal(f.length, 1);

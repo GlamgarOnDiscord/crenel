@@ -34,6 +34,17 @@ const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const JWT = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/;
 const TOKEN_KEYS = ["access_token", "accessToken", "auth_token", "authToken", "token", "jwt", "id_token", "idToken"];
 
+/** Every credential returned by a login belongs to the same session. Send both:
+ * some stacks require a bearer for the API and a CSRF/session cookie together. */
+export function sessionHeaders(session?: Session): Record<string, string> {
+  return session ? { ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}) } : {};
+}
+
+/** Redacted curl flags matching the credentials that were actually sent. */
+export function sessionReplayHeaders(session?: Session, label = "SESSION"): string {
+  return session ? `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}` : "";
+}
+
 /** True for a string that is a JWT: three base64url parts whose header decodes to JSON with `alg`. */
 export function isJwt(s: string): boolean {
   if (!JWT.test(s)) return false;

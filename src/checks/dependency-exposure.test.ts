@@ -50,6 +50,11 @@ test("dependency-exposure: a served manifest with an exactly-pinned vulnerable d
   const f = await run("/package.json.bak", '{"dependencies":{"jsonwebtoken":"8.5.1"}}');
   assert.equal(f.length, 1); assert.equal(f[0]!.state, "proven");
 });
+test("dependency-exposure: lockfiles larger than the old 1 MiB cap are parsed completely", async () => {
+  const lock = JSON.stringify({ padding: "x".repeat(1024 * 1024 + 32), packages: { "node_modules/minimist": { version: "1.2.5" } } });
+  const f = await run("/package-lock.json", lock);
+  assert.equal(f.filter((x) => x.state === "proven").length, 1);
+});
 test("dependency-exposure: a patched or ranged manifest is not flagged", async () => {
   assert.equal((await run("/package.json", '{"dependencies":{"jsonwebtoken":"9.0.2"}}')).filter((x) => x.state === "proven").length, 0);
   assert.equal((await run("/package.json", '{"dependencies":{"jsonwebtoken":"^8.0.0"}}')).filter((x) => x.state === "proven").length, 0);
@@ -84,8 +89,27 @@ test("dependency-exposure: a manifest named in an open listing, served past an e
   const f = await runListing({ index: true, manifest: '{"dependencies":{"sanitize-html":"1.4.2"}}' });
   assert.equal(f.length, 1);
   assert.equal(f[0]!.state, "proven");
-  assert.match(f[0]!.location!, /\/ftp\/package\.json\.bak$/); // the discovered file, not a configured path
+  assert.match(f[0]!.location!, /\/ftp\/package\.json\.bak%2500\.md$/); // exact URL that served the proof
+  assert.match(f[0]!.proof?.replay ?? "", /package\.json\.bak%2500\.md/);
+  assert.doesNotMatch(f[0]!.proof?.replay ?? "", /%00\./, "the replay never invents a different null-byte encoding");
   assert.match(f[0]!.title, /sanitize-html/);
+});
+
+test("dependency-exposure: every listed manifest is checked, including after the former four-file cap", async () => {
+  const names = ["package.json", "package-lock.json", "npm-shrinkwrap.json", "package.json.bak", "package-lock.json.bak"];
+  const index = `<title>Index of /ftp/</title>${names.map((n) => `<a href="${n}">${n}</a>`).join("")}`;
+  const srv = createServer((req, res) => {
+    if (req.url === "/ftp/") { res.writeHead(200); return res.end(index); }
+    if (req.url === "/ftp/package-lock.json.bak") { res.writeHead(200); return res.end('{"dependencies":{"lodash":"4.17.4"}}'); }
+    if (req.url?.startsWith("/ftp/")) { res.writeHead(200); return res.end('{"dependencies":{"lodash":"4.17.21"}}'); }
+    res.writeHead(404); res.end("no");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const f = await dependencyExposure.run({ scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true }), projectDir: ".", stagingUrl: base, options: {}, log: () => {} });
+    assert.ok(f.some((x) => x.state === "proven" && x.location.endsWith("/package-lock.json.bak")));
+  } finally { srv.close(); }
 });
 test("dependency-exposure: a listed manifest with only ranges is not proven", async () => {
   const f = await runListing({ index: true, manifest: '{"dependencies":{"sanitize-html":"~1.4.2","lodash":"^4.0.0"}}' });

@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 
 const spec = {
   openapi: "3.0.0",
+  security: [{ bearerAuth: [] }],
   servers: [{ url: "https://api.example.com/v1" }],
   paths: {
     "/projects/{projectId}": { get: {}, delete: {} },
@@ -20,8 +21,8 @@ const spec = {
 
 test("imports GET routes with one path parameter, with the server prefix; public ones are marked", () => {
   assert.deepEqual(resourcesFromOpenApi(spec), [
-    { name: "projects", path: "/v1/projects/:id", methods: ["GET"] },
-    { name: "status", path: "/v1/status/:id", methods: ["GET"], public: true },
+    { name: "projects", path: "/v1/projects/:id", methods: ["GET"], access: "authenticated" },
+    { name: "status", path: "/v1/status/:id", methods: ["GET"], access: "public" },
   ]);
 });
 

@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 57 checks. Each is deterministic and read-only by default (the
+Crenel runs 65 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -58,13 +58,13 @@ empty list runs every read-only check.
 | cache-poisoning | Unkeyed header (X-Forwarded-Host/Proto) reflected and stored by the cache | yes (sentinel served without the header) | GETs, needs allowActiveTesting and `options.cache-poisoning.enabled` |
 | business-logic | Client code that sends an amount, a plan or a role, admin/invite/credits routes | no (hypotheses, never proven) | no |
 | supabase-functions | Edge Functions using the service role without checking the caller | no (leads) | no |
-| authz-matrix | Cross-tenant object authorization | yes (live probe, opt-in) | yes + active gate |
+| authz-matrix | Cross-tenant object authorization and missing authentication on declared private/authenticated resources | yes (owner/attacker/anonymous/control differentials with stable replay) | yes + active gate |
 | nested-authz | Cross-tenant read of a nested resource (server trusts the leaf id) | yes (live differential) | yes + active gate |
 | function-authz | Broken function-level authorization: a normal account reaches a privileged function (anon refused, control refused) | yes (live differential: privileged, normal, anon, control) | yes + active gate |
 | stored-xss | Stored XSS: markup saved through one endpoint is served unescaped (HTML) by another | yes (store a marker, read it back unescaped) | **writes**: allowActiveTesting + `options.stored-xss.enabled` |
 | signup-privilege | A registration endpoint accepts a privileged field (sign up as admin): control signup default vs probe signup carrying the field | yes (control vs probe, read back from a listing) | **writes**: allowActiveTesting + `options.signup-privilege.enabled` |
-| data-exposure | A live endpoint returns credentials (>= 2 distinct plaintext passwords) in its response | yes (plaintext, non-hash, non-mask values under password keys) | yes (stagingUrl + declared endpoints) |
-| password-takeover | One account changes another's password (account takeover), confirmed by logging in as the victim | yes (control rejected, cross-account write, victim login succeeds) | **writes**: allowActiveTesting + `options.password-takeover.enabled` |
+| data-exposure | A live endpoint returns credentials (>= 2 distinct plaintext passwords) or violates an explicit PII owner/canary contract | yes (password values; PII only with declared owner/canary proof) | yes (stagingUrl + declared endpoints) |
+| password-takeover | One account changes another's password (account takeover), confirmed by logging in as the victim | yes (non-existent control rejected, random login denied before the write, cross-account write, victim login succeeds, restore always attempted) | **writes**: allowActiveTesting + `options.password-takeover.enabled` |
 | dom-xss | DOM / stored XSS proven by script execution in a real headless browser (optional Playwright) | yes (the injected script executes, alert with our nonce) | browser + (writes: allowActiveTesting + `options.dom-xss.enabled`) |
 | race | A limit (coupon, credits, invite) consumed more than allowed by concurrent requests | yes (responses and A's read both above the limit) | **writes**: allowActiveTesting + `options.race.enabled`, one burst of at most 25 |
 | mass-assignment | Privileged fields (role, plan, credits, isAdmin, owner) accepted in a user's own update | yes (A's next read shows the value) | **writes**: allowActiveTesting + `options.mass-assignment.enabled` |
@@ -220,6 +220,19 @@ into CI). With a `stagingUrl`, two tokens, and active testing enabled for an
 owned host, it replays each cross-tenant request and reports any that did not
 return 401/403/404 as a **proven** broken-authorization finding.
 
+Every resource can declare its access contract:
+
+- `access: private`: authentication plus per-owner isolation. Both anonymous
+  access and account A reaching B's object are tested;
+- `access: authenticated`: every signed-in account may read it, but an
+  anonymous caller must be denied;
+- `access: public`: an explicit trust-boundary decoy, never probed or reported.
+
+Without `access`, the legacy cross-tenant matrix still runs, but a stable
+anonymous read is only a lead: a response alone cannot tell whether the route
+was intended to be public. Anonymous proof always uses B's owner baseline, a
+non-existent-id control and repeated replay; a 200 alone never proves a flaw.
+
 **How each account authenticates.** A token is sent as `Authorization: Bearer`,
 but many apps are not bearer-based. An account may instead carry `cookie` (a raw
 `Cookie` header value, for session apps: Flask-Login, Django, Rails, PHP) or
@@ -232,8 +245,9 @@ is proven just as a bearer API would be.
 **From an OpenAPI file.** `options.authz-matrix.openapi: api.yaml` (path relative
 to the config) adds every GET route with exactly one path parameter as a
 resource (`/projects/{projectId}` becomes `/projects/:id`, with the server's
-path prefix). An operation with `security: []` is imported as public by design
-and never probed. Hand-declared resources win on a name clash. You still list
+path prefix). An operation with `security: []` is imported as `public`; a
+non-empty operation/global security requirement is imported as `authenticated`.
+Hand-declared resources win on a name clash. You still list
 the ids account B owns: the matrix never guesses objects.
 
 **Ids found in B's own responses.** With `accounts.b.token` set, ids shaped like
@@ -615,6 +629,8 @@ bend:
   `<check>:writes` finding (info) listing every request it sent, its answer,
   and whether the previous value was put back. What could not be restored is
   in its title and description: fix those objects by hand before the next run.
+  Passwords, tokens, cookies and secret-shaped body fields are redacted before
+  the receipt is built; the network request still receives the original value.
 - **Proof is the state, not the status.** A finding is proven only when a read
   shows the change (the owner's own read for authz-write), with a control that
   shows the declaration is right.
@@ -628,6 +644,11 @@ bend:
 Test accounts can be declared once under `options.authz-matrix.accounts` (`a`
 and `b` with `token`); each active check reads them from there unless it has
 its own `accounts`.
+
+`password-takeover` never accepts a restore password in YAML. Each target names
+`restorePasswordEnv` (for example `CRENEL_VICTIM_PASSWORD`); the check refuses
+to write when that variable is absent. Once A's write is accepted, restoration
+with B's token runs in `finally`, even when the confirming login fails.
 
 ## authz-write
 

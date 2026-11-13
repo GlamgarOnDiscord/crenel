@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { extractSession, isJwt, jwtSub, listedIds, mentions } from "./session.js";
+import { extractSession, isJwt, jwtSub, listedIds, mentions, sessionHeaders, sessionReplayHeaders } from "./session.js";
 import { authzMatrix } from "./authz-matrix.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext } from "../core/types.js";
@@ -35,6 +35,14 @@ test("extractSession: a failed login, or an answer with no token and no cookie, 
   assert.equal(extractSession(answer(200, JSON.stringify({ message: "Successfully logged in.", status: "success" }))), null);
   assert.equal(extractSession(answer(200, JSON.stringify({ token: "short" }))), null, "a short value is not a token");
   assert.equal(extractSession(answer(200, "<html>welcome</html>")), null);
+});
+
+test("session auth sends and replays bearer plus cookie together", () => {
+  assert.deepEqual(sessionHeaders({ token: "tok", cookie: "sid=x" }), { authorization: "Bearer tok", cookie: "sid=x" });
+  const replay = sessionReplayHeaders({ token: "tok", cookie: "sid=x" }, "A");
+  assert.match(replay, /<A_TOKEN>/);
+  assert.match(replay, /<A_COOKIE>/);
+  assert.doesNotMatch(replay, /Bearer tok|sid=x/);
 });
 
 // A login-gated API: JWTs from POST /login (or a cookie session from /login-form), notes owned per user.

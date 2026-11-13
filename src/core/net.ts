@@ -5,10 +5,8 @@
 //   1. the host is in the Scope allowlist (you declared you own it);
 //   2. the host does not resolve to a private/loopback/link-local address
 //      (blocks SSRF to internal services), unless the target explicitly opts
-//      into private ranges for an internal staging box. KNOWN GAP: the address
-//      checked is not pinned (fetch resolves again), so a TTL-0 DNS rebinding
-//      between the check and the connection is not blocked yet; the egress
-//      proxy does pin. See HARDENING-LOG.md H2;
+//      into private ranges for an internal staging box. The socket lookup is
+//      pinned to that validated answer, so DNS rebinding cannot swap it;
 //   3. every redirect hop is re-validated against the same rules (a 302 cannot
 //      smuggle the agent off scope);
 //   4. the response body is capped, so a hostile target cannot flood context;
@@ -25,6 +23,11 @@
 // It is deliberately small and dependency-free.
 
 import { lookup } from "node:dns/promises";
+import type { LookupAddress, LookupOptions } from "node:dns";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import type { LookupFunction } from "node:net";
+import { Readable } from "node:stream";
 import { AccessGateError, Scope, ScopeError } from "./scope.js";
 import { detectAccessGate } from "./access.js";
 
@@ -79,22 +82,54 @@ export function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-async function assertResolvesPublic(host: string, allowPrivate: boolean): Promise<void> {
-  if (allowPrivate) return;
+type Resolver = (host: string, options: { all: true }) => Promise<LookupAddress[]>;
+
+/** Resolve once, reject the whole answer set if any address crosses the private
+ * boundary, then return only the validated addresses the socket may use. */
+export async function resolveTarget(host: string, allowPrivate: boolean, resolver: Resolver = lookup): Promise<LookupAddress[]> {
   let addrs;
   try {
-    addrs = await lookup(host, { all: true });
+    addrs = await resolver(host, { all: true });
   } catch {
     throw new ScopeError(`Refused: cannot resolve ${host}`);
   }
+  if (addrs.length === 0) throw new ScopeError(`Refused: cannot resolve ${host}`);
   for (const { address } of addrs) {
     if (isPrivateIp(address)) {
-      throw new ScopeError(
+      if (!allowPrivate) throw new ScopeError(
         `Refused: ${host} resolves to a private address (${address}). ` +
           `Set scope.allowPrivate only for an internal staging box you own.`,
       );
     }
   }
+  return addrs;
+}
+
+/** Node socket lookup that never resolves again: it returns only the addresses
+ * already validated by resolveTarget. Exported for the rebinding regression test. */
+export function pinnedLookup(targets: LookupAddress[]): LookupFunction {
+  return (_host: string, options: LookupOptions, callback) => {
+    if (options.all) callback(null, targets);
+    else callback(null, targets[0]!.address, targets[0]!.family);
+  };
+}
+
+async function fetchPinned(url: string, targets: LookupAddress[], init: { method: string; headers?: Record<string, string>; body?: string; signal: AbortSignal }): Promise<Response> {
+  const u = new URL(url);
+  const request = u.protocol === "https:" ? httpsRequest : httpRequest;
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new ScopeError(`Refused: unsupported protocol ${u.protocol}`);
+  return new Promise<Response>((resolve, reject) => {
+    const req = request(u, { method: init.method, headers: init.headers, signal: init.signal, lookup: pinnedLookup(targets) }, (res) => {
+      const headers = new Headers();
+      for (let i = 0; i < res.rawHeaders.length; i += 2) headers.append(res.rawHeaders[i]!, res.rawHeaders[i + 1]!);
+      const status = res.statusCode ?? 502;
+      const noBody = init.method === "HEAD" || status === 204 || status === 205 || status === 304;
+      if (noBody) res.resume();
+      resolve(new Response(noBody ? null : Readable.toWeb(res) as ReadableStream, { status, statusText: res.statusMessage, headers }));
+    });
+    req.on("error", reject);
+    req.end(init.body);
+  });
 }
 
 export interface SafeResponse {
@@ -194,6 +229,7 @@ export async function safeFetch(
     throw new ScopeError(why);
   }
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let targets: LookupAddress[];
     try {
       scope.signal?.throwIfAborted();
       scope.assertUrlAllowed(current);
@@ -203,7 +239,7 @@ export async function safeFetch(
       // leaves the rest of the host reachable.
       const known = scope.accessGates.get(new URL(current).hostname.toLowerCase());
       if (known && new URL(known.url).pathname === "/") throw new AccessGateError(known);
-      await assertResolvesPublic(new URL(current).hostname, scope.allowPrivate);
+      targets = await resolveTarget(new URL(current).hostname, scope.allowPrivate, scope.testTransport?.resolve ?? lookup);
       await scope.pace();
     } catch (err) {
       // Not a refusal of the scope: the host is known to be gated and nothing was sent.
@@ -221,7 +257,9 @@ export async function safeFetch(
     const headers = tokenSent ? { ...carried, ...access } : carried;
     try {
       // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
-      res = await fetch(current, { method, headers, body: init.body, redirect: "manual", signal });
+      res = scope.testTransport
+        ? await scope.testTransport.fetch(current, { method, headers, body: init.body, redirect: "manual", signal })
+        : await fetchPinned(current, targets, { method, headers, body: init.body, signal });
     } catch (err) {
       scope.onRequest?.({ method, url: current, error: (err as Error).message });
       throw err;

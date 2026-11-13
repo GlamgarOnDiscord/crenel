@@ -254,6 +254,42 @@ test("public route: an anonymous caller already gets B's object, so another acco
   }
 });
 
+test("explicit private contract: stable anonymous access to the owner's object is proven", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"not found"}'); }
+    if (req.headers.authorization === "Bearer tok-a") { res.writeHead(403); return res.end('{"error":"forbidden"}'); }
+    res.writeHead(200, { "content-type": "application/json" }); res.end('{"id":"secret-b","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "export", path: "/exports/:id", access: "private" }], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { export: ["secret-b"] } } } } },
+    });
+    const proof = found.find((f) => f.id.endsWith(":anonymous"));
+    assert.equal(proof?.state, "proven");
+    assert.equal(proof?.severity, "high");
+    assert.match(proof?.proof?.method ?? "", /declared private contract/);
+    assert.match(proof?.regressionHint ?? "", /anonymous cannot GET export/);
+  } finally { server.close(); }
+});
+
+test("explicit public contract is a trust-boundary decoy and is never flagged", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_req, res) => { res.writeHead(200); res.end('{"id":"public-b","owner":"org-b"}'); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "profile", path: "/profiles/:id", access: "public" }], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { profile: ["public-b"] } } } } },
+    });
+    assert.deepEqual(found, []);
+  } finally { server.close(); }
+});
+
 test("public route guard: a one-off anonymous leak (stale cache, race) does not hide a real cross-tenant break", async () => {
   const http = await import("node:http");
   // The first anonymous read of B's record leaks (a shared cache entry), every

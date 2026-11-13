@@ -38,6 +38,12 @@ export interface ScopeConfig {
   ratePerSec?: number;
   /** Refuse any request past this many in the life of the scope (a run's budget). */
   maxRequests?: number;
+  /** Dependency injection for hermetic tests. It is intentionally absent from
+   * ConfigSchema, so a project config can never replace the pinned transport. */
+  testTransport?: {
+    resolve: (host: string, options: { all: true }) => Promise<{ address: string; family: number }[]>;
+    fetch: (url: string, init: RequestInit) => Promise<Response>;
+  };
 }
 
 /** One request seen by the scoped client: sent (with a status or an error) or refused. */
@@ -76,6 +82,7 @@ export class Scope {
   readonly onRequest?: (e: NetEvent) => void;
   readonly ratePerSec?: number;
   readonly maxRequests?: number;
+  readonly testTransport?: ScopeConfig["testTransport"];
   /** Requests reserved so far (budget and pacing). */
   private sent = 0;
   private nextAt = 0;
@@ -94,6 +101,7 @@ export class Scope {
     this.allowed = new Set(config.allowedHosts.map((h) => h.toLowerCase().trim()));
     this.allowActiveTesting = config.allowActiveTesting ?? false;
     this.allowPrivate = config.allowPrivate ?? false;
+    this.testTransport = config.testTransport;
     if (config.ratePerSec !== undefined && config.ratePerSec > 0) this.ratePerSec = config.ratePerSec;
     if (config.maxRequests !== undefined && config.maxRequests > 0) this.maxRequests = config.maxRequests;
     if (config.access && Object.keys(config.access).length) {

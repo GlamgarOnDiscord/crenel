@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch, topLevelKeys } from "./net.js";
+import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, pinnedLookup, readOnlyPost, redirectHeaders, resolveTarget, safeFetch, topLevelKeys } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -38,6 +38,26 @@ test("public addresses are allowed", () => {
   for (const ip of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
     assert.equal(isPrivateIp(ip), false, `${ip} should be public`);
   }
+});
+
+test("DNS is validated once and the socket lookup is pinned to that answer", async () => {
+  let resolutions = 0;
+  const targets = await resolveTarget("rebind.example", false, async () => {
+    resolutions++;
+    return [{ address: "93.184.216.34", family: 4 }];
+  });
+  const lookup = pinnedLookup(targets);
+  const got = await new Promise<{ address: string; family?: number }>((resolve, reject) => lookup("rebind.example", {}, (err, address, family) => {
+    if (err) reject(err); else resolve({ address: address as string, family });
+  }));
+  assert.equal(resolutions, 1);
+  assert.deepEqual(got, { address: "93.184.216.34", family: 4 });
+});
+
+test("a mixed public/private DNS answer is refused before a socket is opened", async () => {
+  await assert.rejects(resolveTarget("mixed.example", false, async () => [
+    { address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 },
+  ]), /private address/);
 });
 
 test("safeFetch returns the body for an allowed host", async () => {

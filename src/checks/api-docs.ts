@@ -82,7 +82,7 @@ export const apiDocs: Check = {
         const routes = Object.keys(spec.paths!);
         const ops = routes.reduce((n, r) => n + Object.keys(spec.paths![r] ?? {}).filter((m) => METHODS.has(m)).length, 0);
         const sensitive = routes.filter((r) => SENSITIVE.test(r));
-        const objects = resourcesFromOpenApi(spec as Parameters<typeof resourcesFromOpenApi>[0]).filter((r) => !r.public);
+        const objects = resourcesFromOpenApi(spec as Parameters<typeof resourcesFromOpenApi>[0]).filter((r) => r.access !== "public");
         out.push({
           id: `api-docs:${new URL(base).host}${path}`, check: "api-docs", state: "proven",
           severity: sensitive.length ? "medium" : "low",

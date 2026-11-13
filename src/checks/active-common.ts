@@ -8,8 +8,8 @@
 //   - every request goes through safeFetch (declared hosts, journal, kill switch)
 //     and through a per-run budget with a hard ceiling;
 //   - targets and ids come only from the config: nothing discovered is written;
-//   - every write is recorded with what was sent, its answer and whether the
-//     previous value was put back, and the run reports that list verbatim.
+//   - every write is recorded with a redacted payload, its answer and whether
+//     the previous value was put back. Credentials never enter a report.
 
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
@@ -96,6 +96,15 @@ export interface WriteRecord {
 }
 
 export interface Answer { status: number; body: string; json: unknown }
+const SECRET_FIELD = /(password|passwd|pwd|secret|token|authorization|cookie|api[_-]?key|session)/i;
+
+/** Redact secrets by key before a write payload reaches receipts/evidence. */
+export function redactWriteBody(value: unknown, key = "", depth = 0): unknown {
+  if (SECRET_FIELD.test(key)) return "<redacted>";
+  if (depth > 8 || value == null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => redactWriteBody(v, "", depth + 1));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactWriteBody(v, k, depth + 1)]));
+}
 
 /**
  * The only way the active checks talk to the target: scoped client, budget,
@@ -126,7 +135,8 @@ export class ActiveClient {
     if (payload !== undefined) headers["content-type"] = "application/json";
     let rec: WriteRecord | undefined;
     if (WRITE_METHODS.has(m)) {
-      rec = { method: m, url, body: payload, actor: record?.actor ?? "?", purpose: record?.purpose ?? "", restore: record?.restore };
+      const safeBody = body === undefined ? undefined : JSON.stringify(redactWriteBody(body));
+      rec = { method: m, url, body: safeBody, actor: record?.actor ?? "?", purpose: record?.purpose ?? "", restore: record?.restore };
       this.writes.push(rec);
     }
     const res = await safeFetch(url, this.ctx.scope, { method: m, headers, body: payload, followRedirects: false });

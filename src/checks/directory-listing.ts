@@ -9,7 +9,7 @@
 // actually exposes. Read-only GETs on the declared base. Generic.
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
-import { safeFetch } from "../core/net.js";
+import { safeFetch, type SafeResponse } from "../core/net.js";
 import { lastMatch, tagsOf } from "../core/html.js";
 
 export const LISTING_PATHS = [
@@ -45,6 +45,20 @@ export function listedFiles(body: string): string[] {
   return names.slice(0, 40);
 }
 
+/** One anonymous directory-index read, shared by every check in the same run. */
+export function readDirectoryIndex(ctx: CheckContext, url: string): Promise<SafeResponse> {
+  const key = `directory-index:GET:${url}`;
+  const prior = ctx.recon?.get(key);
+  if (prior) return prior;
+  const pending = safeFetch(url, ctx.scope, { headers: { accept: "text/html" }, maxBytes: 256 * 1024 });
+  if (ctx.recon) {
+    ctx.recon.set(key, pending);
+    // A transient network failure must not poison a later check in this run.
+    void pending.catch(() => { if (ctx.recon?.get(key) === pending) ctx.recon.delete(key); });
+  }
+  return pending;
+}
+
 const SENSITIVE = /(confidential|secret|backup|\.bak\b|\.sql\b|\.env|password|private|acquisition|coupon|dump|\.key\b|\.pem\b)/i;
 
 export const directoryListing: Check = {
@@ -59,7 +73,7 @@ export const directoryListing: Check = {
     const findings: Finding[] = [];
     for (const path of opts.paths ?? LISTING_PATHS) {
       try {
-        const res = await safeFetch(base + path, ctx.scope, { headers: { accept: "text/html" }, maxBytes: 256 * 1024 });
+        const res = await readDirectoryIndex(ctx, base + path);
         if (res.status !== 200 || !isDirectoryListing(res.body)) continue;
         const files = listedFiles(res.body);
         // Only claim a file is "exposed" when it is actually served (fetched 200

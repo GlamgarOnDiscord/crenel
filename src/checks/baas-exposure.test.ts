@@ -172,7 +172,8 @@ test("Firebase: a listable Storage bucket and the default RTDB instance are prov
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
   try {
-    const scope = new Scope({ allowedHosts: ["firebasestorage.googleapis.com", "demo-app-default-rtdb.firebaseio.com"], allowPrivate: true, allowActiveTesting: true });
+    const scope = new Scope({ allowedHosts: ["firebasestorage.googleapis.com", "demo-app-default-rtdb.firebaseio.com"], allowPrivate: true, allowActiveTesting: true,
+      testTransport: { resolve: async () => [{ address: "127.0.0.1", family: 4 }], fetch: globalThis.fetch } });
     const found = await baasExposure.run(ctx(dir, scope));
     const ids = found.filter((f) => f.state === "proven").map((f) => f.id).sort();
     assert.deepEqual(ids, ["baas-exposure:firebase-rtdb:https://demo-app-default-rtdb.firebaseio.com", "baas-exposure:firebase-storage:demo-app.firebasestorage.app"]);

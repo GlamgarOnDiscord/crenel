@@ -49,6 +49,7 @@ export async function run(
     projectDir,
     stagingUrl: scope.stagingUrl,
     options: config.options,
+    recon: new Map(),
     log,
   };
 

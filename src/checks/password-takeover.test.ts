@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { passwordTakeover } from "./password-takeover.js";
+import { redactWriteBody } from "./active-common.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext, Finding } from "../core/types.js";
 
@@ -11,9 +12,15 @@ const opts = {
   "password-takeover": {
     enabled: true,
     accounts: { a: { token: "A" }, b: { token: "B" } },
-    targets: [{ name: "password", changePath: "/users/:id/password", victimId: "victim", body: '{"password":"{{PW}}"}', login: { path: "/login", userField: "user", victimUser: "victim" }, restorePassword: "orig" }],
+    targets: [{ name: "password", changePath: "/users/:id/password", victimId: "victim", body: '{"password":"{{PW}}"}', login: { path: "/login", userField: "user", victimUser: "victim" }, restorePasswordEnv: "CRENEL_TEST_RESTORE_PASSWORD" }],
   },
 };
+
+test("active receipts redact nested passwords, tokens, cookies and secrets", () => {
+  assert.deepEqual(redactWriteBody({ password: "p", nested: { apiKey: "k", cookie: "c", safe: "shown" }, token: "t" }), {
+    password: "<redacted>", nested: { apiKey: "<redacted>", cookie: "<redacted>", safe: "shown" }, token: "<redacted>",
+  });
+});
 
 function run(server: Server, options: Record<string, unknown>): Promise<Finding[]> {
   return new Promise((resolve, reject) => {
@@ -23,7 +30,8 @@ function run(server: Server, options: Record<string, unknown>): Promise<Finding[
         scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }),
         projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {},
       };
-      try { resolve(await passwordTakeover.run(ctx)); } catch (e) { reject(e); } finally { server.close(); }
+      process.env.CRENEL_TEST_RESTORE_PASSWORD = "orig";
+      try { resolve(await passwordTakeover.run(ctx)); } catch (e) { reject(e); } finally { delete process.env.CRENEL_TEST_RESTORE_PASSWORD; server.close(); }
     });
   });
 }
@@ -58,6 +66,7 @@ test("password-takeover: A changing B's password, confirmed by login as B, is pr
   assert.equal(proven.length, 1, "the account takeover is the one proof");
   assert.match(proven[0]!.title, /Account takeover/i);
   assert.equal(proven[0]!.severity, "critical");
+  assert.doesNotMatch(JSON.stringify(found), /"password":"(?:orig|Crenel-)/, "probe and restore passwords are redacted from the receipt");
 });
 
 test("password-takeover: a properly-gated endpoint (A gets 403 on B) proves nothing", async () => {
@@ -80,6 +89,30 @@ test("password-takeover: an accept-all endpoint (control for a non-existent vict
   });
   const found = await run(server, opts);
   assert.ok(!found.some((f) => f.state === "proven"), "accept-all is not a takeover proof");
+});
+
+test("password-takeover: restoration still runs when the confirmation login connection fails", async () => {
+  let loginCalls = 0, restored = false;
+  const server = createServer(async (req, res) => {
+    const m = /^\/users\/([^/]+)\/password$/.exec(req.url ?? "");
+    if (m && req.method === "PUT") {
+      if (m[1] !== "victim") { res.writeHead(404); return res.end(); }
+      const value = JSON.parse(await body(req)).password;
+      if (req.headers.authorization === "Bearer B" && value === "orig") restored = true;
+      res.writeHead(200); return res.end("{}");
+    }
+    if (req.url === "/login") {
+      loginCalls++;
+      await body(req);
+      if (loginCalls === 2) return req.socket.destroy();
+      res.writeHead(200); return res.end('{"status":"fail"}');
+    }
+    res.writeHead(404); res.end();
+  });
+  const found = await run(server, opts);
+  assert.equal(restored, true);
+  assert.ok(!found.some((f) => f.state === "proven"));
+  assert.ok(found.some((f) => f.id === "password-takeover:writes" && /every change restored/i.test(f.title)));
 });
 
 test("password-takeover: off unless active testing is enabled (scope gate holds)", async () => {

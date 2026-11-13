@@ -28,7 +28,7 @@ checks: []                    # empty = every read-only check
 options:
   authz-matrix:
     resources:
-      - { name: project, path: /api/projects/:id, methods: [GET] }
+      - { name: project, path: /api/projects/:id, methods: [GET], access: private }
     accounts:
       a: { token: "<staging token for account A>" }
       b: { owns: { project: ["<id owned by B>"] } }

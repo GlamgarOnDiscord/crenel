@@ -56,16 +56,57 @@ function serveAuth(authBody: string, anonStatus: number): Server {
 }
 const PII_OPTS = { options: { "data-exposure": { endpoints: ["/_debug"], pii: true, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
 
-test("data-exposure PII: >=2 other accounts' emails to an authed user while anon is refused is proven, emails redacted", async () => {
+test("data-exposure PII: several emails plus an anonymous denial is a lead without a privacy contract", async () => {
   const found = await run(serveAuth(JSON.stringify({ posts: [{ author: { email: "alice@corp.io" } }, { author: { email: "bob@corp.io" } }] }), 401), PII_OPTS);
-  const proven = found.filter((f) => f.state === "proven" && /excessive data exposure/i.test(f.title));
-  assert.equal(proven.length, 1, "a gated endpoint returning several accounts' emails is proven");
-  assert.doesNotMatch(JSON.stringify(proven[0]!), /alice@corp\.io|bob@corp\.io/, "the email addresses are never written into the finding");
+  const pii = found.filter((f) => /excessive data exposure/i.test(f.title));
+  assert.equal(pii.length, 1);
+  assert.equal(pii[0]!.state, "unproven", "a member directory can legitimately return several emails");
+  assert.doesNotMatch(JSON.stringify(pii[0]!), /alice@corp\.io|bob@corp\.io/, "the email addresses are never written into the finding");
+});
+
+test("data-exposure PII: an explicit owner-only contract proves a foreign-owner record", async () => {
+  process.env.CRENEL_TEST_OWNER = "user-a";
+  try {
+    const options = { options: { "data-exposure": { endpoints: ["/_debug"], pii: { policy: "owner-only", ownerField: "ownerId", ownerValueEnv: "CRENEL_TEST_OWNER" }, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
+    const payload = JSON.stringify({ records: [{ ownerId: "user-a", email: "me@corp.io" }, { ownerId: "user-b", email: "other@corp.io" }] });
+    const found = await run(serveAuth(payload, 401), options);
+    const proof = found.find((f) => f.state === "proven" && /owner-only/i.test(f.title));
+    assert.ok(proof);
+    assert.doesNotMatch(JSON.stringify(proof), /me@corp\.io|other@corp\.io|user-a|user-b/);
+  } finally { delete process.env.CRENEL_TEST_OWNER; }
 });
 
 test("data-exposure PII: a publicly readable endpoint (anonymous not refused) is not proven", async () => {
   const found = await run(serveAuth(JSON.stringify({ posts: [{ author: { email: "alice@corp.io" } }, { author: { email: "bob@corp.io" } }] }), 200), PII_OPTS);
   assert.equal(found.filter((f) => f.state === "proven" && /excessive data/i.test(f.title)).length, 0, "a public endpoint is a lead, not a proof");
+});
+
+test("data-exposure sends token and cookie together and replays both", async () => {
+  const server = createServer((req, res) => {
+    if (req.headers.authorization !== "Bearer tok-a" || req.headers.cookie !== "sid=a") { res.writeHead(401); return res.end("{}"); }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ users: [{ password: "pass-one" }, { password: "pass-two" }] }));
+  });
+  const found = await run(server, { options: { "data-exposure": { endpoints: ["/_debug"], as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a", cookie: "sid=a" } } } } });
+  const proof = found.find((f) => f.state === "proven");
+  assert.ok(proof);
+  assert.match(proof!.proof?.replay ?? "", /authorization: Bearer <SESSION_TOKEN>/);
+  assert.match(proof!.proof?.replay ?? "", /cookie: <SESSION_COOKIE>/);
+});
+
+test("data-exposure resolves only the selected account's login", async () => {
+  let unwantedLogins = 0;
+  const server = createServer((req, res) => {
+    if (req.url === "/login-b") { unwantedLogins++; res.writeHead(500); return res.end("{}"); }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ users: [{ password: "pass-one" }, { password: "pass-two" }] }));
+  });
+  const found = await run(server, { options: {
+    "data-exposure": { endpoints: ["/_debug"], as: "a" },
+    "authz-matrix": { accounts: { a: { token: "tok-a" }, b: { login: { url: "/login-b", username: "b", passwordEnv: "UNSET_B_PASSWORD" } } } },
+  } });
+  assert.ok(found.some((f) => f.state === "proven"));
+  assert.equal(unwantedLogins, 0);
 });
 
 test("data-exposure PII: a single email (the caller's own record) is not a finding", async () => {

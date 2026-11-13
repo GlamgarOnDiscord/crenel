@@ -21,16 +21,17 @@ options:
       - name: project
         path: /api/projects/:id
         methods: [GET]
+        access: private
       - name: render
         path: /api/renders/:id
         methods: [GET]
+        access: private
     accounts:
       a: { token: "demo-token-a" }                     # another tenant than B
       b:
         token: "demo-token-b"                           # owner baseline for the oracle
         marker: "acct_b_demo"                           # appears only in B's objects
         owns: { project: ["proj_b_1"], render: ["rnd_b_1"] }
-    publicByDesign: []                                  # routes public on purpose (trust boundary)
   # Optional Docker toolbox (crenel tools build, then crenel tools <name>).
   # Its only network exit is Crenel's scoped proxy. See docs/TOOLBOX.md.
   toolbox:

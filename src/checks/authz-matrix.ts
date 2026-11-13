@@ -27,7 +27,12 @@ interface ResourceSpec {
   path: string;
   /** HTTP methods to test for isolation. GET only by default (read-only). */
   methods?: string[];
-  /** Public by design (a trust boundary): never probed, never reported. */
+  /** Expected access contract. `private` requires authentication and ownership;
+   * `authenticated` requires a session but is shared across accounts; `public`
+   * is a decoy/trust boundary and is never reported. Unset keeps the legacy
+   * private matrix, but anonymous access remains a lead until declared. */
+  access?: "private" | "authenticated" | "public";
+  /** @deprecated Use `access: "public"`. */
   public?: boolean;
   /** Owner-id field in the object body (e.g. "UserId", "owner_id"). Enables the
    * owner-id differential: proves a cross-tenant read without B's token/marker. */
@@ -79,6 +84,8 @@ type Auth = { token?: string; cookie?: string; headers?: Record<string, string> 
 const authHeaders = (a?: Auth): Record<string, string> =>
   a ? { ...(a.token ? { authorization: `Bearer ${a.token}` } : {}), ...(a.cookie ? { cookie: a.cookie } : {}), ...(a.headers ?? {}) } : {};
 const hasAuth = (a?: Auth): boolean => !!(a && (a.token || a.cookie || (a.headers && Object.keys(a.headers).length > 0)));
+const accessOf = (r: ResourceSpec): "private" | "authenticated" | "public" => r.access ?? (r.public ? "public" : "private");
+const hasAccessContract = (r: ResourceSpec): boolean => r.access !== undefined || r.public === true;
 /** Two accounts carry the SAME custom auth headers (same non-empty key/value set):
  * then A and B are one identity, so a "cross-tenant" read is just B reading its own
  * object and proves nothing. Mirrors the token/cookie same-identity guard. */
@@ -88,8 +95,9 @@ const sameCustomHeaders = (a?: Record<string, string>, b?: Record<string, string
   return ak.length > 0 && ak.length === bk.length && ak.every((k) => a[k] === b[k]);
 };
 /** A redacted curl snippet for the replay hint, matching the auth shape used. */
-const replayAuth = (a: Auth | undefined, key: string): string =>
-  a?.token ? ` -H 'authorization: Bearer <${key.toUpperCase()}_TOKEN>'` : a?.cookie ? ` -H 'cookie: <${key.toUpperCase()}_SESSION>'` : hasAuth(a) ? ` -H '<${key.toUpperCase()}_AUTH>'` : "";
+const replayAuth = (a: Auth | undefined, key: string): string => a
+  ? `${a.token ? ` -H 'authorization: Bearer <${key.toUpperCase()}_TOKEN>'` : ""}${a.cookie ? ` -H 'cookie: <${key.toUpperCase()}_SESSION>'` : ""}${a.headers && Object.keys(a.headers).length ? ` -H '<${key.toUpperCase()}_AUTH>'` : ""}`
+  : "";
 
 
 export const authzMatrix: Check = {
@@ -98,12 +106,17 @@ export const authzMatrix: Check = {
   readOnly: true, // matrix generation is read-only; live probes are gated separately
   async run(ctx: CheckContext): Promise<Finding[]> {
     const cfg = { ...((ctx.options["authz-matrix"] ?? {}) as AuthzOptions) };
-    const resources = cfg.resources ?? [];
+    const declaredResources = cfg.resources ?? [];
+    const resources = declaredResources.filter((r) => accessOf(r) !== "public");
     const findings: Finding[] = [];
     const provenIds = new Set<string>();
 
-    if (resources.length === 0) {
+    if (declaredResources.length === 0) {
       ctx.log("authz-matrix: no resources declared, nothing to check");
+      return findings;
+    }
+    if (resources.length === 0) {
+      ctx.log("authz-matrix: every declared resource is public by contract, nothing to probe");
       return findings;
     }
     // Declared login flows: a fresh session per run (short-lived tokens, cookie sessions).
@@ -113,7 +126,7 @@ export const authzMatrix: Check = {
 
     // B's objects from a listing B reads with its session. Being listed proves nothing (a listing can
     // be global): an id is kept only when B reads the object and its body names B, and not A.
-    const listed = resources.filter((r) => !r.public && r.list);
+    const listed = resources.filter((r) => accessOf(r) !== "public" && r.list);
     const bAcc = cfg.accounts?.b, bWho = bAcc?.marker || jwtSub(bAcc?.token), aWho = cfg.accounts?.a?.marker || jwtSub(cfg.accounts?.a?.token);
     if (ctx.stagingUrl && listed.length && hasAuth(bAcc) && bWho && bWho.length >= 4) {
       ctx.scope.assertActiveAllowed("authz-matrix (live probe)");
@@ -139,7 +152,7 @@ export const authzMatrix: Check = {
     const b = cfg.accounts?.b;
     const cases: { resource: ResourceSpec; method: string; id: string }[] = [];
     for (const r of resources) {
-      if (r.public) continue;
+      if (accessOf(r) === "public") continue;
       const methods = r.methods ?? ["GET"];
       const ids = b?.owns?.[r.name] ?? [];
       for (const method of methods) {
@@ -152,9 +165,10 @@ export const authzMatrix: Check = {
     // Owner-id differential work is independent of b.owns cases: it needs only a
     // resource with ownerField + probeIds and A's own id of that resource.
     const ownerFieldResources = resources.filter(
-      (r) => !r.public && r.ownerField && (r.probeIds?.length ?? 0) > 0,
+      (r) => accessOf(r) === "private" && r.ownerField && (r.probeIds?.length ?? 0) > 0,
     );
-    const canProbe = !!ctx.stagingUrl && hasAuth(cfg.accounts?.a) && cases.length > 0;
+    const canAnonymous = cases.some((c) => hasAccessContract(c.resource)) && hasAuth(cfg.accounts?.b);
+    const canProbe = !!ctx.stagingUrl && cases.length > 0 && (hasAuth(cfg.accounts?.a) || canAnonymous);
     const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (hasAuth(cfg.accounts?.a) || ownerFieldResources.some((r) => r.gql));
 
     if (!canProbe && !canOwnerField) {
@@ -202,7 +216,9 @@ export const authzMatrix: Check = {
         description: `The tokens for A and B ${same}. Use two accounts of two different tenants.`,
         remediation: "Create a second test account in another organization and put its token under accounts.a.",
       });
-      return findings;
+      // An explicit anonymous-access contract is independent of A's identity:
+      // keep that probe, but never run a cross-tenant/owner-field probe as A.
+      if (!cases.some((c) => hasAccessContract(c.resource))) return findings;
     }
     const get = (url: string, auth?: Auth) =>
       safeFetch(url, ctx.scope, { method: "GET", headers: authHeaders(auth) })
@@ -215,7 +231,7 @@ export const authzMatrix: Check = {
     // handled separately (the public-route guard below): a cross-tenant break is
     // only meaningful on a route that actually refuses an anonymous caller, so a
     // route anyone can read is reported as a lead, never a "proven" BOLA.
-    const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = [
+    const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = same ? [] : [
       { key: "a", who: "account A's credentials", auth: accounts.a },
       ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c }] : []),
     ];
@@ -228,12 +244,10 @@ export const authzMatrix: Check = {
       try {
         const owner = hasAuth(accounts.b) ? await get(url, accounts.b) : undefined;
         if (owner && owner.status >= 200 && owner.status < 300) ownerBodies.push(owner.body);
-        // Public-route guard. Before claiming a cross-tenant break, check that the
-        // route refuses an anonymous caller. If an anonymous GET already returns
-        // B's object, the route is not access-controlled at all: another account
-        // reaching it is NOT broken object-level authorization (everyone can, by
-        // design or by a missing auth gate we cannot tell apart from here). Report
-        // one lead — never a "proven" BOLA an anonymous request would also satisfy.
+        // Anonymous access is judged against the resource's explicit contract.
+        // Without one, an anonymous object read remains a lead: the route may be
+        // deliberately public. With `private` or `authenticated`, the same stable
+        // owner/control differential proves a missing authentication boundary.
         // The anonymous probe never follows redirects: a 302 to /login is a
         // denial, not a leak, and following it can loop. A failure here only skips
         // the guard (treated as "not public"), never the cross-tenant checks below.
@@ -246,15 +260,21 @@ export const authzMatrix: Check = {
         // route counts as public only when a second anonymous read leaks again.
         const anonAgain = anonLeak.verdict === "leak" ? authzOracle({ attacker: await anonGet(url), owner, control: anonCtl, ownerMarkers: markers }) : anonLeak;
         if (anonLeak.verdict === "leak" && anonAgain.verdict === "leak") {
+          const contract = accessOf(c.resource);
+          const provenAnonymous = hasAccessContract(c.resource) && contract !== "public";
           findings.push({
-            id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}:public`,
+            id: `authz-matrix:${c.resource.name}:${c.method}:${c.id}:${provenAnonymous ? "anonymous" : "public"}`,
             check: "authz-matrix",
-            title: `${c.resource.name} is readable without authentication (${c.method} ${anon.status})`,
-            severity: "medium", state: "unproven", location: url,
-            description: `An anonymous ${c.method} on this ${c.resource.name} returns the object (${anonLeak.reason}). The route is not access-controlled, so another account reaching it is not a broken-authorization proof — anyone can read it. Confirm whether this object is meant to be public; if not, require authentication, then enforce the per-object ownership check.`,
+            title: provenAnonymous
+              ? `Anonymous caller reached ${c.resource.name} ${c.id}, declared ${contract} (${c.method} ${anon.status})`
+              : `${c.resource.name} is readable without authentication (${c.method} ${anon.status})`,
+            severity: provenAnonymous ? "high" : "medium", state: provenAnonymous ? "proven" : "unproven", location: url,
+            description: provenAnonymous
+              ? `The resource contract declares this ${c.resource.name} ${contract}, but a stable anonymous ${c.method} returned account B's object while the non-existent-id control did not (${anonLeak.reason}). This is a missing authentication/authorization boundary.`
+              : `An anonymous ${c.method} on this ${c.resource.name} returns the object (${anonLeak.reason}). No access contract declares it private, so this is a review lead rather than a vulnerability proof. Declare access as private, authenticated or public.`,
             remediation: `Require authentication on ${c.resource.name}, then enforce the per-object ownership check for every authenticated caller.`,
             proof: {
-              method: "live anonymous read on staging: owner baseline, anonymous caller, negative control",
+              method: `live anonymous read against the declared ${contract} contract: owner baseline, anonymous caller, negative control, stable replay`,
               replay: `curl -i -X ${c.method} '${url}'`,
               evidence: `anonymous HTTP ${anon.status}; control ${anonCtl.status}${owner ? `; owner ${owner.status}` : ""}. ${anonLeak.reason}`,
             },
@@ -262,6 +282,9 @@ export const authzMatrix: Check = {
           });
           continue; // public route: do not assert a cross-tenant authorization break on it
         }
+        // An authenticated-shared resource has no cross-tenant boundary by
+        // design. Once anonymous access is checked, another account is a decoy.
+        if (accessOf(c.resource) === "authenticated") continue;
         for (const actor of actors) {
           const attacker = await get(url, actor.auth);
           const control = await get(controlUrl, actor.auth);
@@ -319,7 +342,7 @@ export const authzMatrix: Check = {
       }
       return get(base + r.path.replace(":id", raw ? idOrRaw : encodeURIComponent(idOrRaw)), aAuth);
     };
-    for (const r of ownerFieldResources) {
+    for (const r of same ? [] : ownerFieldResources) {
       const targetIds = (r.probeIds ?? []).filter((id) => !provenIds.has(`${r.name}:${id}`));
       if (!targetIds.length) continue;
       try {
@@ -381,7 +404,7 @@ export const authzMatrix: Check = {
     // response.
     if (accounts.b?.token && ownerBodies.length) {
       const declared = new Set(cases.map((c) => `${c.resource.name}:${c.id}`));
-      const found = discoverIds(ownerBodies.join("\n"), resources.filter((r) => !r.public), b?.owns ?? {})
+      const found = discoverIds(ownerBodies.join("\n"), resources.filter((r) => accessOf(r) === "private"), b?.owns ?? {})
         .filter((d) => !declared.has(`${d.resource.name}:${d.id}`))
         .slice(0, MAX_DISCOVERED);
       if (found.length) ctx.log(`authz-matrix: ${found.length} id(s) of B discovered in B's responses, replayed`);
@@ -492,18 +515,27 @@ function renderTestFile(resources: ResourceSpec[]): string {
   for (const r of resources) {
     const methods = r.methods ?? ["GET"];
     for (const method of methods) {
-      lines.push(
-        `test('A cannot ${method} another account\\'s ${r.name}', async () => {`,
+      if (hasAccessContract(r) && accessOf(r) !== "public") lines.push(
+        `test('anonymous cannot ${method} ${r.name}', async () => {`,
         `  for (const id of B_OWNS[${JSON.stringify(r.name)}] ?? []) {`,
-        `    const res = await fetch(BASE_URL + ${JSON.stringify(r.path)}.replace(':id', id), {`,
-        `      method: ${JSON.stringify(method)},`,
-        "      headers: { authorization: `Bearer ${A}` },",
-        "    });",
+        `    const res = await fetch(BASE_URL + ${JSON.stringify(r.path)}.replace(':id', id), { method: ${JSON.stringify(method)} });`,
         "    expect([401, 403, 404]).toContain(res.status);",
         "  }",
         "});",
         "",
       );
+      if (accessOf(r) === "private") lines.push(
+          `test('A cannot ${method} another account\\'s ${r.name}', async () => {`,
+          `  for (const id of B_OWNS[${JSON.stringify(r.name)}] ?? []) {`,
+          `    const res = await fetch(BASE_URL + ${JSON.stringify(r.path)}.replace(':id', id), {`,
+          `      method: ${JSON.stringify(method)},`,
+          "      headers: { authorization: `Bearer ${A}` },",
+          "    });",
+          "    expect([401, 403, 404]).toContain(res.status);",
+          "  }",
+          "});",
+          "",
+        );
     }
   }
   return lines.join("\n");
