@@ -88,6 +88,7 @@ export const dataExposure: Check = {
     const selected = o.as && rawAccounts[o.as] ? await resolveAccounts(ctx, { [o.as]: rawAccounts[o.as] }, "data-exposure") : {};
     const sess = o.as ? selected[o.as] : undefined;
     const headers = sessionHeaders(sess);
+    const authenticated = Object.keys(headers).length > 0;
     const findings: Finding[] = [];
     for (const ep of endpoints.slice(0, 40)) {
       const url = ep.startsWith("http") ? ep : base + (ep.startsWith("/") ? ep : "/" + ep);
@@ -124,7 +125,7 @@ export const dataExposure: Check = {
           const contract = typeof o.pii === "object" ? o.pii : undefined;
           const canary = contract?.policy === "canary" && ENV_NAME.test(contract.canaryEnv) ? process.env[contract.canaryEnv] : undefined;
           const owner = contract?.policy === "owner-only" && ENV_NAME.test(contract.ownerValueEnv) ? process.env[contract.ownerValueEnv] : undefined;
-          const foreign = contract?.policy === "owner-only" && owner ? foreignPiiRecords(json, contract.ownerField, owner) : 0;
+          const foreign = contract?.policy === "owner-only" && owner && authenticated ? foreignPiiRecords(json, contract.ownerField, owner) : 0;
           const canarySeen = !!(canary && containsScalar(json, canary));
           // Several emails are only a signal: a gated member directory may be
           // intentional. Proof needs an explicit owner-only policy plus a foreign
@@ -132,6 +133,7 @@ export const dataExposure: Check = {
           if (emails.size >= 2 || foreign > 0 || canarySeen) {
             const anon = await safeFetch(url, ctx.scope, { method: "GET", maxBytes: 4096 }).catch(() => null);
             const contractProof = foreign > 0 || canarySeen;
+            const requestActor = authenticated ? "the selected ordinary account" : "an anonymous caller";
             const replayBase = `curl -sS ${shellQuote(url)}${sessionReplayHeaders(sess, "A")}`;
             const piiReplay = contractProof && contract?.policy === "canary"
               ? `${replayBase} | jq --arg canary "$${contract.canaryEnv}" '.. | scalars | select(tostring == $canary)'`
@@ -148,11 +150,11 @@ export const dataExposure: Check = {
                 state: contractProof ? "proven" : "unproven",
                 location: url,
                 description: contractProof
-                  ? `GET ${ep} with the selected ordinary account returned ${canarySeen ? "the declared privacy canary" : `${foreign} record(s) carrying personal email data whose ${contract!.policy === "owner-only" ? contract!.ownerField : "owner"} does not match the caller`}. This violates the operator-declared ${contract!.policy} contract.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`
-                  : `GET ${ep} returned ${emails.size} distinct personal emails. That may be an intentional member directory; authentication status alone does not prove the records are unauthorized, so this remains a review lead.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`,
+                  ? `GET ${ep} as ${requestActor} returned ${canarySeen ? "the declared privacy canary" : `${foreign} record(s) carrying personal email data whose ${contract!.policy === "owner-only" ? contract!.ownerField : "owner"} does not match the caller`}. This violates the operator-declared ${contract!.policy} contract.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`
+                  : `GET ${ep}${authenticated ? " with the selected account" : " anonymously"} returned ${emails.size} distinct personal emails. That may be an intentional member directory; authentication status alone does not prove the records are unauthorized, so this remains a review lead.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`,
                 remediation: `Return only the caller's own data, or scope the response to resources they own; never include other accounts' email, phone or vehicle in a list a normal user can read. Filter at the data layer, not the client.`,
                 proof: {
-                  method: contractProof ? `live authenticated GET checked against the declared ${contract!.policy} privacy contract` : "live authenticated GET; multiple PII values observed, authorization not established",
+                  method: contractProof ? `live ${authenticated ? "authenticated" : "anonymous"} GET checked against the declared ${contract!.policy} privacy contract` : `live ${authenticated ? "authenticated" : "anonymous"} GET; multiple PII values observed, authorization not established`,
                   replay: piiReplay,
                   evidence: contractProof ? `${canarySeen ? "declared canary present" : `${foreign} foreign-owner PII record(s)`}; values redacted` : `${emails.size} distinct personal emails; values redacted; no owner/canary proof`,
                 },

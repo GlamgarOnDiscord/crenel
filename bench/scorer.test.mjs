@@ -2,18 +2,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { score, seededOrder, summarize } from "./scorer.mjs";
 
-const finding = (over = {}) => ({ id: "broad", check: "authz", title: "two flaws", location: "/a/b", state: "proven", severity: "critical", ...over });
+const finding = (over = {}) => ({ id: "broad", check: "authz", title: "two flaws", location: "/a/b", state: "proven", severity: "critical", proof: { evidence: "replayed response" }, ...over });
 
 test("one finding cannot satisfy two ground-truth flaws", () => {
   const c = { mustFind: [{ id: "a", check: "authz", state: "proven" }, { id: "b", check: "authz", state: "proven" }] };
   const rows = score([finding()], c).rows;
   assert.equal(rows.filter((r) => r.ok).length, 1);
   assert.equal(score([finding({ id: "a" }), finding({ id: "b" })], c).rows.filter((r) => r.ok).length, 2);
+  assert.equal(score([finding({ proof: undefined })], { mustFind: [{ id: "a", check: "authz", state: "proven" }] }).rows[0].ok, false);
 });
 
 test("closed-world cases penalize unknown proven high findings, not review leads", () => {
   const c = { mustFind: [], mustNotFlag: [], maxUnknownHigh: 0 };
   assert.equal(score([finding()], c).rows[0].ok, false);
+  assert.equal(score([finding({ proof: undefined })], c).rows[0].ok, true, "a state-only proof claim is not a proven spam finding");
   assert.equal(score([finding({ state: "unproven", severity: "medium" })], c).rows[0].ok, true);
   assert.equal(score([finding({ state: "lead", severity: "high" })], c).rows[0].ok, true, "LLM adapters use the external lead state");
 });

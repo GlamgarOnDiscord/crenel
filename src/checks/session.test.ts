@@ -38,11 +38,12 @@ test("extractSession: a failed login, or an answer with no token and no cookie, 
 });
 
 test("session auth sends and replays bearer plus cookie together", () => {
-  assert.deepEqual(sessionHeaders({ token: "tok", cookie: "sid=x" }), { authorization: "Bearer tok", cookie: "sid=x" });
-  const replay = sessionReplayHeaders({ token: "tok", cookie: "sid=x" }, "A");
+  assert.deepEqual(sessionHeaders({ token: "tok", cookie: "sid=x", headers: { "x-auth": "custom" } }), { authorization: "Bearer tok", cookie: "sid=x", "x-auth": "custom" });
+  const replay = sessionReplayHeaders({ token: "tok", cookie: "sid=x", headers: { "x-auth": "custom" } }, "A");
   assert.match(replay, /<A_TOKEN>/);
   assert.match(replay, /<A_COOKIE>/);
-  assert.doesNotMatch(replay, /Bearer tok|sid=x/);
+  assert.match(replay, /<A_AUTH>/);
+  assert.doesNotMatch(replay, /Bearer tok|sid=x|custom/);
 });
 
 // A login-gated API: JWTs from POST /login (or a cookie session from /login-form), notes owned per user.

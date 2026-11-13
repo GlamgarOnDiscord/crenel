@@ -65,6 +65,7 @@ test("data-exposure PII: several emails plus an anonymous denial is a lead witho
 });
 
 test("data-exposure PII: an explicit owner-only contract proves a foreign-owner record", async () => {
+  const previous = process.env.CRENEL_TEST_OWNER;
   process.env.CRENEL_TEST_OWNER = "user-a";
   try {
     const options = { options: { "data-exposure": { endpoints: ["/_debug"], pii: { policy: "owner-only", ownerField: "ownerId", ownerValueEnv: "CRENEL_TEST_OWNER" }, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
@@ -75,10 +76,23 @@ test("data-exposure PII: an explicit owner-only contract proves a foreign-owner 
     assert.doesNotMatch(JSON.stringify(proof), /me@corp\.io|other@corp\.io|user-a|user-b/);
     assert.match(proof!.proof?.replay ?? "", /jq --arg owner "\$CRENEL_TEST_OWNER"/);
     assert.match(proof!.proof?.replay ?? "", /--arg field 'ownerId'/);
-  } finally { delete process.env.CRENEL_TEST_OWNER; }
+  } finally { if (previous === undefined) delete process.env.CRENEL_TEST_OWNER; else process.env.CRENEL_TEST_OWNER = previous; }
+});
+
+test("data-exposure PII: owner-only proof requires credentials for the declared owner", async () => {
+  const previous = process.env.CRENEL_TEST_OWNER;
+  process.env.CRENEL_TEST_OWNER = "user-a";
+  try {
+    const options = { options: { "data-exposure": { endpoints: ["/_debug"], pii: { policy: "owner-only", ownerField: "ownerId", ownerValueEnv: "CRENEL_TEST_OWNER" } } } };
+    const payload = JSON.stringify({ records: [{ ownerId: "user-a", email: "me@corp.io" }, { ownerId: "user-b", email: "other@corp.io" }] });
+    const found = await run(serve(payload), options);
+    assert.ok(!found.some((f) => f.state === "proven" && /owner-only/i.test(f.title)));
+    assert.ok(found.some((f) => f.state === "unproven" && /personal emails/i.test(f.title)));
+  } finally { if (previous === undefined) delete process.env.CRENEL_TEST_OWNER; else process.env.CRENEL_TEST_OWNER = previous; }
 });
 
 test("data-exposure PII: a declared canary has a contract-specific replay", async () => {
+  const previous = process.env.CRENEL_TEST_PII_CANARY;
   process.env.CRENEL_TEST_PII_CANARY = "private-canary-value";
   try {
     const options = { options: { "data-exposure": { endpoints: ["/_debug"], pii: { policy: "canary", canaryEnv: "CRENEL_TEST_PII_CANARY" }, as: "a" }, "authz-matrix": { accounts: { a: { token: "tok-a" } } } } };
@@ -87,7 +101,7 @@ test("data-exposure PII: a declared canary has a contract-specific replay", asyn
     assert.ok(proof);
     assert.match(proof!.proof?.replay ?? "", /jq --arg canary "\$CRENEL_TEST_PII_CANARY"/);
     assert.doesNotMatch(JSON.stringify(proof), /private-canary-value/);
-  } finally { delete process.env.CRENEL_TEST_PII_CANARY; }
+  } finally { if (previous === undefined) delete process.env.CRENEL_TEST_PII_CANARY; else process.env.CRENEL_TEST_PII_CANARY = previous; }
 });
 
 test("data-exposure PII: a publicly readable endpoint (anonymous not refused) is not proven", async () => {
@@ -115,6 +129,7 @@ test("data-exposure resolves only the selected account's login", async () => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ users: [{ password: "pass-one" }, { password: "pass-two" }] }));
   });
+  const previous = process.env.CRENEL_TEST_B_PASSWORD;
   process.env.CRENEL_TEST_B_PASSWORD = "b-password";
   try {
     const found = await run(server, { options: {
@@ -123,7 +138,7 @@ test("data-exposure resolves only the selected account's login", async () => {
     } });
     assert.ok(found.some((f) => f.state === "proven"));
     assert.equal(unwantedLogins, 0);
-  } finally { delete process.env.CRENEL_TEST_B_PASSWORD; }
+  } finally { if (previous === undefined) delete process.env.CRENEL_TEST_B_PASSWORD; else process.env.CRENEL_TEST_B_PASSWORD = previous; }
 });
 
 test("data-exposure PII: a single email (the caller's own record) is not a finding", async () => {

@@ -72,18 +72,18 @@ for (const name of cases) {
       await Promise.race([operation.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 1_500))]);
       throw err;
     }
-    const { findings, errors, metadata } = result;
+    const { findings, errors, metadata, replayed = false } = result;
     // A recorded exploration replays an answer the case's author wrote: it checks
     // that the harness turns those moves into a proof, not that anything was
     // discovered. Kept in the score, and named in the summary.
     const scored = score(findings, c);
-    report.cases.push({ name, title: c.title, rows: scored.rows, errors, findings: findings.length, unknown: scored.unknown, unknownHigh: scored.unknownHigh, replayed: !!c.config?.explore?.script, durationMs: Date.now() - caseStarted, metadata });
+    report.cases.push({ name, title: c.title, rows: scored.rows, errors, findings: findings.length, unknown: scored.unknown, unknownHigh: scored.unknownHigh, replayed, durationMs: Date.now() - caseStarted, metadata });
   } catch (err) {
     // A case that crashes still counts: every flaw it holds is a miss. Dropping
     // its rows would shrink the denominator and raise the recall. Its decoys
     // are left out (nothing ran, so nothing was flagged or cleared).
     const rows = (c.mustFind ?? []).map((r) => ({ kind: "find", id: r.id, ok: false, got: "erreur", why: r.why }));
-    report.cases.push({ name, title: c.title, rows, errors: [{ check: "bench", message: err.message }], replayed: !!c.config?.explore?.script, durationMs: Date.now() - caseStarted });
+    report.cases.push({ name, title: c.title, rows, errors: [{ check: "bench", message: err.message }], replayed: false, durationMs: Date.now() - caseStarted });
   } finally {
     clearTimeout(timeout);
     controller.abort();

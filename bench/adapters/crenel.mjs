@@ -36,9 +36,11 @@ export async function run({ projectDir, baseUrl, caseConfig, tmp, signal }) {
   const findings = result.findings ?? [];
   const errors = result.errors ?? [];
   let explorationRequests = 0;
+  let replayed = false;
   // A case with a recorded exploration (explore.script) also runs `crenel explore`
   // on it, replaying the model's moves: the validators decide, as with a live model.
   if (caseConfig.explore?.script) {
+    replayed = true;
     const script = join(tmp, "explore.script.json");
     writeFileSync(script, JSON.stringify(caseConfig.explore.script));
     const ex = await exec(process.execPath, ["--import", "tsx", join(REPO, "src/cli.ts"), "explore", "--config", cfgPath, "--json", "--llm-script", script, "--state", join(tmp, "state")], REPO, env, signal);
@@ -51,14 +53,19 @@ export async function run({ projectDir, baseUrl, caseConfig, tmp, signal }) {
     }
   }
   const scanRequests = result.requests ?? 0;
-  return { findings, errors, metadata: { durationMs: Date.now() - started, scanDurationMs: result.durationMs, requests: scanRequests + explorationRequests, scanRequests, explorationRequests, checksRun: result.checksRun?.length } };
+  return { findings, errors, replayed, metadata: { durationMs: Date.now() - started, scanDurationMs: result.durationMs, requests: scanRequests + explorationRequests, scanRequests, explorationRequests, checksRun: result.checksRun?.length } };
 }
 
 function exec(cmd, args, cwd, env = {}, signal) {
   return new Promise((resolve) => {
-    const p = spawn(cmd, args, { cwd, env: { ...process.env, ...env, NO_COLOR: "1" } });
+    const p = spawn(cmd, args, { cwd, env: { ...process.env, ...env, NO_COLOR: "1" }, detached: process.platform !== "win32" });
     let stdout = "", stderr = "";
-    const abort = () => { p.kill("SIGTERM"); setTimeout(() => { if (p.exitCode === null) p.kill("SIGKILL"); }, 1_000).unref(); };
+    const killTree = (kind) => {
+      if (!p.pid) return;
+      if (process.platform === "win32") spawn("taskkill", ["/pid", String(p.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true }).unref();
+      else { try { process.kill(-p.pid, kind); } catch { p.kill(kind); } }
+    };
+    const abort = () => { killTree("SIGTERM"); setTimeout(() => { if (p.exitCode === null) killTree("SIGKILL"); }, 1_000).unref(); };
     if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
     p.stdout.on("data", (d) => (stdout += d));
     p.stderr.on("data", (d) => (stderr += d));

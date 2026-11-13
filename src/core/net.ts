@@ -84,6 +84,14 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 type Resolver = (host: string, options: { all: true }) => Promise<LookupAddress[]>;
+interface TestTransport { resolver?: Resolver; fetch?: (url: string, init: RequestInit) => Promise<Response> }
+const TEST_TRANSPORTS = new WeakMap<Scope, TestTransport>();
+
+/** @internal Test-only transport installation. This module is not a package
+ * export; production Scope construction has no transport override capability. */
+export function installSafeFetchTestTransport(scope: Scope, transport: TestTransport): void {
+  TEST_TRANSPORTS.set(scope, transport);
+}
 
 /** Resolve once, reject the whole answer set if any address crosses the private
  * boundary, then return only the validated addresses the socket may use. */
@@ -244,6 +252,7 @@ export async function safeFetch(
   }
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     let targets: LookupAddress[];
+    const testTransport = TEST_TRANSPORTS.get(scope);
     try {
       scope.signal?.throwIfAborted();
       scope.assertUrlAllowed(current);
@@ -253,7 +262,7 @@ export async function safeFetch(
       // leaves the rest of the host reachable.
       const known = scope.accessGates.get(new URL(current).hostname.toLowerCase());
       if (known && new URL(known.url).pathname === "/") throw new AccessGateError(known);
-      targets = await resolveTarget(new URL(current).hostname, scope.allowPrivate, scope.testResolver ?? scope.testTransport?.resolve ?? lookup);
+      targets = await resolveTarget(new URL(current).hostname, scope.allowPrivate, testTransport?.resolver ?? lookup);
       await scope.pace();
     } catch (err) {
       // Not a refusal of the scope: the host is known to be gated and nothing was sent.
@@ -271,8 +280,8 @@ export async function safeFetch(
     const headers = tokenSent ? { ...carried, ...access } : carried;
     try {
       // A body only goes out when it passed readOnlyPost above, or under allowActiveTesting.
-      res = scope.testTransport
-        ? await scope.testTransport.fetch(current, { method, headers, body: init.body, redirect: "manual", signal })
+      res = testTransport?.fetch
+        ? await testTransport.fetch(current, { method, headers, body: init.body, redirect: "manual", signal })
         : await fetchPinned(current, targets, { method, headers, body: init.body, signal });
     } catch (err) {
       scope.onRequest?.({ method, url: current, error: (err as Error).message });

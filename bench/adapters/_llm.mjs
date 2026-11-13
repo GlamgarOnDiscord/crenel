@@ -66,14 +66,19 @@ export function permissionArgs(env = process.env) {
 // spawn would leave the model's curl probes without an answer.
 function spawnAsync(cmd, args, { cwd, timeout, env, maxBuffer, signal }) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     let stdout = "", stderr = "", timedOut = false, size = 0;
     const take = (which) => (d) => { size += d.length; if (size > maxBuffer) { child.kill("SIGKILL"); return; } if (which === "out") stdout += d; else stderr += d; };
     child.stdout.on("data", take("out"));
     child.stderr.on("data", take("err"));
-    const abort = () => { child.kill("SIGTERM"); setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 1_000).unref(); };
+    const killTree = (kind) => {
+      if (!child.pid) return;
+      if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true }).unref();
+      else { try { process.kill(-child.pid, kind); } catch { child.kill(kind); } }
+    };
+    const abort = () => { killTree("SIGTERM"); setTimeout(() => { if (child.exitCode === null) killTree("SIGKILL"); }, 1_000).unref(); };
     if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
-    const t = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeout);
+    const t = setTimeout(() => { timedOut = true; killTree("SIGKILL"); }, timeout);
     child.on("error", (e) => { clearTimeout(t); signal?.removeEventListener("abort", abort); resolve({ stdout, stderr: stderr + String(e.message), status: null, timedOut }); });
     child.on("close", (status) => { clearTimeout(t); signal?.removeEventListener("abort", abort); resolve({ stdout, stderr, status, timedOut }); });
   });

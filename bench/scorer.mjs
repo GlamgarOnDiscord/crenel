@@ -11,7 +11,8 @@ export function matches(f, rule) {
   return true;
 }
 
-const qualifies = (f, rule) => (rule.state !== "proven" || f.state === "proven")
+const isProven = (f) => f.state === "proven" && String(f.proof?.evidence ?? "").trim().length > 0;
+const qualifies = (f, rule) => (rule.state !== "proven" || isProven(f))
   && (SEV[f.severity] ?? 0) >= (SEV[rule.minSeverity ?? "info"] ?? 0);
 
 /** Maximum one-to-one assignment between mustFind rules and qualifying findings. */
@@ -43,12 +44,12 @@ export function score(findings, c) {
     rows.push({ kind: "find", id: r.id, ok: used.has(i), got: hits.map((f) => `${f.state}/${f.severity}`).join(", ") || "rien", why: r.why });
   }
   for (const r of c.mustNotFlag ?? []) {
-    const bad = findings.filter((f) => matches(f, r) && (r.forbid === "any" || (r.forbid === "proven" && f.state === "proven") || (r.forbid === "high" && (SEV[f.severity] ?? 0) >= SEV.high)));
+    const bad = findings.filter((f) => matches(f, r) && (r.forbid === "any" || (r.forbid === "proven" && isProven(f)) || (r.forbid === "high" && (SEV[f.severity] ?? 0) >= SEV.high)));
     rows.push({ kind: "decoy", id: r.id, ok: bad.length === 0, got: bad.map((f) => `${f.state}/${f.severity}`).join(", ") || "rien", why: r.why });
   }
   const known = (f) => mustFind.some((r) => matches(f, r)) || (c.mustNotFlag ?? []).some((r) => matches(f, r));
   const unknown = findings.filter((f) => !known(f));
-  const unknownHigh = unknown.filter((f) => f.state === "proven" && (SEV[f.severity] ?? 0) >= SEV.high);
+  const unknownHigh = unknown.filter((f) => isProven(f) && (SEV[f.severity] ?? 0) >= SEV.high);
   if (Number.isInteger(c.maxUnknownHigh)) rows.push({
     kind: "spam", id: "unknown-high-findings", ok: unknownHigh.length <= c.maxUnknownHigh,
     got: `${unknownHigh.length}/${c.maxUnknownHigh}`, why: "High/critical proven findings outside this case's closed ground truth are penalized.",

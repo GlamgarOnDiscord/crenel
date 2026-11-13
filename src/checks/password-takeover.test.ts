@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { passwordBody, passwordTakeover, plannedTakeover } from "./password-takeover.js";
-import { redactWriteBody } from "./active-common.js";
+import { ActiveClient, redactWriteBody } from "./active-common.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext, Finding } from "../core/types.js";
 
@@ -30,6 +30,19 @@ test("password templates preserve JSON-special and replacement-token characters"
   assert.equal(plannedTakeover(opts, "https://staging.example").length, 5);
 });
 
+test("active receipts suppress scalar and array payloads", async () => {
+  const server = createServer((_req, res) => { res.writeHead(200); res.end("{}"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const context: CheckContext = { scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, allowActiveTesting: true }), projectDir: "/tmp", options: {}, log: () => {} };
+  const client = new ActiveClient(context, "test");
+  try {
+    await client.send("POST", `http://127.0.0.1:${port}/`, undefined, "secret scalar");
+    await client.send("POST", `http://127.0.0.1:${port}/`, undefined, ["secret array"]);
+    assert.deepEqual(client.writes.map((w) => w.body), ["<redacted non-object payload>", "<redacted non-object payload>"]);
+  } finally { server.close(); }
+});
+
 function run(server: Server, options: Record<string, unknown>): Promise<Finding[]> {
   return new Promise((resolve, reject) => {
     server.listen(0, "127.0.0.1", async () => {
@@ -38,8 +51,12 @@ function run(server: Server, options: Record<string, unknown>): Promise<Finding[
         scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }),
         projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, options, log: () => {},
       };
+      const previous = process.env.CRENEL_TEST_RESTORE_PASSWORD;
       process.env.CRENEL_TEST_RESTORE_PASSWORD = "orig";
-      try { resolve(await passwordTakeover.run(ctx)); } catch (e) { reject(e); } finally { delete process.env.CRENEL_TEST_RESTORE_PASSWORD; server.close(); }
+      try { resolve(await passwordTakeover.run(ctx)); } catch (e) { reject(e); } finally {
+        if (previous === undefined) delete process.env.CRENEL_TEST_RESTORE_PASSWORD; else process.env.CRENEL_TEST_RESTORE_PASSWORD = previous;
+        server.close();
+      }
     });
   });
 }

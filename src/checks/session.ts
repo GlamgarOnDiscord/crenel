@@ -27,7 +27,7 @@ export interface LoginSpec {
   /** Dotted path of the token in the JSON answer, when it is not found by shape. */
   tokenPath?: string;
 }
-export interface Session { token?: string; cookie?: string }
+export interface Session { token?: string; cookie?: string; headers?: Record<string, string> }
 type Answer = { status: number; headers: Headers; body: string };
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
@@ -37,12 +37,12 @@ const TOKEN_KEYS = ["access_token", "accessToken", "auth_token", "authToken", "t
 /** Every credential returned by a login belongs to the same session. Send both:
  * some stacks require a bearer for the API and a CSRF/session cookie together. */
 export function sessionHeaders(session?: Session): Record<string, string> {
-  return session ? { ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}) } : {};
+  return session ? { ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}), ...(session.headers ?? {}) } : {};
 }
 
 /** Redacted curl flags matching the credentials that were actually sent. */
 export function sessionReplayHeaders(session?: Session, label = "SESSION"): string {
-  return session ? `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}` : "";
+  return session ? `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}${session.headers && Object.keys(session.headers).length ? ` -H '<${label}_AUTH>'` : ""}` : "";
 }
 
 /** True for a string that is a JWT: three base64url parts whose header decodes to JSON with `alg`. */

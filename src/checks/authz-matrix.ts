@@ -14,7 +14,7 @@
 //     testing is enabled for an owned host, replay each cross-tenant request and
 //     report any that did not return 401/403/404 as PROVEN broken authorization.
 
-import { jwtSub, listedIds, mentions, resolveAccounts, type LoginSpec } from "./session.js";
+import { jwtSub, listedIds, mentions, resolveAccounts, sessionHeaders, sessionReplayHeaders, type LoginSpec } from "./session.js";
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
@@ -84,8 +84,7 @@ interface AuthzOptions {
  * generic auth shapes (bearer token, session cookie, custom headers). Empty for
  * an anonymous caller. No target specifics: the values are operator config. */
 type Auth = { token?: string; cookie?: string; headers?: Record<string, string> };
-const authHeaders = (a?: Auth): Record<string, string> =>
-  a ? { ...(a.token ? { authorization: `Bearer ${a.token}` } : {}), ...(a.cookie ? { cookie: a.cookie } : {}), ...(a.headers ?? {}) } : {};
+const authHeaders = (a?: Auth): Record<string, string> => sessionHeaders(a);
 const hasAuth = (a?: Auth): boolean => !!(a && (a.token || a.cookie || (a.headers && Object.keys(a.headers).length > 0)));
 const accessOf = (r: ResourceSpec): "private" | "authenticated" | "public" => r.access ?? (r.public ? "public" : "private");
 const hasAccessContract = (r: ResourceSpec): boolean => r.access !== undefined || r.public === true || r.authentication === "required";
@@ -99,9 +98,7 @@ const sameCustomHeaders = (a?: Record<string, string>, b?: Record<string, string
   return ak.length > 0 && ak.length === bk.length && ak.every((k) => a[k] === b[k]);
 };
 /** A redacted curl snippet for the replay hint, matching the auth shape used. */
-const replayAuth = (a: Auth | undefined, key: string): string => a
-  ? `${a.token ? ` -H 'authorization: Bearer <${key.toUpperCase()}_TOKEN>'` : ""}${a.cookie ? ` -H 'cookie: <${key.toUpperCase()}_SESSION>'` : ""}${a.headers && Object.keys(a.headers).length ? ` -H '<${key.toUpperCase()}_AUTH>'` : ""}`
-  : "";
+const replayAuth = (a: Auth | undefined, key: string): string => sessionReplayHeaders(a, key.toUpperCase());
 
 
 export const authzMatrix: Check = {
@@ -172,7 +169,8 @@ export const authzMatrix: Check = {
       (r) => accessOf(r) === "private" && r.ownerField && (r.probeIds?.length ?? 0) > 0,
     );
     const canAnonymous = cases.some((c) => hasAccessContract(c.resource)) && hasAuth(cfg.accounts?.b);
-    const canProbe = !!ctx.stagingUrl && cases.length > 0 && (hasAuth(cfg.accounts?.a) || canAnonymous);
+    const hasAuthenticatedAttacker = hasAuth(cfg.accounts?.a) || hasAuth(cfg.accounts?.c);
+    const canProbe = !!ctx.stagingUrl && cases.length > 0 && (hasAuthenticatedAttacker || canAnonymous);
     const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (hasAuth(cfg.accounts?.a) || ownerFieldResources.some((r) => r.gql));
 
     if (!canProbe && !canOwnerField) {
@@ -206,6 +204,17 @@ export const authzMatrix: Check = {
     const base = ctx.stagingUrl!.replace(/\/$/, "");
     ctx.scope.assertUrlAllowed(base);
     const accounts = cfg.accounts ?? {};
+    if (canAnonymous && !hasAuthenticatedAttacker && cases.some((c) => accessOf(c.resource) === "private")) {
+      findings.push({
+        id: "authz-matrix:missing-attacker", check: "authz-matrix", state: "unproven", severity: "medium",
+        title: "Private-resource authentication can be checked, but cross-tenant ownership still needs account A",
+        location: "options.authz-matrix.accounts.a",
+        description: "Account B is configured, so the anonymous boundary can be probed. No distinct authenticated attacker (A or C) is configured, so the per-owner isolation boundary cannot be tested and is not treated as passing.",
+        remediation: "Configure a test account A from another tenant (or C) with its staging credentials, then rerun the matrix.",
+        proof: { method: "matrix coverage plan", replay: "see regressionHint", evidence: renderTestFile(resources) },
+        regressionHint: renderTestFile(resources),
+      });
+    }
     const markers = [accounts.b?.marker ?? ""].filter(Boolean);
     // Distinct contexts (Teycir's guard): if A and B are the same account, every
     // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
@@ -236,7 +245,7 @@ export const authzMatrix: Check = {
     // only meaningful on a route that actually refuses an anonymous caller, so a
     // route anyone can read is reported as a lead, never a "proven" BOLA.
     const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = same ? [] : [
-      { key: "a", who: "account A's credentials", auth: accounts.a },
+      ...(hasAuth(accounts.a) ? [{ key: "a" as const, who: "account A's credentials", auth: accounts.a }] : []),
       ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c }] : []),
     ];
     const ownerBodies: string[] = [];

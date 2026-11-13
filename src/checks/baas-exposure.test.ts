@@ -8,6 +8,7 @@ import { baasExposure, extractBaas } from "./baas-exposure.js";
 import { exposedSecrets } from "./exposed-secrets.js";
 import { generateRegressionFile } from "../generate/tests.js";
 import { Scope } from "../core/scope.js";
+import { installSafeFetchTestTransport } from "../core/net.js";
 import type { CheckContext } from "../core/types.js";
 
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
@@ -172,8 +173,8 @@ test("Firebase: a listable Storage bucket and the default RTDB instance are prov
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
   try {
-    const scope = new Scope({ allowedHosts: ["firebasestorage.googleapis.com", "demo-app-default-rtdb.firebaseio.com"], allowPrivate: true, allowActiveTesting: true,
-      testTransport: { resolve: async () => [{ address: "127.0.0.1", family: 4 }], fetch: globalThis.fetch } });
+    const scope = new Scope({ allowedHosts: ["firebasestorage.googleapis.com", "demo-app-default-rtdb.firebaseio.com"], allowPrivate: true, allowActiveTesting: true });
+    installSafeFetchTestTransport(scope, { resolver: async () => [{ address: "127.0.0.1", family: 4 }], fetch: globalThis.fetch });
     const found = await baasExposure.run(ctx(dir, scope));
     const ids = found.filter((f) => f.state === "proven").map((f) => f.id).sort();
     assert.deepEqual(ids, ["baas-exposure:firebase-rtdb:https://demo-app-default-rtdb.firebaseio.com", "baas-exposure:firebase-storage:demo-app.firebasestorage.app"]);

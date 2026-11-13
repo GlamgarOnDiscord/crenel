@@ -181,7 +181,7 @@ async function restore(client: ActiveClient, method: string, writeUrl: string, r
       if (same(getField(r.json, field), old)) { rec.restore = "restored"; return true; }
     } catch { /* recorded below */ }
   }
-  rec.restore = `not restored: ${field} should be ${JSON.stringify(old)}`;
+  rec.restore = `not restored: field ${field} needs manual restoration`;
   return false;
 }
 

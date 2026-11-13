@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, pinnedLookup, readOnlyPost, redirectHeaders, resolveTarget, safeFetch, topLevelKeys } from "./net.js";
+import { installSafeFetchTestTransport, isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, pinnedLookup, readOnlyPost, redirectHeaders, resolveTarget, safeFetch, topLevelKeys } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -60,9 +60,9 @@ test("safeFetch connects its real socket to the one validated DNS answer", async
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as import("node:net").AddressInfo).port;
   let resolutions = 0;
-  const scope = new Scope({
-    allowedHosts: ["rebind.invalid"], allowPrivate: true,
-    testResolver: async () => {
+  const scope = new Scope({ allowedHosts: ["rebind.invalid"], allowPrivate: true });
+  installSafeFetchTestTransport(scope, {
+    resolver: async () => {
       resolutions++;
       return resolutions === 1
         ? [{ address: "127.0.0.1", family: 4 }]

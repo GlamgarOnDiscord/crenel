@@ -135,7 +135,9 @@ export class ActiveClient {
     if (payload !== undefined) headers["content-type"] = "application/json";
     let rec: WriteRecord | undefined;
     if (WRITE_METHODS.has(m)) {
-      const safeBody = body === undefined ? undefined : JSON.stringify(redactWriteBody(body));
+      const safeBody = body === undefined ? undefined
+        : typeof body !== "object" || body === null || Array.isArray(body) ? "<redacted non-object payload>"
+          : JSON.stringify(redactWriteBody(body));
       rec = { method: m, url, body: safeBody, actor: record?.actor ?? "?", purpose: record?.purpose ?? "", restore: record?.restore };
       this.writes.push(rec);
     }

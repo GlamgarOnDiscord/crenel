@@ -114,7 +114,7 @@ test("live probe: cookie-session auth + an owner marker proves the leak; the ano
     const p = proven[0]!;
     assert.match(p.id, /:draft:GET:1$/);
     assert.equal(p.severity, "critical");
-    assert.match(p.proof?.replay ?? "", /cookie: <A_SESSION>/, "the replay hint reflects cookie auth, not a bearer");
+    assert.match(p.proof?.replay ?? "", /cookie: <A_COOKIE>/, "the replay hint reflects cookie auth, not a bearer");
     assert.ok(!found.some((f) => f.id.endsWith(":anon") && f.state === "proven"), "the redirected anonymous caller is not proven");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
@@ -273,6 +273,25 @@ test("explicit private contract: stable anonymous access to the owner's object i
     assert.equal(proof?.severity, "high");
     assert.match(proof?.proof?.method ?? "", /declared private contract/);
     assert.match(proof?.regressionHint ?? "", /anonymous cannot GET export/);
+  } finally { server.close(); }
+});
+
+test("a private anonymous check does not pretend ownership was tested without an attacker", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    res.writeHead(200); res.end('{"id":"private-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "private", path: "/private/:id", access: "private" }], accounts: { b: { label: "B", token: "tok-b", owns: { private: ["private-b"] } } } } },
+    });
+    assert.ok(found.some((f) => f.id === "authz-matrix:missing-attacker" && f.state === "unproven"));
+    assert.ok(!found.some((f) => f.state === "proven"));
   } finally { server.close(); }
 });
 
