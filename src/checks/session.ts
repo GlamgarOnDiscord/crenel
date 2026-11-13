@@ -37,13 +37,37 @@ const TOKEN_KEYS = ["access_token", "accessToken", "auth_token", "authToken", "t
 /** Every credential returned by a login belongs to the same session. Send both:
  * some stacks require a bearer for the API and a CSRF/session cookie together. */
 export function sessionHeaders(session?: Session): Record<string, string> {
-  return session ? { ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}), ...(session.headers ?? {}) } : {};
+  if (!session) return {};
+  const custom = effectiveCustomHeaders(session);
+  return { ...custom, ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}) };
 }
 
 /** Redacted curl flags matching the credentials that were actually sent. */
 export function sessionReplayHeaders(session?: Session, label = "SESSION"): string {
-  return session ? `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}${session.headers && Object.keys(session.headers).length ? ` -H '<${label}_AUTH>'` : ""}` : "";
+  if (!session) return "";
+  const custom = Object.keys(effectiveCustomHeaders(session))
+    .map((name) => ` -H ${shellQuote(`${name}: <${label}_AUTH>`)}`)
+    .join("");
+  return `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}${custom}`;
 }
+
+/** One effective value per case-insensitive custom header. Explicit token and
+ * cookie fields take precedence over custom aliases of Authorization/Cookie. */
+function effectiveCustomHeaders(session: Session): Record<string, string> {
+  const out: Record<string, string> = {};
+  const names = new Map<string, string>();
+  for (const [name, value] of Object.entries(session.headers ?? {})) {
+    const lower = name.toLowerCase();
+    if ((lower === "authorization" && session.token) || (lower === "cookie" && session.cookie)) continue;
+    const previous = names.get(lower);
+    if (previous) delete out[previous];
+    names.set(lower, name);
+    out[name] = value;
+  }
+  return out;
+}
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 
 /** True for a string that is a JWT: three base64url parts whose header decodes to JSON with `alg`. */
 export function isJwt(s: string): boolean {

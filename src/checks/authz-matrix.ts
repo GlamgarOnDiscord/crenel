@@ -94,9 +94,13 @@ const requiresAuthentication = (r: ResourceSpec): boolean => r.authentication ==
  * object and proves nothing. Mirrors the token/cookie same-identity guard. */
 const sameCustomHeaders = (a?: Record<string, string>, b?: Record<string, string>): boolean => {
   if (!a || !b) return false;
-  const ak = Object.keys(a), bk = Object.keys(b);
-  return ak.length > 0 && ak.length === bk.length && ak.every((k) => a[k] === b[k]);
+  const normalized = (headers: Record<string, string>) => Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  const an = normalized(a), bn = normalized(b), ak = Object.keys(an), bk = Object.keys(bn);
+  return ak.length > 0 && ak.length === bk.length && ak.every((k) => an[k] === bn[k]);
 };
+const sameAuthIdentity = (attacker?: Auth, owner?: Auth): string | null => sameIdentity(attacker?.token, owner?.token)
+  || (attacker?.cookie && attacker.cookie === owner?.cookie ? "use the same session cookie" : null)
+  || (sameCustomHeaders(attacker?.headers, owner?.headers) ? "use the same custom auth headers" : null);
 /** A redacted curl snippet for the replay hint, matching the auth shape used. */
 const replayAuth = (a: Auth | undefined, key: string): string => sessionReplayHeaders(a, key.toUpperCase());
 
@@ -169,8 +173,9 @@ export const authzMatrix: Check = {
       (r) => accessOf(r) === "private" && r.ownerField && (r.probeIds?.length ?? 0) > 0,
     );
     const canAnonymous = cases.some((c) => hasAccessContract(c.resource)) && hasAuth(cfg.accounts?.b);
-    const hasAuthenticatedAttacker = hasAuth(cfg.accounts?.a) || hasAuth(cfg.accounts?.c);
-    const canProbe = !!ctx.stagingUrl && cases.length > 0 && (hasAuthenticatedAttacker || canAnonymous);
+    const hasConfiguredAttacker = hasAuth(cfg.accounts?.a) || hasAuth(cfg.accounts?.c);
+    const hasAuthenticatedAttacker = [cfg.accounts?.a, cfg.accounts?.c].some((a) => hasAuth(a) && !sameAuthIdentity(a, cfg.accounts?.b));
+    const canProbe = !!ctx.stagingUrl && cases.length > 0 && (hasConfiguredAttacker || canAnonymous);
     const canOwnerField = !!ctx.stagingUrl && ownerFieldResources.length > 0 && (hasAuth(cfg.accounts?.a) || ownerFieldResources.some((r) => r.gql));
 
     if (!canProbe && !canOwnerField) {
@@ -218,20 +223,18 @@ export const authzMatrix: Check = {
     const markers = [accounts.b?.marker ?? ""].filter(Boolean);
     // Distinct contexts (Teycir's guard): if A and B are the same account, every
     // "cross-tenant" read is just B reading its own object. Refuse to prove anything.
-    const same = sameIdentity(accounts.a?.token, accounts.b?.token)
-      || (accounts.a?.cookie && accounts.a.cookie === accounts.b?.cookie ? "use the same session cookie" : null)
-      || (sameCustomHeaders(accounts.a?.headers, accounts.b?.headers) ? "use the same custom auth headers" : null);
-    if (same) {
-      ctx.log(`authz-matrix: accounts A and B are the same identity (${same}), live probe skipped`);
+    const candidates: { key: "a" | "c"; who: string; auth?: Auth; same: string | null }[] = [
+      ...(hasAuth(accounts.a) ? [{ key: "a" as const, who: "account A's credentials", auth: accounts.a, same: sameAuthIdentity(accounts.a, accounts.b) }] : []),
+      ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c, same: sameAuthIdentity(accounts.c, accounts.b) }] : []),
+    ];
+    for (const actor of candidates.filter((a) => a.same)) {
+      ctx.log(`authz-matrix: accounts ${actor.key.toUpperCase()} and B are the same identity (${actor.same}), that actor is skipped`);
       findings.push({
-        id: "authz-matrix:same-identity", check: "authz-matrix", title: "Test accounts A and B are the same identity: the matrix cannot prove anything",
+        id: `authz-matrix:same-identity${actor.key === "a" ? "" : `:${actor.key}`}`, check: "authz-matrix", title: `Test accounts ${actor.key.toUpperCase()} and B are the same identity: that actor cannot prove isolation`,
         severity: "medium", state: "unproven", location: "options.authz-matrix.accounts",
-        description: `The tokens for A and B ${same}. Use two accounts of two different tenants.`,
-        remediation: "Create a second test account in another organization and put its token under accounts.a.",
+        description: `The credentials for ${actor.key.toUpperCase()} and B ${actor.same}. A request from that actor is B reading B's own object, not a cross-tenant test.`,
+        remediation: `Configure account ${actor.key.toUpperCase()} as a distinct test account in another organization.`,
       });
-      // An explicit anonymous-access contract is independent of A's identity:
-      // keep that probe, but never run a cross-tenant/owner-field probe as A.
-      if (!cases.some((c) => hasAccessContract(c.resource))) return findings;
     }
     const get = (url: string, auth?: Auth) =>
       safeFetch(url, ctx.scope, { method: "GET", headers: authHeaders(auth) })
@@ -244,10 +247,7 @@ export const authzMatrix: Check = {
     // handled separately (the public-route guard below): a cross-tenant break is
     // only meaningful on a route that actually refuses an anonymous caller, so a
     // route anyone can read is reported as a lead, never a "proven" BOLA.
-    const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = same ? [] : [
-      ...(hasAuth(accounts.a) ? [{ key: "a" as const, who: "account A's credentials", auth: accounts.a }] : []),
-      ...(hasAuth(accounts.c) ? [{ key: "c" as const, who: "account C's credentials (another tenant)", auth: accounts.c }] : []),
-    ];
+    const actors: { key: "a" | "c"; who: string; auth?: Auth }[] = candidates.filter((a) => !a.same).map(({ key, who, auth }) => ({ key, who, auth }));
     const ownerBodies: string[] = [];
     for (const c of cases) {
       if (c.method !== "GET") { ctx.log(`authz-matrix: ${c.method} ${c.resource.path} skipped, only GET is probed live`); continue; }
@@ -355,7 +355,8 @@ export const authzMatrix: Check = {
       }
       return get(base + r.path.replace(":id", raw ? idOrRaw : encodeURIComponent(idOrRaw)), aAuth);
     };
-    for (const r of same ? [] : ownerFieldResources) {
+    const aSameAsOwner = sameAuthIdentity(accounts.a, accounts.b);
+    for (const r of aSameAsOwner ? [] : ownerFieldResources) {
       const targetIds = (r.probeIds ?? []).filter((id) => !provenIds.has(`${r.name}:${id}`));
       if (!targetIds.length) continue;
       try {

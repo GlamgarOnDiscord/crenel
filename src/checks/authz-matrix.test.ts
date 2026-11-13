@@ -157,6 +157,25 @@ test("distinct contexts: accounts that share the same custom auth headers are re
   }
 });
 
+test("distinct contexts: account C identical to B is skipped and cannot prove a BOLA", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    res.writeHead(200); res.end('{"id":"x","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "p", path: "/p/:id" }], accounts: { b: { label: "B", token: "same", owns: { p: ["x"] } }, c: { label: "C", token: "same" } } } },
+    });
+    assert.ok(found.some((f) => f.id === "authz-matrix:same-identity:c" && f.state === "unproven"));
+    assert.ok(!found.some((f) => f.state === "proven"), "B's own credentials under C cannot become a cross-tenant proof");
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
 test("a route that leaks only once in three replays is not proven", async () => {
   const http = await import("node:http");
   let n = 0;
