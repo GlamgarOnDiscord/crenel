@@ -105,29 +105,46 @@ export function redactWriteBody(value: unknown, key = ""): unknown {
   if (SECRET_FIELD.test(key)) return "<redacted>";
   if (value == null || typeof value !== "object") return value;
   const root: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
-  const seen = new WeakSet<object>([value]);
-  const pending: { source: object; target: Record<string, unknown> | unknown[]; depth: number }[] = [
-    { source: value, target: root, depth: 0 },
+  const pending: { source: object; target: Record<string, unknown> | unknown[]; depth: number; ancestors: Set<object> }[] = [
+    { source: value, target: root, depth: 0, ancestors: new Set([value]) },
   ];
   let visited = 0;
+  const maxValues = 10_000;
   const assign = (target: Record<string, unknown> | unknown[], childKey: string, child: unknown) => {
     if (Array.isArray(target)) target[Number(childKey)] = child;
     else target[childKey] = child;
   };
+  const truncate = (target: Record<string, unknown> | unknown[]) => {
+    if (Array.isArray(target)) target.push("<redacted remaining values>");
+    else target["<truncated>"] = "<redacted remaining values>";
+  };
   while (pending.length) {
-    const { source, target, depth } = pending.pop()!;
-    const entries = Array.isArray(source)
-      ? source.map((child, index) => [String(index), child] as const)
-      : Object.entries(source as Record<string, unknown>);
-    for (const [childKey, child] of entries) {
-      if (SECRET_FIELD.test(childKey)) { assign(target, childKey, "<redacted>"); continue; }
-      if (child == null || typeof child !== "object") { assign(target, childKey, child); continue; }
-      if (seen.has(child)) { assign(target, childKey, "<redacted circular value>"); continue; }
-      if (depth >= 32 || visited++ >= 10_000) { assign(target, childKey, "<redacted nested value>"); continue; }
+    const { source, target, depth, ancestors } = pending.pop()!;
+    const visit = (childKey: string, child: unknown): boolean => {
+      if (visited >= maxValues) { truncate(target); return false; }
+      visited++;
+      if (SECRET_FIELD.test(childKey)) { assign(target, childKey, "<redacted>"); return true; }
+      if (child == null || typeof child !== "object") { assign(target, childKey, child); return true; }
+      if (ancestors.has(child)) { assign(target, childKey, "<redacted circular value>"); return true; }
+      if (depth >= 32) { assign(target, childKey, "<redacted nested value>"); return true; }
       const copy: Record<string, unknown> | unknown[] = Array.isArray(child) ? [] : {};
       assign(target, childKey, copy);
-      seen.add(child);
-      pending.push({ source: child, target: copy, depth: depth + 1 });
+      const childAncestors = new Set(ancestors);
+      childAncestors.add(child);
+      pending.push({ source: child, target: copy, depth: depth + 1, ancestors: childAncestors });
+      return true;
+    };
+    if (Array.isArray(source)) {
+      // An index loop materialises sparse holes as undefined without allocating
+      // an entries array proportional to an attacker-controlled length.
+      for (let index = 0; index < source.length; index++) if (!visit(String(index), source[index])) break;
+    } else {
+      // for..in is consumed lazily: unlike Object.entries it can stop at the
+      // global value budget before allocating every key of a very wide object.
+      for (const childKey in source) {
+        if (!Object.prototype.hasOwnProperty.call(source, childKey)) continue;
+        if (!visit(childKey, (source as Record<string, unknown>)[childKey])) break;
+      }
     }
   }
   return root;
