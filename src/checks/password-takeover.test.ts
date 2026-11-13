@@ -26,6 +26,17 @@ test("active receipts redact nested passwords, tokens, cookies and secrets", () 
   const cyclic: { safe: string; nested?: unknown; password: string } = { safe: "shown", password: "never-visible" };
   cyclic.nested = cyclic;
   assert.deepEqual(redactWriteBody(cyclic), { safe: "shown", password: "<redacted>", nested: "<redacted circular value>" });
+  const shared = { safe: "copied twice" };
+  assert.deepEqual(redactWriteBody({ first: shared, second: shared }), { first: { safe: "copied twice" }, second: { safe: "copied twice" } }, "a repeated reference is not a cycle");
+  const sparse: unknown[] = [];
+  sparse[2] = { password: "never-visible" };
+  assert.deepEqual(redactWriteBody({ sparse }), { sparse: [undefined, undefined, { password: "<redacted>" }] });
+  const wide: Record<string, unknown> = {};
+  for (let i = 0; i < 20_000; i++) wide[`safe${i}`] = i;
+  wide.password = "never-visible";
+  const bounded = JSON.stringify(redactWriteBody(wide));
+  assert.doesNotMatch(bounded, /never-visible/);
+  assert.ok(bounded.length < 250_000, "wide receipt redaction stops at its global property budget");
 });
 
 test("password templates preserve JSON-special and replacement-token characters", () => {
