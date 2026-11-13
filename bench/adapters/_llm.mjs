@@ -67,13 +67,18 @@ export function permissionArgs(env = process.env) {
 function spawnAsync(cmd, args, { cwd, timeout, env, maxBuffer, signal }) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-    let stdout = "", stderr = "", timedOut = false, size = 0;
+    let stdout = "", stderr = "", timedOut = false, size = 0, overflowed = false;
     const killTree = (kind) => {
       if (!child.pid) return;
       if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true }).unref();
       else { try { process.kill(-child.pid, kind); } catch { child.kill(kind); } }
     };
-    const take = (which) => (d) => { size += d.length; if (size > maxBuffer) { killTree("SIGKILL"); return; } if (which === "out") stdout += d; else stderr += d; };
+    const take = (which) => (d) => {
+      if (overflowed) return;
+      size += d.length;
+      if (size > maxBuffer) { overflowed = true; killTree("SIGKILL"); return; }
+      if (which === "out") stdout += d; else stderr += d;
+    };
     child.stdout.on("data", take("out"));
     child.stderr.on("data", take("err"));
     const abort = () => { killTree("SIGTERM"); setTimeout(() => { if (child.exitCode === null) killTree("SIGKILL"); }, 1_000).unref(); };
