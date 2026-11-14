@@ -27,12 +27,47 @@ export interface LoginSpec {
   /** Dotted path of the token in the JSON answer, when it is not found by shape. */
   tokenPath?: string;
 }
-export interface Session { token?: string; cookie?: string }
+export interface Session { token?: string; cookie?: string; headers?: Record<string, string> }
 type Answer = { status: number; headers: Headers; body: string };
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const JWT = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/;
 const TOKEN_KEYS = ["access_token", "accessToken", "auth_token", "authToken", "token", "jwt", "id_token", "idToken"];
+
+/** Every credential returned by a login belongs to the same session. Send both:
+ * some stacks require a bearer for the API and a CSRF/session cookie together. */
+export function sessionHeaders(session?: Session): Record<string, string> {
+  if (!session) return {};
+  const custom = effectiveCustomHeaders(session);
+  return { ...custom, ...(session.token ? { authorization: `Bearer ${session.token}` } : {}), ...(session.cookie ? { cookie: session.cookie } : {}) };
+}
+
+/** Redacted curl flags matching the credentials that were actually sent. */
+export function sessionReplayHeaders(session?: Session, label = "SESSION"): string {
+  if (!session) return "";
+  const custom = Object.keys(effectiveCustomHeaders(session))
+    .map((name) => ` -H ${shellQuote(`${name}: <${label}_AUTH>`)}`)
+    .join("");
+  return `${session.token ? ` -H 'authorization: Bearer <${label}_TOKEN>'` : ""}${session.cookie ? ` -H 'cookie: <${label}_COOKIE>'` : ""}${custom}`;
+}
+
+/** One effective value per case-insensitive custom header. Explicit token and
+ * cookie fields take precedence over custom aliases of Authorization/Cookie. */
+function effectiveCustomHeaders(session: Session): Record<string, string> {
+  const out: Record<string, string> = {};
+  const names = new Map<string, string>();
+  for (const [name, value] of Object.entries(session.headers ?? {})) {
+    const lower = name.toLowerCase();
+    if ((lower === "authorization" && session.token) || (lower === "cookie" && session.cookie)) continue;
+    const previous = names.get(lower);
+    if (previous) delete out[previous];
+    names.set(lower, name);
+    out[name] = value;
+  }
+  return out;
+}
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 
 /** True for a string that is a JWT: three base64url parts whose header decodes to JSON with `alg`. */
 export function isJwt(s: string): boolean {

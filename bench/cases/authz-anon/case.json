@@ -3,7 +3,7 @@
   "type": "live",
   "config": {
     "options": { "authz-matrix": {
-      "resources": [ { "name": "export", "path": "/api/exports/:id", "methods": ["GET"] } ],
+      "resources": [ { "name": "export", "path": "/api/exports/:id", "methods": ["GET"], "access": "private" } ],
       "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "owns": { "export": ["exp_b_1"] } } }
     } }
   },

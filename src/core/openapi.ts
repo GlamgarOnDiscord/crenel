@@ -8,7 +8,17 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 
-export interface ImportedResource { name: string; path: string; methods: string[]; public?: boolean }
+export interface ImportedResource {
+  name: string;
+  path: string;
+  methods: string[];
+  /** Authentication is inferable from OpenAPI; ownership is not. */
+  authentication?: "required" | "none";
+  /** Anonymous-by-spec routes are explicit trust boundaries. */
+  access?: "public";
+  /** Compatibility for validators that consume the legacy trust-boundary flag. */
+  public?: boolean;
+}
 
 interface OpenApiDoc {
   servers?: { url?: string }[];
@@ -38,9 +48,22 @@ export function resourcesFromOpenApi(doc: OpenApiDoc): ImportedResource[] {
     let name = (before.at(-1) ?? "resource").replace(/[^\w-]/g, "") || "resource";
     for (let i = 2; names.has(name); i++) name = `${before.at(-1) ?? "resource"}-${i}`;
     names.add(name);
-    // An operation with `security: []` declares itself public: a trust boundary, not a leak.
-    const isPublic = Array.isArray(get.security) && get.security.length === 0;
-    out.push({ name, path: prefix + route.replace(params[0]!, ":id"), methods: ["GET"], ...(isPublic ? { public: true } : {}) });
+    // OpenAPI can prove an authentication contract, not ownership. An explicit
+    // empty security list is public; a non-empty operation/global list requires
+    // a session. Unspecified security stays unspecified, so no assumption is made.
+    const security = Array.isArray(get.security) ? get.security : doc.security;
+    const specified = Array.isArray(security);
+    // An empty list removes global auth. An empty requirement object is an
+    // anonymous alternative (`security: [{}]`) even beside authenticated ones.
+    const requiresAuthentication = specified && security.length > 0 && security.every(
+      (requirement) => !!requirement && typeof requirement === "object" && Object.keys(requirement as object).length > 0,
+    );
+    const anonymousBySpec = specified && !requiresAuthentication;
+    out.push({
+      name, path: prefix + route.replace(params[0]!, ":id"), methods: ["GET"],
+      ...(anonymousBySpec ? { access: "public" as const, public: true, authentication: "none" as const }
+        : requiresAuthentication ? { authentication: "required" as const } : {}),
+    });
   }
   return out;
 }

@@ -40,3 +40,16 @@ test("a check that runs but finds nothing is still counted as run", async () => 
   assert.equal(r.findings.length, 0);
   assert.equal(r.errors.length, 0);
 });
+
+test("checks in one run share reconnaissance, but separate runs do not", async () => {
+  const seen: Map<string, Promise<import("./net.js").SafeResponse>>[] = [];
+  const inspect = (name: string) => check(name, (ctx) => {
+    assert.ok(ctx.recon, "the runner provides a per-run reconnaissance map");
+    seen.push(ctx.recon!);
+    return [];
+  });
+  await run(config, "x.yaml", {}, [inspect("a"), inspect("b")]);
+  await run(config, "x.yaml", {}, [inspect("c")]);
+  assert.equal(seen[0], seen[1]);
+  assert.notEqual(seen[1], seen[2]);
+});

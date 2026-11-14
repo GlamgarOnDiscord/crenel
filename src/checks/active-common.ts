@@ -8,8 +8,8 @@
 //   - every request goes through safeFetch (declared hosts, journal, kill switch)
 //     and through a per-run budget with a hard ceiling;
 //   - targets and ids come only from the config: nothing discovered is written;
-//   - every write is recorded with what was sent, its answer and whether the
-//     previous value was put back, and the run reports that list verbatim.
+//   - every write is recorded with a redacted payload, its answer and whether
+//     the previous value was put back. Credentials never enter a report.
 
 import { randomBytes } from "node:crypto";
 import { safeFetch } from "../core/net.js";
@@ -96,6 +96,59 @@ export interface WriteRecord {
 }
 
 export interface Answer { status: number; body: string; json: unknown }
+const SECRET_FIELD = /(password|passwd|pwd|passphrase|secret|token|authorization|cookie|credentials?|private[_-]?key|api[_-]?key|session|otp|mfa)/i;
+
+/** Redact secrets by key before a write payload reaches receipts/evidence.
+ * Iterative and bounded so an adversarially deep object cannot overflow the
+ * stack or delay an active check after its request body was serialized. */
+export function redactWriteBody(value: unknown, key = ""): unknown {
+  if (SECRET_FIELD.test(key)) return "<redacted>";
+  if (value == null || typeof value !== "object") return value;
+  const root: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
+  const pending: { source: object; target: Record<string, unknown> | unknown[]; depth: number; ancestors: Set<object> }[] = [
+    { source: value, target: root, depth: 0, ancestors: new Set([value]) },
+  ];
+  let visited = 0;
+  const maxValues = 10_000;
+  const assign = (target: Record<string, unknown> | unknown[], childKey: string, child: unknown) => {
+    if (Array.isArray(target)) target[Number(childKey)] = child;
+    else target[childKey] = child;
+  };
+  const truncate = (target: Record<string, unknown> | unknown[]) => {
+    if (Array.isArray(target)) target.push("<redacted remaining values>");
+    else target["<truncated>"] = "<redacted remaining values>";
+  };
+  while (pending.length) {
+    const { source, target, depth, ancestors } = pending.pop()!;
+    const visit = (childKey: string, child: unknown): boolean => {
+      if (visited >= maxValues) { truncate(target); return false; }
+      visited++;
+      if (SECRET_FIELD.test(childKey)) { assign(target, childKey, "<redacted>"); return true; }
+      if (child == null || typeof child !== "object") { assign(target, childKey, child); return true; }
+      if (ancestors.has(child)) { assign(target, childKey, "<redacted circular value>"); return true; }
+      if (depth >= 32) { assign(target, childKey, "<redacted nested value>"); return true; }
+      const copy: Record<string, unknown> | unknown[] = Array.isArray(child) ? [] : {};
+      assign(target, childKey, copy);
+      const childAncestors = new Set(ancestors);
+      childAncestors.add(child);
+      pending.push({ source: child, target: copy, depth: depth + 1, ancestors: childAncestors });
+      return true;
+    };
+    if (Array.isArray(source)) {
+      // An index loop materialises sparse holes as undefined without allocating
+      // an entries array proportional to an attacker-controlled length.
+      for (let index = 0; index < source.length; index++) if (!visit(String(index), source[index])) break;
+    } else {
+      // for..in is consumed lazily: unlike Object.entries it can stop at the
+      // global value budget before allocating every key of a very wide object.
+      for (const childKey in source) {
+        if (!Object.prototype.hasOwnProperty.call(source, childKey)) continue;
+        if (!visit(childKey, (source as Record<string, unknown>)[childKey])) break;
+      }
+    }
+  }
+  return root;
+}
 
 /**
  * The only way the active checks talk to the target: scoped client, budget,
@@ -126,7 +179,10 @@ export class ActiveClient {
     if (payload !== undefined) headers["content-type"] = "application/json";
     let rec: WriteRecord | undefined;
     if (WRITE_METHODS.has(m)) {
-      rec = { method: m, url, body: payload, actor: record?.actor ?? "?", purpose: record?.purpose ?? "", restore: record?.restore };
+      const safeBody = body === undefined ? undefined
+        : typeof body !== "object" || body === null || Array.isArray(body) ? "<redacted non-object payload>"
+          : JSON.stringify(redactWriteBody(body));
+      rec = { method: m, url, body: safeBody, actor: record?.actor ?? "?", purpose: record?.purpose ?? "", restore: record?.restore };
       this.writes.push(rec);
     }
     const res = await safeFetch(url, this.ctx.scope, { method: m, headers, body: payload, followRedirects: false });

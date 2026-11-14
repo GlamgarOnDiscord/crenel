@@ -2,6 +2,7 @@
   "title": "A committed agent settings file that only sets commit attribution",
   "type": "static",
   "config": { "projectDir": "project" },
+  "maxUnknownHigh": 0,
   "mustFind": [],
   "mustNotFlag": [
     { "id": "attribution-only-settings", "check": "mcp-surface", "where": "settings\\.json", "forbid": "any",

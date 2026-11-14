@@ -117,7 +117,15 @@ probes. A session proves nothing: the proof is still `authzOracle` and the
 same-identity guard; a failed login only means fewer probes.
 The same `login` works for the accounts of `nested-authz`, `authz-write`,
 `mass-assignment` (bearer token only, as their client sends) and the account
-`data-exposure` reads as (`as`).
+`data-exposure` reads as (`as`). When a login returns both a bearer and a cookie,
+`data-exposure` sends and redacts both; it logs in only the selected `as`
+account, not every account in the matrix.
+
+Several personal emails plus an anonymous denial are not, by themselves, a PII
+proof: a gated member directory can be legitimate. `data-exposure.pii: true`
+therefore emits a lead. A proven PII finding requires an explicit `owner-only`
+contract (`ownerField` and an `ownerValueEnv`) that observes a foreign owner, or
+a `canary` contract whose `canaryEnv` value is returned. Values stay redacted.
 
 **B's objects from a listing.** A resource may declare `list` (a listing path)
 and `idField` (default `id`) instead of ids under `accounts.b.owns`. B reads the

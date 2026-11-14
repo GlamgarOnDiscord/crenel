@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { extractSession, isJwt, jwtSub, listedIds, mentions } from "./session.js";
+import { extractSession, isJwt, jwtSub, listedIds, mentions, sessionHeaders, sessionReplayHeaders } from "./session.js";
 import { authzMatrix } from "./authz-matrix.js";
 import { Scope } from "../core/scope.js";
 import type { CheckContext } from "../core/types.js";
@@ -35,6 +35,17 @@ test("extractSession: a failed login, or an answer with no token and no cookie, 
   assert.equal(extractSession(answer(200, JSON.stringify({ message: "Successfully logged in.", status: "success" }))), null);
   assert.equal(extractSession(answer(200, JSON.stringify({ token: "short" }))), null, "a short value is not a token");
   assert.equal(extractSession(answer(200, "<html>welcome</html>")), null);
+});
+
+test("session auth sends and replays bearer plus cookie together", () => {
+  const session = { token: "tok", cookie: "sid=x", headers: { Authorization: "shadow-token", COOKIE: "shadow-cookie", "x-auth": "custom" } };
+  assert.deepEqual(sessionHeaders(session), { "x-auth": "custom", authorization: "Bearer tok", cookie: "sid=x" }, "canonical token/cookie fields win without case-insensitive duplicates");
+  const replay = sessionReplayHeaders(session, "A");
+  assert.match(replay, /<A_TOKEN>/);
+  assert.match(replay, /<A_COOKIE>/);
+  assert.match(replay, /-H 'x-auth: <A_AUTH>'/, "a custom-auth replay preserves the header name and redacts only its value");
+  assert.doesNotMatch(replay, /Bearer tok|sid=x|custom|shadow-token|shadow-cookie/);
+  assert.deepEqual(sessionHeaders({ headers: { Authorization: "Custom opaque", authorization: "last wins" } }), { authorization: "last wins" }, "custom-only auth keeps one case-insensitive value");
 });
 
 // A login-gated API: JWTs from POST /login (or a cookie session from /login-form), notes owned per user.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, readOnlyPost, redirectHeaders, safeFetch, topLevelKeys } from "./net.js";
+import { installSafeFetchTestTransport, isGraphqlGetWrite, isGraphqlQueryOnly, isPrivateIp, pinnedLookup, readOnlyPost, redirectHeaders, resolveTarget, safeFetch, topLevelKeys } from "./net.js";
 import { Scope } from "./scope.js";
 
 test("private and loopback addresses are refused", () => {
@@ -40,6 +40,48 @@ test("public addresses are allowed", () => {
   }
 });
 
+test("DNS is validated once and the socket lookup is pinned to that answer", async () => {
+  let resolutions = 0;
+  const targets = await resolveTarget("rebind.example", false, async () => {
+    resolutions++;
+    return [{ address: "93.184.216.34", family: 4 }];
+  });
+  const lookup = pinnedLookup(targets);
+  const got = await new Promise<{ address: string; family?: number }>((resolve, reject) => lookup("rebind.example", {}, (err, address, family) => {
+    if (err) reject(err); else resolve({ address: address as string, family });
+  }));
+  assert.equal(resolutions, 1);
+  assert.deepEqual(got, { address: "93.184.216.34", family: 4 });
+});
+
+test("safeFetch connects its real socket to the one validated DNS answer", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => { res.writeHead(req.headers.host?.startsWith("rebind.invalid:") ? 200 : 400); res.end("pinned"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  let resolutions = 0;
+  const scope = new Scope({ allowedHosts: ["rebind.invalid"], allowPrivate: true });
+  installSafeFetchTestTransport(scope, {
+    resolver: async () => {
+      resolutions++;
+      return resolutions === 1
+        ? [{ address: "127.0.0.1", family: 4 }]
+        : [{ address: "203.0.113.1", family: 4 }];
+    },
+  });
+  try {
+    const response = await safeFetch(`http://rebind.invalid:${port}/`, scope);
+    assert.equal(response.body, "pinned");
+    assert.equal(resolutions, 1, "the socket must not resolve the hostname a second time");
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
+test("a mixed public/private DNS answer is refused before a socket is opened", async () => {
+  await assert.rejects(resolveTarget("mixed.example", false, async () => [
+    { address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 },
+  ]), /private address/);
+});
+
 test("safeFetch returns the body for an allowed host", async () => {
   const http = await import("node:http");
   const server = http.createServer((_q, s) => { s.writeHead(200); s.end("hello"); });
@@ -50,6 +92,18 @@ test("safeFetch returns the body for an allowed host", async () => {
     const res = await safeFetch(`http://127.0.0.1:${port}/`, scope);
     assert.equal(res.status, 200);
     assert.equal(res.body, "hello");
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
+});
+
+test("safeFetch decodes compressed responses before checks parse the body", async () => {
+  const http = await import("node:http");
+  const { gzipSync } = await import("node:zlib");
+  const server = http.createServer((_q, s) => { s.writeHead(200, { "content-encoding": "gzip" }); s.end(gzipSync("decoded body")); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const scope = new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true });
+    assert.equal((await safeFetch(`http://127.0.0.1:${port}/`, scope)).body, "decoded body");
   } finally { await new Promise<void>((r) => server.close(() => r())); }
 });
 
@@ -128,6 +182,12 @@ test("safeFetch refuses writes unless the body is a read or active testing is on
     assert.equal((await safeFetch(url, active, { method: "DELETE" })).status, 200);
     assert.deepEqual(seen, ["POST", "DELETE"]);
   } finally { server.close(); }
+});
+
+test("safeFetch refuses bodies on GET and HEAD even in active mode", async () => {
+  const scope = new Scope({ allowedHosts: ["example.com"], allowActiveTesting: true });
+  await assert.rejects(safeFetch("https://example.com/", scope, { method: "GET", body: "x=1" }), /cannot carry a request body/);
+  await assert.rejects(safeFetch("https://example.com/", scope, { method: "HEAD", body: "x=1" }), /cannot carry a request body/);
 });
 
 // H3: a redirect to another origin, or down to plain http, does not carry the actor's credentials.

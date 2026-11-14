@@ -47,6 +47,12 @@ export interface CheckContext {
   readonly stagingUrl?: string;
   /** Per-check options from the config file, keyed by check name. */
   readonly options: Record<string, unknown>;
+  /**
+   * Read-only HTTP reconnaissance shared by checks in this run. Keys must
+   * include the request shape and URL. The map is per-run: results can never
+   * bleed into another target or another invocation.
+   */
+  readonly recon?: Map<string, Promise<import("./net.js").SafeResponse>>;
   /** Logger that respects the CLI verbosity. */
   log: (msg: string) => void;
 }

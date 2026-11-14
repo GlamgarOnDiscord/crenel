@@ -114,7 +114,7 @@ test("live probe: cookie-session auth + an owner marker proves the leak; the ano
     const p = proven[0]!;
     assert.match(p.id, /:draft:GET:1$/);
     assert.equal(p.severity, "critical");
-    assert.match(p.proof?.replay ?? "", /cookie: <A_SESSION>/, "the replay hint reflects cookie auth, not a bearer");
+    assert.match(p.proof?.replay ?? "", /cookie: <A_COOKIE>/, "the replay hint reflects cookie auth, not a bearer");
     assert.ok(!found.some((f) => f.id.endsWith(":anon") && f.state === "proven"), "the redirected anonymous caller is not proven");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
@@ -155,6 +155,25 @@ test("distinct contexts: accounts that share the same custom auth headers are re
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
+});
+
+test("distinct contexts: account C identical to B is skipped and cannot prove a BOLA", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    res.writeHead(200); res.end('{"id":"x","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "p", path: "/p/:id" }], accounts: { b: { label: "B", token: "same", owns: { p: ["x"] } }, c: { label: "C", token: "same" } } } },
+    });
+    assert.ok(found.some((f) => f.id === "authz-matrix:same-identity:c" && f.state === "unproven"));
+    assert.ok(!found.some((f) => f.state === "proven"), "B's own credentials under C cannot become a cross-tenant proof");
+  } finally { await new Promise<void>((r) => server.close(() => r())); }
 });
 
 test("a route that leaks only once in three replays is not proven", async () => {
@@ -252,6 +271,84 @@ test("public route: an anonymous caller already gets B's object, so another acco
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
+});
+
+test("explicit private contract: stable anonymous access to the owner's object is proven", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"not found"}'); }
+    if (req.headers.authorization === "Bearer tok-a") { res.writeHead(403); return res.end('{"error":"forbidden"}'); }
+    res.writeHead(200, { "content-type": "application/json" }); res.end('{"id":"secret-b","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "export", path: "/exports/:id", access: "private" }], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { export: ["secret-b"] } } } } },
+    });
+    const proof = found.find((f) => f.id.endsWith(":anonymous"));
+    assert.equal(proof?.state, "proven");
+    assert.equal(proof?.severity, "high");
+    assert.match(proof?.proof?.method ?? "", /declared private contract/);
+    assert.match(proof?.regressionHint ?? "", /anonymous cannot GET export/);
+  } finally { server.close(); }
+});
+
+test("a private anonymous check does not pretend ownership was tested without an attacker", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (!req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    res.writeHead(200); res.end('{"id":"private-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "private", path: "/private/:id", access: "private" }], accounts: { b: { label: "B", token: "tok-b", owns: { private: ["private-b"] } } } } },
+    });
+    assert.ok(found.some((f) => f.id === "authz-matrix:missing-attacker" && f.state === "unproven"));
+    assert.ok(!found.some((f) => f.state === "proven"));
+  } finally { server.close(); }
+});
+
+test("explicit public contract is a trust-boundary decoy and is never flagged", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_req, res) => { res.writeHead(200); res.end('{"id":"public-b","owner":"org-b"}'); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [{ name: "profile", path: "/profiles/:id", access: "public" }], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { profile: ["public-b"] } } } } },
+    });
+    assert.deepEqual(found, []);
+  } finally { server.close(); }
+});
+
+test("an imported authentication requirement proves anonymous exposure and still tests cross-tenant ownership", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    if (req.url?.includes("crenel-nonexistent")) { res.writeHead(404); return res.end('{"error":"missing"}'); }
+    if (!req.headers.authorization && req.url?.startsWith("/invoices/")) { res.writeHead(401); return res.end('{"error":"auth"}'); }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(req.url?.startsWith("/statements/") ? '{"id":"statement-b","owner":"org-b"}' : '{"id":"invoice-b","owner":"org-b"}');
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  try {
+    const found = await authzMatrix.run({
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowActiveTesting: true, allowPrivate: true }), projectDir: "/tmp", stagingUrl: `http://127.0.0.1:${port}`, log: () => {},
+      options: { "authz-matrix": { resources: [
+        { name: "invoice", path: "/invoices/:id", authentication: "required" },
+        { name: "statement", path: "/statements/:id", authentication: "required" },
+      ], accounts: { a: { label: "A", token: "tok-a" }, b: { label: "B", token: "tok-b", owns: { invoice: ["invoice-b"], statement: ["statement-b"] } } } } },
+    });
+    assert.ok(found.some((f) => f.state === "proven" && f.severity === "critical" && /Account A/.test(f.title)), "OpenAPI auth must not imply shared access");
+    assert.ok(found.some((f) => f.id.endsWith(":anonymous") && f.state === "proven" && f.severity === "high"), "the imported requirement must make a stable anonymous object response a proven authentication-boundary break");
+  } finally { server.close(); }
 });
 
 test("public route guard: a one-off anonymous leak (stale cache, race) does not hide a real cross-tenant break", async () => {

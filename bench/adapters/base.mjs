@@ -4,10 +4,10 @@ import { assertIsolatedConfig, buildPrompt, runClaude, parseFindings } from "./_
 
 export const name = "base";
 
-export async function run({ projectDir, baseUrl, tmp }) {
+export async function run({ projectDir, baseUrl, tmp, signal }) {
   assertIsolatedConfig();
   const prompt = buildPrompt({ projectDir, baseUrl });
-  const r = await runClaude({ prompt, cwd: projectDir, tmp, tool: "base" });
+  const r = await runClaude({ prompt, cwd: projectDir, tmp, tool: "base", signal });
   const findings = parseFindings(r.stdout);
   const errors = [];
   if (r.timedOut) errors.push({ check: "base", message: "claude timed out" });

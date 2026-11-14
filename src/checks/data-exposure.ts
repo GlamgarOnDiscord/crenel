@@ -12,9 +12,14 @@
 
 import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
-import { resolveAccounts, type LoginSpec, type Session } from "./session.js";
+import { resolveAccounts, sessionHeaders, sessionReplayHeaders, type LoginSpec, type Session } from "./session.js";
 
-interface Opts { endpoints?: string[]; as?: string; pii?: boolean }
+type PiiContract =
+  | { policy: "owner-only"; ownerField: string; ownerValueEnv: string }
+  | { policy: "canary"; canaryEnv: string };
+interface Opts { endpoints?: string[]; as?: string; pii?: boolean | PiiContract }
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
 // A plausible real email address. Placeholders (noreply@, no-reply@, a bare
 // example.com with no local part) are not someone's personal data.
@@ -27,6 +32,23 @@ function leakedEmails(json: unknown, out: Set<string>, depth = 0): void {
   if (typeof json !== "object") return;
   if (Array.isArray(json)) { for (const v of json) leakedEmails(v, out, depth + 1); return; }
   for (const v of Object.values(json as Record<string, unknown>)) leakedEmails(v, out, depth + 1);
+}
+
+function containsScalar(json: unknown, wanted: string, depth = 0): boolean {
+  if (depth > 8 || json == null) return false;
+  if (typeof json !== "object") return String(json) === wanted;
+  return Object.values(json as Record<string, unknown>).some((v) => containsScalar(v, wanted, depth + 1));
+}
+
+function foreignPiiRecords(json: unknown, ownerField: string, owner: string, depth = 0): number {
+  if (depth > 8 || !json || typeof json !== "object") return 0;
+  if (Array.isArray(json)) return json.reduce((n, v) => n + foreignPiiRecords(v, ownerField, owner, depth + 1), 0);
+  const o = json as Record<string, unknown>;
+  const emails = new Set<string>();
+  leakedEmails(o, emails);
+  const own = o[ownerField];
+  const here = emails.size > 0 && (typeof own === "string" || typeof own === "number") && String(own) !== owner ? 1 : 0;
+  return here + Object.values(o).reduce<number>((n, v) => n + foreignPiiRecords(v, ownerField, owner, depth + 1), 0);
 }
 
 const PASSWORD_KEY = /^(?:password|passwd|pwd|pass|user_?password|plainpassword)$/i;
@@ -61,12 +83,12 @@ export const dataExposure: Check = {
     const base = ctx.stagingUrl.replace(/\/+$/, "");
     ctx.scope.assertUrlAllowed(base);
     const rawAccounts = ((ctx.options["authz-matrix"] ?? {}) as { accounts?: Record<string, Session & { login?: LoginSpec }> }).accounts ?? {};
-    // A declared login becomes a fresh session (a pre-set token/cookie wins), like
-    // the other account-based checks (src/checks/session.ts).
-    const accounts = await resolveAccounts(ctx, rawAccounts, "data-exposure");
-    const sess = o.as ? accounts[o.as] : undefined;
-    const token = sess?.token;
-    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : sess?.cookie ? { cookie: sess.cookie } : {};
+    // Resolve only the selected actor. Logging every configured account in for a
+    // one-actor read is unnecessary traffic and can mutate login/session state.
+    const selected = o.as && rawAccounts[o.as] ? await resolveAccounts(ctx, { [o.as]: rawAccounts[o.as] }, "data-exposure") : {};
+    const sess = o.as ? selected[o.as] : undefined;
+    const headers = sessionHeaders(sess);
+    const authenticated = Object.keys(headers).length > 0;
     const findings: Finding[] = [];
     for (const ep of endpoints.slice(0, 40)) {
       const url = ep.startsWith("http") ? ep : base + (ep.startsWith("/") ? ep : "/" + ep);
@@ -92,7 +114,7 @@ export const dataExposure: Check = {
           remediation: `Remove the password (and any secret) from this response; never serialize credentials to a client. If this is a debug route, delete it or gate it behind a non-production flag and authentication. Store passwords only as a salted hash.`,
           proof: {
             method: "live GET on staging: the JSON response carries multiple plaintext passwords under password-shaped keys (values are not hashes or masks)",
-            replay: `curl -s ${JSON.stringify(url)}${token ? " -H 'authorization: Bearer <TOKEN>'" : ""} | grep -i password`,
+            replay: `curl -s ${JSON.stringify(url)}${sessionReplayHeaders(sess)} | grep -i password`,
             evidence: `${found.size} distinct plaintext passwords exposed at ${ep} (values redacted)`,
           },
           regressionHint: `After the fix, GET ${ep} must not return any password field.`,
@@ -100,30 +122,44 @@ export const dataExposure: Check = {
         if (o.pii) {
           const emails = new Set<string>();
           leakedEmails(json, emails);
-          // >=2 distinct personal emails = a directory/feed of several accounts, not one
-          // user's own record. Control: an anonymous read must be REFUSED, so the endpoint
-          // is gated yet still hands every authenticated caller other accounts' PII
-          // (excessive data exposure, OWASP API3). A publicly readable one stays a lead.
-          if (emails.size >= 2) {
+          const contract = typeof o.pii === "object" ? o.pii : undefined;
+          const canary = contract?.policy === "canary" && ENV_NAME.test(contract.canaryEnv) ? process.env[contract.canaryEnv] : undefined;
+          const owner = contract?.policy === "owner-only" && ENV_NAME.test(contract.ownerValueEnv) ? process.env[contract.ownerValueEnv] : undefined;
+          const foreign = contract?.policy === "owner-only" && owner && authenticated ? foreignPiiRecords(json, contract.ownerField, owner) : 0;
+          const canarySeen = !!(canary && containsScalar(json, canary));
+          // Several emails are only a signal: a gated member directory may be
+          // intentional. Proof needs an explicit owner-only policy plus a foreign
+          // owner in the same record, or an operator-provided canary value.
+          if (emails.size >= 2 || foreign > 0 || canarySeen) {
             const anon = await safeFetch(url, ctx.scope, { method: "GET", maxBytes: 4096 }).catch(() => null);
-            if (anon && (anon.status === 401 || anon.status === 403)) {
-              findings.push({
+            const contractProof = foreign > 0 || canarySeen;
+            const requestActor = authenticated ? "the selected ordinary account" : "an anonymous caller";
+            const replayBase = `curl -sS ${shellQuote(url)}${sessionReplayHeaders(sess, "A")}`;
+            const piiReplay = contractProof && contract?.policy === "canary"
+              ? `${replayBase} | jq --arg canary "$${contract.canaryEnv}" '.. | scalars | select(tostring == $canary)'`
+              : contractProof && contract?.policy === "owner-only"
+                ? `${replayBase} | jq --arg owner "$${contract.ownerValueEnv}" --arg field ${shellQuote(contract.ownerField)} '.. | objects | select(has($field)) | select((.[$field] | tostring) != $owner)'`
+                : `${replayBase} | grep -oiE '[a-z0-9._%+-]+@[a-z0-9.-]+' | sort -u`;
+            findings.push({
                 id: `data-exposure:pii:${ep}`,
                 check: "data-exposure",
-                title: `Excessive data exposure: ${ep} returns other accounts' PII (${emails.size} personal emails) to any authenticated user`,
-                severity: "high",
-                state: "proven",
+                title: contractProof
+                  ? `Excessive data exposure: ${ep} violates its declared ${contract!.policy} privacy contract`
+                  : `Possible excessive data exposure: ${ep} returns ${emails.size} personal emails`,
+                severity: contractProof ? "high" : "medium",
+                state: contractProof ? "proven" : "unproven",
                 location: url,
-                description: `GET ${ep}, read with one ordinary account's token, returns ${emails.size} distinct personal email addresses belonging to other accounts, while an anonymous request is refused (HTTP ${anon.status}). Any authenticated user harvests the whole user base's PII (OWASP API3, excessive data exposure): a privacy breach and a phishing / credential-stuffing seed.`,
+                description: contractProof
+                  ? `GET ${ep} as ${requestActor} returned ${canarySeen ? "the declared privacy canary" : `${foreign} record(s) carrying personal email data whose ${contract!.policy === "owner-only" ? contract!.ownerField : "owner"} does not match the caller`}. This violates the operator-declared ${contract!.policy} contract.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`
+                  : `GET ${ep}${authenticated ? " with the selected account" : " anonymously"} returned ${emails.size} distinct personal emails. That may be an intentional member directory; authentication status alone does not prove the records are unauthorized, so this remains a review lead.${anon ? ` Anonymous HTTP ${anon.status}.` : ""}`,
                 remediation: `Return only the caller's own data, or scope the response to resources they own; never include other accounts' email, phone or vehicle in a list a normal user can read. Filter at the data layer, not the client.`,
                 proof: {
-                  method: "live GET on staging with one account's token: the JSON lists several distinct real email addresses of other accounts, and the same request without a token is refused",
-                  replay: `curl -s ${JSON.stringify(url)} -H 'authorization: Bearer <A_TOKEN>' | grep -oiE '[a-z0-9._%+-]+@[a-z0-9.-]+' | sort -u`,
-                  evidence: `${emails.size} distinct personal emails exposed at ${ep}; anonymous request refused (HTTP ${anon.status}) (addresses redacted)`,
+                  method: contractProof ? `live ${authenticated ? "authenticated" : "anonymous"} GET checked against the declared ${contract!.policy} privacy contract` : `live ${authenticated ? "authenticated" : "anonymous"} GET; multiple PII values observed, authorization not established`,
+                  replay: piiReplay,
+                  evidence: contractProof ? `${canarySeen ? "declared canary present" : `${foreign} foreign-owner PII record(s)`}; values redacted` : `${emails.size} distinct personal emails; values redacted; no owner/canary proof`,
                 },
                 regressionHint: `After the fix, GET ${ep} with a normal account must not return another account's email address.`,
               });
-            } else ctx.log(`data-exposure: ${ep} returns ${emails.size} emails but an anonymous read is not refused (HTTP ${anon?.status ?? "n/a"}): public endpoint, kept a lead`);
           }
         }
       } catch (err) {
