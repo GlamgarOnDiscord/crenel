@@ -15,9 +15,7 @@ Légende statut : `ouvert` · `en cours` · `corrigé (commit)` · `arbitrage` (
 Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont corrigés et mergés (#49, #50, #54 à #58).
 
 **Restant pour Tom (décision requise) :**
-- H2 : DNS rebinding dans `safeFetch` (options (a)/(b) plus bas ; recommandation (a)).
 - W1, W2 : isolation WSL (interop Windows, `/mnt/<lecteur>` en écriture) ; seul levier : `/etc/wsl.conf` de la distribution, à proposer dans `crenel tools install --wsl` avec confirmation.
-- I2 : `.crenel/` lui-même peut être un lien (tout l'état de Crenel) ; refuser un lien ou résoudre et vérifier qu'il reste dans le projet.
 
 **Restant, faible, sans urgence :** T3 (cible sans schéma dans `freeArgsProblem`, déjà refusée par le proxy), T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales sur entrées courtes ou locales, dont `vercel-preview.ts:13`).
 
@@ -26,7 +24,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 | # | Sévérité | Zone | Fichier:ligne | Statut |
 |---|---|---|---|---|
 | H1 | Élevée | Porte lecture seule : lexing GraphQL contournable | `src/core/net.ts:110-117` | corrigé (`fb744f9`) |
-| H2 | Élevée | DNS rebinding : la résolution vérifiée n'est pas celle utilisée | `src/core/net.ts:79-95`, `:181` | **arbitrage Tom** (doc corrigée `8e90cdc`) |
+| H2 | Élevée | DNS rebinding : la résolution vérifiée n'est pas celle utilisée | `src/core/net.ts` | corrigé (option (a) : `resolveTarget` résout une fois, `fetchPinned`/`pinnedLookup` épinglent le socket aux adresses validées) |
 | H3 | Moyenne | En-têtes d'authentification transmis à travers les redirections | `src/core/net.ts:178`, `:197-200` | corrigé (`b4e2b15`) |
 | M4 | Moyenne | Clé du fournisseur LLM transmise en suivant une redirection | `src/agent/llm.ts:124` | corrigé (`d6b5058`) |
 | M5 | Moyenne | Clés JSON dupliquées : différentiel de parseur sur `readOnlyPost` | `src/core/net.ts:129-134` | corrigé (`2acbe53`) |
@@ -43,7 +41,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 | W2 | Moyenne | WSL : `/mnt/<lecteur>` monté en écriture pour l'outil | `src/toolbox/wsl.ts` | **arbitrage Tom** (déjà documenté) |
 | W3 | Info | WSL : en NAT, le proxy écoute sur la passerelle du commutateur virtuel (jeton par exécution) | `src/toolbox/wsl.ts:140` | accepté |
 | I1 | Moyenne | Secrets : écriture à travers un lien symbolique planté dans `.crenel/` | `src/integrations/secrets.ts:40-44` | corrigé (PR #55) |
-| I2 | Faible | `.crenel/` lui-même peut être un lien (tout l'état de Crenel, pas seulement les secrets) | `src/integrations/cli.ts` (`stateDirOf`) | ouvert (décision globale) |
+| I2 | Faible | `.crenel/` lui-même peut être un lien (tout l'état de Crenel, pas seulement les secrets) | `src/agent/state.ts` (`StateStore`) | corrigé (refus d'un `.crenel/` lien, comme I1) |
 | I3 | Faible | `deliver` lit tout le corps de la réponse avant de le couper à 2 Ko | `src/integrations/deliver.ts:104` | corrigé (PR #58) |
 | R1 | Moyenne | ReDoS sur des corps de la cible (2 Mo) : meta refresh, `<a href>`, `<script>`, `<link>`, imports JS, table de chunks, version Next, `.env`, `.git/config`, chemins de pile | `src/core/html.ts` + 6 fichiers | corrigé (PR #56) |
 | R2 | Faible | Regex polynomiales sur entrées courtes ou locales (motif du modèle, extrait, Dockerfile, fichiers du projet, en-tête `Proxy-Authorization`) | voir détail | accepté (taille bornée) |

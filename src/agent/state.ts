@@ -10,7 +10,7 @@
 // Everything is plain JSON so a human (or another tool) can read it. Nothing
 // here is written outside `.crenel/`: Crenel never touches the scanned project.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, renameSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Finding } from "../core/types.js";
@@ -72,6 +72,14 @@ function writeJson(path: string, data: unknown): void {
 
 export class StateStore {
   constructor(readonly dir: string) {
+    // I2 (HARDENING-LOG): `.crenel/` holds all of Crenel's state and every
+    // write lands inside it. A symlink here would redirect that state out of
+    // the project, so refuse one outright, the same stance the secrets store
+    // takes for a symlinked file. `lstatSync` throws if it is not there yet
+    // (the normal first-run case), which is fine.
+    let link = false;
+    try { link = lstatSync(dir).isSymbolicLink(); } catch { /* not created yet */ }
+    if (link) throw new Error(`${dir} is a symbolic link: Crenel refuses to use it for state`);
     mkdirSync(join(dir, "runs"), { recursive: true });
   }
 
