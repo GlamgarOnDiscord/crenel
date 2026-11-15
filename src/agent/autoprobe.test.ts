@@ -35,6 +35,7 @@ test("sourceRoutesToEndpoints accepts only safe GET object routes and normalizes
     hint("GET", "/api/collection"),
     hint("GET", "/api/raw/${id}"),
     hint("GET", "//evil.example/:id"),
+    hint("GET", "/\\evil.example/:id"), // backslash escapes to another origin (WHATWG treats \ as /)
   ], "https://staging.example.test/root").map(({ url, template }) => ({ url, template })), [
     { url: "https://staging.example.test/api/projects/1", template: "/api/projects/:id" },
   ]);

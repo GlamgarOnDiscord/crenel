@@ -37,7 +37,7 @@ export function sourceRoutesToEndpoints(hints: SourceRouteHint[], base: string):
   const out: Endpoint[] = [];
   const seen = new Set<string>();
   for (const hint of hints) {
-    if (hint.method.toUpperCase() !== "GET" || !hint.path.startsWith("/") || hint.path.startsWith("//") || hint.path.includes("*")) continue;
+    if (hint.method.toUpperCase() !== "GET" || !hint.path.startsWith("/") || hint.path.startsWith("//") || hint.path.includes("\\") || hint.path.includes("*")) continue;
     const rawPath = hint.path.split("?", 1)[0]!;
     if (RISKY_SOURCE_PATH.test(rawPath)) continue;
     const params = [...rawPath.matchAll(SOURCE_PARAM)];
@@ -47,12 +47,17 @@ export function sourceRoutesToEndpoints(hints: SourceRouteHint[], base: string):
     // Reject unresolved framework syntax or interpolation. Only the one declared
     // object id may vary in a source-derived autoprobe route.
     if (/[{}\[\]$<>]/.test(template) || template.includes(":id:")) continue;
-    let url: string;
-    try { url = new URL(template.replace(":id", "1"), origin).toString(); } catch { continue; }
-    const key = `GET ${new URL(url).origin}${template}`;
+    let resolved: URL;
+    try { resolved = new URL(template.replace(":id", "1"), origin); } catch { continue; }
+    // A route literal must resolve to the target's own origin. Backslashes,
+    // protocol-relative or absolute literals can escape it (WHATWG treats `\`
+    // as `/`); Scope would refuse the undeclared host, but autoprobe never
+    // emits an off-origin endpoint in the first place.
+    if (resolved.origin !== origin.origin) continue;
+    const key = `GET ${resolved.origin}${template}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ url, template });
+    out.push({ url: resolved.toString(), template });
   }
   return out;
 }
