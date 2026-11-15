@@ -138,7 +138,8 @@ test("explore: a read on a route no check knows is proven by request replay, wit
     assert.match(f.proof!.evidence ?? "", /without credentials/);
     assert.match(f.proof!.evidence ?? "", /cannot exist/);
     assert.ok(t.hits.includes("GET /rpc/billing.getStatement?statement=stm_b_19 anon"), "the negative control was sent without credentials");
-    // The prompt showed the code search result fenced, and no token.
+    // The first prompt has the deterministic source route map; the next one has the explicit search result.
+    assert.ok(t.llm.prompts[0]!.includes("GET /rpc/billing.getStatement"), "source route reconnaissance reaches the first turn");
     assert.ok(t.llm.prompts[1]!.includes("routes.ts:1"));
     assert.ok(!t.llm.prompts.some((p) => p.includes("tok-a") || p.includes("tok-b")), "the model never sees a token");
   } finally { t.close(); }
@@ -184,6 +185,31 @@ test("explore: the request budget stops exploration, not the run", async () => {
     assert.equal(t.hits.length, 3);
     assert.ok(events(t.run, "explore.stop").some((e) => String(e.reason).includes("request budget")));
     assert.equal(t.llm.prompts.length, 1, "no second model call once the budget is spent");
+  } finally { t.close(); }
+});
+
+test("explore: identical reads are skipped unless fresh is explicit", async () => {
+  const same = { tool: "http.request", args: { url: "/rpc/billing.getPlan?statement=stm_b_19", as: "a" } };
+  const t = await setup({ script: [turn([same, same, { tool: "http.request", args: { ...same.args, fresh: true } }], true)] });
+  try {
+    await t.run.start();
+    assert.equal(t.hits.filter((h) => h.includes("/rpc/billing.getPlan")).length, 2, "one normal read and one deliberate fresh read reached the target");
+    assert.equal(events(t.run, "explore.repeat").length, 1);
+    assert.match(String(events(t.run, "explore.tool")[1]!.result), /duplicate read/);
+    const end = events(t.run, "explore.end")[0]!;
+    assert.equal(end.duplicateReads, 1);
+    assert.equal((end.funnel as { duplicateReads: number }).duplicateReads, 1);
+  } finally { t.close(); }
+});
+
+test("explore: an authorized write invalidates cached HTTP reads", async () => {
+  const read = { tool: "http.request", args: { url: "/rpc/billing.getPlan", as: "a" } };
+  const write = { tool: "http.request", args: { method: "PATCH", url: "/rpc/billing.getPlan", as: "a", body: "{}" } };
+  const t = await setup({ explore: "full", active: true, script: [turn([read, write, read], true)] });
+  try {
+    await t.run.start();
+    assert.equal(t.hits.filter((h) => h.includes("/rpc/billing.getPlan")).length, 3, "the post-write GET reaches the target again");
+    assert.equal(events(t.run, "explore.repeat").length, 0);
   } finally { t.close(); }
 });
 

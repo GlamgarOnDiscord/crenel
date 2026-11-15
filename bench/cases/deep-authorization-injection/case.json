@@ -1,0 +1,46 @@
+{
+  "title": "Nested BOLA, function-level authorization and URL injection behind realistic controls",
+  "type": "live",
+  "config": {
+    "options": {
+      "nested-authz": {
+        "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b", "marker": "owner-b@example.test" } },
+        "resources": [
+          { "name": "project", "path": "/api/orgs/:org/projects/:id", "segments": { "org": { "b": "org-b" }, "id": { "b": "project-b" } } },
+          { "name": "invoice", "path": "/api/orgs/:org/invoices/:id", "segments": { "org": { "b": "org-b" }, "id": { "b": "invoice-b" } } },
+          { "name": "note", "path": "/api/orgs/:org/notes/:id", "segments": { "org": { "b": "org-b" }, "id": { "b": "note-b" } } }
+        ]
+      },
+      "function-authz": {
+        "accounts": { "privileged": { "token": "admin-token" }, "normal": { "token": "tok-a" } },
+        "functions": [
+          { "name": "user-list", "path": "/api/admin/users" },
+          { "name": "audit-log", "path": "/api/admin/audit" },
+          { "name": "public-stats", "path": "/api/stats" }
+        ]
+      },
+      "param-injection": {
+        "enabled": true,
+        "endpoints": [
+          { "url": "/api/lookup/:name", "param": "name", "baseline": "alice" },
+          { "url": "/api/search", "param": "q", "baseline": "alice" },
+          { "url": "/api/catalog?sort=name", "param": "sort", "baseline": "name" }
+        ]
+      }
+    }
+  },
+  "mustFind": [
+    { "id": "nested-project-bola", "check": "nested-authz", "where": "/api/orgs/org-b/projects/project-b", "state": "proven", "minSeverity": "high", "why": "The parent organization is accepted but the foreign project leaf is not authorized." },
+    { "id": "admin-users-bfla", "check": "function-authz", "where": "/api/admin/users", "state": "proven", "minSeverity": "high", "why": "A normal authenticated account reaches the same privileged user list as an administrator." },
+    { "id": "lookup-path-sqli", "check": "param-injection", "where": "/api/lookup/", "state": "proven", "minSeverity": "critical", "why": "A URL path value is concatenated into a query: TRUE and FALSE conditions diverge." }
+  ],
+  "mustNotFlag": [
+    { "id": "nested-invoice-gated", "check": "nested-authz", "where": "/api/orgs/org-b/invoices/invoice-b", "forbid": "any", "why": "The invoice leaf is checked and a foreign caller receives 403." },
+    { "id": "nested-note-public", "check": "nested-authz", "where": "/api/orgs/org-b/notes/note-b", "forbid": "proven", "why": "The note is intentionally public, so it is not a cross-tenant authorization bypass." },
+    { "id": "admin-audit-gated", "check": "function-authz", "where": "/api/admin/audit", "forbid": "any", "why": "The audit function enforces the administrator role." },
+    { "id": "stats-public", "check": "function-authz", "where": "/api/stats", "forbid": "proven", "why": "Public statistics have no privileged authorization boundary." },
+    { "id": "search-parameterized", "check": "param-injection", "where": "/api/search", "forbid": "any", "why": "The search endpoint treats its query as a literal value." },
+    { "id": "catalog-ignored-sort", "check": "param-injection", "where": "/api/catalog", "forbid": "any", "why": "The catalog ignores unknown sort values and returns a stable safe response." }
+  ],
+  "maxUnknownHigh": 0
+}

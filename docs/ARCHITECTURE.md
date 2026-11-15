@@ -56,6 +56,24 @@ a class and a `detail`, and a validator in `agent/validators.ts` replays it. Any
 Budgets (`maxCalls`, `maxRequests`, `maxTokens`, `maxMs`, `maxToolRuns`) live in
 `options.explore`.
 
+Before the first model turn, exploration builds a bounded, read-only route map
+from the project source. It recognizes common server declarations (Express,
+Fastify, Flask/FastAPI, Spring, Laravel, Rails/Sinatra and Go), client `fetch` /
+Axios / Ky calls, and file-system routes under Next.js `app/api` and
+`pages/api`. These entries are fenced as untrusted context and are only a map:
+they can guide a request, but can never create or prove a finding. Exact repeated
+reads (`http.request` GET/HEAD, `code.search`, `code.read`, `bundle.fetch`) are
+skipped to preserve the request and context budgets. A caller can set
+`fresh: true` on an HTTP read when a second observation is part of a deliberate
+stability or timing check.
+
+The deterministic `autoprobe` path uses the same map conservatively: it admits
+only one-parameter GET object routes, rejects catch-alls and state-changing
+names, normalizes the parameter to an `:id` template, and submits the resulting
+requests to the existing cross-actor validators. POST/PUT/PATCH/DELETE and
+`ANY` hints never enter this path. A source hint can increase reach, but it has
+no authority to create a claim or a proof.
+
 Every finding is proven by a **generic oracle**, never a target-specific
 signature: a differential, a reflection, a computation, an out-of-band callback,
 real execution or a file signature. Each oracle also has guards against false
