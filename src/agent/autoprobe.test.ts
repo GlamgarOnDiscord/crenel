@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Scope } from "../core/scope.js";
-import { autoClaims, runAutoProbe } from "./autoprobe.js";
+import { autoClaims, runAutoProbe, sourceRoutesToEndpoints } from "./autoprobe.js";
 import type { ValidatorEnv } from "./validators.js";
 
 test("autoClaims: systematic set per endpoint x technique, no accounts -> no auth claims", () => {
@@ -19,6 +19,61 @@ test("autoClaims: systematic set per endpoint x technique, no accounts -> no aut
   assert.ok(full.some((c) => c.class === "explore.jwt-forge"));
   assert.ok(full.some((c) => c.class === "explore.cross-actor" && c.detail.attacker === "anon"));
   assert.ok(full.some((c) => c.class === "explore.cross-actor" && c.detail.attacker === "a"));
+});
+
+test("sourceRoutesToEndpoints accepts only safe GET object routes and normalizes one id", () => {
+  const hint = (method: string, path: string) => ({ method, path, file: "routes.ts", line: 1 });
+  assert.deepEqual(sourceRoutesToEndpoints([
+    hint("GET", "/api/projects/:projectId"),
+    hint("get", "/api/projects/{projectId}"), // duplicate after normalization
+    hint("POST", "/api/projects/:projectId"),
+    hint("ANY", "/api/reports/:id"),
+    hint("GET", "/api/orgs/:org/projects/:id"),
+    hint("GET", "/api/files/:path*"),
+    hint("GET", "/account/reset/:id"),
+    hint("GET", "/account/password-reset/:id"),
+    hint("GET", "/api/collection"),
+    hint("GET", "/api/raw/${id}"),
+    hint("GET", "//evil.example/:id"),
+  ], "https://staging.example.test/root").map(({ url, template }) => ({ url, template })), [
+    { url: "https://staging.example.test/api/projects/1", template: "/api/projects/:id" },
+  ]);
+  assert.deepEqual(sourceRoutesToEndpoints([hint("GET", "/api/x/:id")], "not a URL"), []);
+  assert.deepEqual(sourceRoutesToEndpoints([hint("GET", "/api/x/:id")], "file:///tmp/x"), []);
+});
+
+test("source-derived endpoints can guide autoprobe, but only validators prove the vulnerable twin", async () => {
+  let postHits = 0;
+  const srv = createServer((req, res) => {
+    const path = new URL(req.url!, "http://x").pathname;
+    const who = req.headers.authorization;
+    const json = (s: number, b: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    if (req.method === "POST") { postHits++; return json(200, { changed: true }); }
+    const m = /^\/internal\/(records|safe)\/([^/]+)$/.exec(path);
+    if (!m || m[2] !== "1") return json(404, { error: "not found" });
+    if (!who) return json(401, { error: "auth" });
+    if (m[1] === "safe" && who !== "Bearer tok-b") return json(403, { error: "forbidden" });
+    return json(200, { id: "1", owner: "acct_b_marker" });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const dir = mkdtempSync(join(tmpdir(), "crenel-ap-source-"));
+  try {
+    const endpoints = sourceRoutesToEndpoints([
+      { method: "GET", path: "/internal/records/:recordId", file: "api.ts", line: 1 },
+      { method: "GET", path: "/internal/safe/:recordId", file: "api.ts", line: 2 },
+      { method: "POST", path: "/internal/records/:recordId", file: "api.ts", line: 3 },
+    ], base);
+    const env: ValidatorEnv = {
+      scope: new Scope({ allowedHosts: ["127.0.0.1"], allowPrivate: true, stagingUrl: base }),
+      projectDir: dir, stagingUrl: base, checks: [],
+      options: { "authz-matrix": { accounts: { a: { token: "tok-a", marker: "acct_a_marker" }, b: { token: "tok-b", marker: "acct_b_marker" } } } },
+    };
+    const result = await runAutoProbe(env, { endpoints }, { idScan: 0 });
+    assert.ok(result.proven.some((v) => /\/internal\/records\/1/.test(v.reason)), result.proven.map((v) => v.reason).join(" | "));
+    assert.ok(!result.proven.some((v) => /\/internal\/safe\/1/.test(v.reason)), "the owner-gated twin stays silent");
+    assert.equal(postHits, 0, "a source POST never enters autoprobe");
+  } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("runAutoProbe proves a public object leak deterministically (no model)", async () => {

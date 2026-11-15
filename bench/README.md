@@ -27,6 +27,19 @@ their truth is closed, which penalizes high/critical proven spam outside the
 declared truth. Recorded model scripts are reported as **replay validation**,
 separate from discovery recall. CI uploads the complete JSON manifest.
 
+The local suite includes adversarial safe twins for status-only and
+reflection-only oracles (owner-gated/public authorization routes, parameterized
+lookups, escaped/JSON-only stored content, privileged-field allowlists, password
+hashes and schema fields). Adding a case must increase hardness without changing
+the scorer or weakening an existing truth rule. A perfect local score is a
+regression result, not a competitive claim; tool comparisons require the same
+neutral targets, model, budget and ground truth for every adapter.
+
+On the local suite at seed `market-hardness-20261114` (41 cases), the current
+branch measured 48/48 discovered flaws plus 1/1 replay-validated flaw, with
+68/68 declared decoys silent. The full report also contains findings outside
+the declared truth on open cases; those are not counted as zero false positives.
+
 The `base` adapter ("Claude Code alone") runs `claude -p` in the logged-in
 config directory named by `CRENEL_BENCH_CC_CONFIG` (required). By default the
 model may only read the case and run `curl` (`--allowedTools

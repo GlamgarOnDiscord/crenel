@@ -1,5 +1,27 @@
 # Exploration: closing the recall gap, honestly
 
+## Internal hardness gate, measured 2026-11-15
+
+The repository's local regression benchmark now contains three additional
+adversarial cases covering nested BOLA, broken function authorization, URL-path
+SQL injection, privileged signup, stored XSS, cross-account password takeover
+with restoration, and plaintext credential exposure. Every vulnerable mechanism
+has a safe or public twin; the closed cases also reject any undeclared proven
+high/critical finding as spam.
+
+On seed `market-hardness-20261114`, Crenel scored **48/48 flaws discovered plus
+1/1 replay-validated flaw, with 0/68 declared decoys and 0 spam penalties**. This is an
+internal regression/hardness result, not evidence that Crenel beats another tool:
+a competitive claim still requires rerunning every tool on the same neutral
+targets, model, budget and ground truth. The new cases do not change the scorer
+or any existing truth file.
+
+Exploration also receives a bounded route map before its first model call,
+including common framework declarations, client HTTP calls and implicit Next.js
+API routes. Exact repeated reads are suppressed unless the model explicitly asks
+for a fresh observation. Both changes improve reach per request without changing
+what counts as proof.
+
 On neutral targets (DVGA + Juice Shop + crAPI, ground truth /32, proven findings only):
 
 | Tool | Recall |
@@ -38,8 +60,7 @@ no-false-positive behaviour, not a bug.
 Caveats: both apps are famous, so a model may know their flaws (the deterministic
 `scan` + `autoprobe` alone reach the same 13/24 here: the model added nothing new);
 the set is small; the changes were developed while looking at these two targets, so
-a held-out target (VAmPI, crAPI) is the next honest check. Misses: the basket IDOR
-(no proof — now found by the owner-field id scan), admin registration (proven by the new
+a held-out target (VAmPI or another target not used to design the case) is the next honest check. At the time of that historical run, misses included admin registration (proven by the new
 create-mode mass assignment when claimed, not claimed in the run), DOM XSS (proven
 with a browser configured, not in the run), NoSQL reviews, feedback deletion and
 basket manipulation (no cross-account write validator yet), open redirect via an
@@ -48,7 +69,7 @@ authorization bypass, stack traces.
 
 ## Why the gap is structural, not just missing checks
 
-The free LLM agents (Claude Code alone, HexStrike) count every finding their model **asserts** as proven, across every category. Crenel counts a finding only when a **deterministic validator replays it** — its "proof, not noise" guarantee: false positives are kept out by the validators and none has been observed on the bench, which is not a claim that there can be none. Each validator is additionally checked against adversarial *safe* servers — endpoints that look vulnerable but are not (a public catalog, a team roster, a login carrying a fresh per-request token, a function open to every authenticated user, a DELETE that acks without deleting, a fixed redirect, a REST page that says "Did you mean", a Firebase web key, a Stripe publishable key, a correctly-signed HS256 token, a DOM sink that only sets textContent) — which must stay unproven. The sweep found and fixed three false positives: a public aggregate and a team roster wrongly flagged as data exposure, and a public-by-design Firebase key flagged as a secret. All are locked in as regression tests. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
+Different adapters can expose different proof contracts, so their scores are only comparable under an explicitly equal protocol. Crenel counts a finding only when a **deterministic validator replays it** — its proof discipline. Each validator is additionally checked against adversarial *safe* servers — endpoints that look vulnerable but are not (a public catalog, a team roster, a login carrying a fresh per-request token, a function open to every authenticated user, a DELETE that acks without deleting, a fixed redirect, a REST page that says "Did you mean", a Firebase web key, a Stripe publishable key, a correctly-signed HS256 token, a DOM sink that only sets textContent) — which must stay unproven. The sweep found and fixed three false positives: a public aggregate and a team roster wrongly flagged as data exposure, and a public-by-design Firebase key flagged as a secret. All are locked in as regression tests. That gate is also the ceiling on recall: a real flaw in a category with no generic validator, or one the model reached but could not hand to a validator, never scores.
 
 So the gap closes on two tracks, and neither is overfitting (no target signatures, no self-asserted proofs):
 
@@ -58,7 +79,6 @@ Each is a pure oracle + a negative control, proving a mechanism, never a signatu
 
 Candidates next, with an honest oracle:
 - **DOM-XSS in autoprobe** — the deterministic path does not yet drive a headless browser; the model path proves it when Playwright is configured (`CRENEL_PLAYWRIGHT`). Wiring a bounded browser probe into `autoprobe` would make it reproducible.
-- **time-based blind SQLi / NoSQLi** — a payload that sleeps the database proves injection where no boolean differential surfaces; honest only with a repeated-measure control to rule out a slow endpoint.
 - **CSRF** — a state-changing POST accepted with no token and a cross-site `Origin`, proven by a differential (the same request with a valid token/origin vs without); needs active mode and a careful control so a token-less public endpoint is not flagged.
 
 ## Track B — let the model work like a free agent (the real lever)
@@ -70,6 +90,8 @@ The plan: run the exploration model as a **free agent with real tools and skills
 Enabling pieces:
 - **Custom / local model providers** (done): an `Llm` provider registry (`src/agent/llm.ts`) so exploration can target any OpenAI-compatible endpoint, Ollama, or the Anthropic API directly — not only the `claude` CLI. Keys only from the environment.
 - A broader, higher-budget toolbox (done: full mode now 24 calls / 300 requests / 10 tool runs / 25 min), and an aggressive, persistent exploitation prompt (done).
+- **Source route reconnaissance and repetition control** (done): the first turn sees bounded route literals and implicit Next.js API paths from source, while duplicate reads are skipped unless `fresh: true` is intentional. The route map remains untrusted context and never proves a finding.
+- **Safe source routes in autoprobe** (done): deterministic probing admits only one-parameter GET object routes from that map; risky names, wildcards, multiple parameters and every write method are excluded before validators run.
 - The agent-freedom step itself: give the spawned agent its own tools/skills within the perimeter proxy, keeping every request on the scoped client. A shell alone does not keep it in the perimeter (a direct socket skips the proxy): the agent runs where egress is restricted at the network layer (a container whose only route out is the proxy), as `docs/TRACK-B-FREE-AGENT.md` details.
 
 The guarantee throughout: a finding is `proven` only when a deterministic validator replays it. Freedom and more models change what the agent *reaches*, never what counts as proof.

@@ -36,6 +36,7 @@ export function* walkFiles(dir: string, opts: WalkOptions = {}): Generator<strin
     let entries;
     try {
       entries = readdirSync(d, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     } catch {
       return;
     }

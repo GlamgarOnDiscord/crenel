@@ -1,0 +1,29 @@
+{
+  "title": "Account takeover and credential exposure with restoration and schema decoys",
+  "type": "live",
+  "config": {
+    "env": { "CRENEL_BENCH_RESTORE_PASSWORD": "victim-original-Aa1!" },
+    "options": {
+      "authz-matrix": { "accounts": { "a": { "token": "tok-a" }, "b": { "token": "tok-b" } } },
+      "password-takeover": {
+        "enabled": true,
+        "targets": [
+          { "name": "unsafe-password-change", "changePath": "/accounts/unsafe/:id/password", "victimId": "victim-b", "body": "{\"password\":\"{{PW}}\"}", "login": { "path": "/login", "userField": "username", "victimUser": "victim-b" }, "restorePasswordEnv": "CRENEL_BENCH_RESTORE_PASSWORD" },
+          { "name": "safe-password-change", "changePath": "/accounts/safe/:id/password", "victimId": "victim-safe", "body": "{\"password\":\"{{PW}}\"}", "login": { "path": "/login", "userField": "username", "victimUser": "victim-safe" }, "restorePasswordEnv": "CRENEL_BENCH_RESTORE_PASSWORD" }
+        ]
+      },
+      "data-exposure": { "endpoints": ["/debug/raw-users", "/debug/password-policy", "/debug/form-schema"] }
+    }
+  },
+  "mustFind": [
+    { "id": "cross-account-password-change", "check": "password-takeover", "where": "/accounts/unsafe/victim-b/password", "state": "proven", "minSeverity": "critical", "why": "A changes B's password, logs in as B with it, then the check restores B's original password." },
+    { "id": "plaintext-password-dump", "check": "data-exposure", "where": "/debug/raw-users", "state": "proven", "minSeverity": "critical", "why": "The JSON response returns multiple distinct plaintext passwords under credential-shaped keys." }
+  ],
+  "mustNotFlag": [
+    { "id": "password-change-owner-gated", "check": "password-takeover", "where": "/accounts/safe/victim-safe/password", "forbid": "proven", "why": "The safe endpoint accepts only the victim's own session." },
+    { "id": "password-restore-succeeded", "check": "password-takeover", "text": "NOT restored", "forbid": "any", "why": "The active proof must leave both throwaway victim accounts at their declared original password." },
+    { "id": "password-policy-metadata", "check": "data-exposure", "where": "/debug/password-policy", "forbid": "any", "why": "Algorithm names in password-policy documentation are not exposed credentials." },
+    { "id": "empty-password-schema", "check": "data-exposure", "where": "/debug/form-schema", "forbid": "any", "why": "An empty form field and the word password are schema metadata, not exposed credentials." }
+  ],
+  "maxUnknownHigh": 0
+}

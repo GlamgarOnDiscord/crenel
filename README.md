@@ -12,7 +12,7 @@ proves each one with a replayable request, and turns it into a regression test.
 [![License: MIT](https://img.shields.io/badge/license-MIT-F2B01E?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-1b1d2a?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-1b1d2a?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Checks](https://img.shields.io/badge/checks-46-1b1d2a?style=flat-square)](docs/CHECKS.md)
+[![Checks](https://img.shields.io/badge/checks-65-1b1d2a?style=flat-square)](docs/CHECKS.md)
 [![Tests](https://img.shields.io/badge/engine%20tests-538%20passing-1b1d2a?style=flat-square)](#contributing)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1b1d2a?style=flat-square)](#quick-start)
 
@@ -132,7 +132,7 @@ Optional toolbox: `crenel tools build` then `crenel tools nuclei|katana|truffleh
 
 ## Measured, not claimed
 
-[`bench/`](bench/) holds small multi-tenant targets with ground truth: real flaws to find and decoys that must stay quiet. `node bench/run.mjs` scores Crenel, misses included. Other tools get adapters next.
+[`bench/`](bench/) holds small multi-tenant targets with ground truth: real flaws to find and decoys that must stay quiet. `node bench/run.mjs` scores Crenel, misses included. The repository includes the Crenel adapter and a Claude Code baseline adapter; comparative claims require running every available adapter on the same neutral case manifest.
 
 ## Contributing
 

@@ -1,0 +1,33 @@
+{
+  "title": "Persistent input workflows: privileged signup and stored XSS with safe twins",
+  "type": "live",
+  "config": {
+    "options": {
+      "signup-privilege": {
+        "enabled": true,
+        "targets": [
+          { "name": "unsafe-signup", "path": "/signup/unsafe", "body": { "username": "bench", "password": "throwaway" }, "privileged": { "role": "admin" }, "readPath": "/internal/users/unsafe", "listField": "users" },
+          { "name": "safe-signup", "path": "/signup/safe", "body": { "username": "bench", "password": "throwaway" }, "privileged": { "role": "admin" }, "readPath": "/internal/users/safe", "listField": "users" }
+        ]
+      },
+      "stored-xss": {
+        "enabled": true,
+        "targets": [
+          { "name": "unsafe-comment", "store": { "path": "/comments/unsafe", "body": "{\"text\":\"{{XSS}}\"}" }, "serve": { "path": "/feed/unsafe" } },
+          { "name": "escaped-comment", "store": { "path": "/comments/safe", "body": "{\"text\":\"{{XSS}}\"}" }, "serve": { "path": "/feed/safe" } },
+          { "name": "json-comment", "store": { "path": "/comments/json", "body": "{\"text\":\"{{XSS}}\"}" }, "serve": { "path": "/feed/json" } }
+        ]
+      }
+    }
+  },
+  "mustFind": [
+    { "id": "signup-role-escalation", "check": "signup-privilege", "where": "/signup/unsafe", "state": "proven", "minSeverity": "critical", "why": "The public signup binds role=admin while its control account remains a member." },
+    { "id": "stored-comment-xss", "check": "stored-xss", "where": "/feed/unsafe", "state": "proven", "minSeverity": "high", "why": "A unique HTML payload is persisted and later rendered unescaped in an HTML response." }
+  ],
+  "mustNotFlag": [
+    { "id": "signup-role-allowlist", "check": "signup-privilege", "where": "/signup/safe", "forbid": "proven", "why": "The safe signup ignores role and assigns member server-side." },
+    { "id": "stored-comment-escaped", "check": "stored-xss", "where": "/feed/safe", "forbid": "proven", "why": "The HTML view escapes angle brackets before rendering." },
+    { "id": "stored-comment-json", "check": "stored-xss", "where": "/feed/json", "forbid": "proven", "why": "Raw markup inside application/json is data, not an executable HTML context." }
+  ],
+  "maxUnknownHigh": 0
+}

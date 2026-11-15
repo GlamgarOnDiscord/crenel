@@ -31,6 +31,7 @@ import { relative, walkFiles } from "../core/walk.js";
 import { crawlLiveBundle, extractEndpoints, type ServedFile } from "../checks/live-bundle.js";
 import type { PlannedRequest } from "./gate.js";
 import { estimateTokens, type Llm } from "./llm.js";
+import { discoverSourceRoutes } from "./source-routes.js";
 import { fence, untrusted, UNTRUSTED_PREAMBLE } from "./untrusted.js";
 import {
   ACTORS, actorMarker, actorToken, cleanHeaders, insideProject, resolveExploreUrl, validateClaim,
@@ -90,6 +91,8 @@ const actor = z.enum(ACTORS as unknown as [Actor, ...Actor[]]);
 const requestShape = z.object({
   method: z.string().max(10).optional(), url: z.string().min(1).max(2000), as: actor.optional(),
   headers: z.record(z.string(), z.string()).optional(), body: z.string().max(20_000).optional(),
+  /** Bypass the read repetition detector when a second observation is intentional. */
+  fresh: z.boolean().optional(),
 });
 const severity = z.enum(["info", "low", "medium", "high", "critical"]);
 const CLAIM_CLASSES = { replay: "explore.replay", "cross-actor": "explore.cross-actor", secret: "explore.secret", "file-match": "explore.file-match", injection: "explore.injection", ssrf: "explore.ssrf", "stored-xss": "explore.stored-xss", "dom-xss": "explore.dom-xss", lfi: "explore.lfi", "jwt-none": "explore.jwt-none", "mass-assignment": "explore.mass-assignment", cors: "explore.cors", reuse: "explore.reuse", redirect: "explore.redirect", graphql: "explore.graphql", "jwt-forge": "explore.jwt-forge", "cross-actor-write": "explore.cross-actor-write", "user-enum": "explore.user-enum", "priv-escalation": "explore.priv-escalation", "data-exposure": "explore.data-exposure", bfla: "explore.bfla", flag: "explore.flag" } as const;
@@ -120,6 +123,7 @@ export interface ExploreResult {
   requests: number;
   tokens: number;
   toolRuns: number;
+  duplicateReads: number;
   /** Why exploration ended before the model said it was done. */
   stopped?: string;
   lines: string[];
@@ -172,6 +176,8 @@ export class Explorer {
   // Where findings are lost, per claim class: submitted, proven, and the stage that stopped the rest.
   private readonly funnel: Record<string, { submitted: number; proven: number; lost: Record<string, number> }> = {};
   private notedLeads = 0;
+  private duplicateReads = 0;
+  private readonly readCache = new Map<string, string>();
   // The config's options, with account markers derived at run time where none is declared.
   private options: Record<string, unknown>;
   private rejectedTurns = 0;
@@ -218,6 +224,8 @@ export class Explorer {
     // page and the routes its scripts cite, so the first turn already has
     // something to work on (a model call costs more than a few GETs).
     await this.deriveAccountMarkers();
+    const sourceRoutes = discoverSourceRoutes(this.d.projectDir);
+    if (sourceRoutes.length) this.history.push(`[reconnaissance source, avant le premier tour]\n${sourceRoutes.length} route(s) déclarée(s) dans le code — carte seulement, jamais une preuve:\n${fence(untrusted("source-routes", sourceRoutes.map((r) => `${r.method} ${r.path}  (${r.file}:${r.line})`).join("\n"), 8000))}`);
     if (this.d.config.scope.stagingUrl && this.d.budget.maxRequests >= 10) {
       const out = await this.tool("bundle.fetch", {});
       const page = this.bundle?.find((f) => f.kind === "html");
@@ -266,16 +274,17 @@ export class Explorer {
     const over = this.overBudget();
     if (over && !this.stopped && this.calls < this.d.budget.maxCalls) this.stopped = over;
     const proven = this.found.filter((x) => x.f.state === "proven").length;
-    const funnel = { claims: this.funnel, notedLeads: this.notedLeads, rejectedTurns: this.rejectedTurns, requestsByActor: this.byActor() };
+    const funnel = { claims: this.funnel, notedLeads: this.notedLeads, rejectedTurns: this.rejectedTurns, duplicateReads: this.duplicateReads, requestsByActor: this.byActor() };
     const funnelLine = Object.entries(this.funnel).map(([c, v]) => `${c} ${v.proven}/${v.submitted}${Object.keys(v.lost).length ? ` (perdu: ${Object.entries(v.lost).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`).join(" · ");
     const lines = [
       `${this.calls} appel(s) au modèle, ${this.requests} requête(s), ~${this.tokens} jetons${this.toolRuns ? `, ${this.toolRuns} outil(s) lancé(s)` : ""}`,
       `${proven} prouvé(s) par un validateur générique, ${this.found.length - proven} piste(s) gardée(s)`,
+      ...(this.duplicateReads ? [`${this.duplicateReads} lecture(s) identique(s) évitée(s), budget conservé`] : []),
       ...(funnelLine ? [`entonnoir: ${funnelLine}${this.notedLeads ? ` · ${this.notedLeads} piste(s) notée(s) sans claim` : ""}`] : this.notedLeads ? [`entonnoir: aucune claim, ${this.notedLeads} piste(s) notée(s)`] : []),
       ...(this.stopped ? [`arrêt: ${this.stopped}`] : []),
     ];
-    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, proven, leads: this.found.length - proven, funnel });
-    return { found: this.found, calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, stopped: this.stopped, lines };
+    this.d.emit("explore.end", { calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, duplicateReads: this.duplicateReads, stopped: this.stopped, proven, leads: this.found.length - proven, funnel });
+    return { found: this.found, calls: this.calls, requests: this.requests, tokens: this.tokens, toolRuns: this.toolRuns, duplicateReads: this.duplicateReads, stopped: this.stopped, lines };
   }
 
   /* ---------------- the prompt ---------------- */
@@ -290,7 +299,7 @@ export class Explorer {
     const accounts = (["a", "b", "c"] as const).filter((k) => actorToken(cfg.options, k)).map((k) => `${k}${actorMarker(this.options, k) ? ` (marqueur présent seulement dans ses objets: ${actorMarker(this.options, k)})` : ""}`);
     const b = this.d.budget;
     const tools = [
-      `http.request {method?, url, as?, headers?, body?}: une requête vers un hôte déclaré (url absolue ou chemin relatif à la cible). as = "a" | "b" | "c" | "anon" (le jeton du compte est ajouté par l'outil; tu ne le vois jamais). GET/HEAD seulement${this.d.mode === "full" ? "; une écriture (POST, PUT, PATCH, DELETE) passe par la porte et allowActiveTesting, et l'utilisateur est sollicité à chaque fois" : ""}.`,
+      `http.request {method?, url, as?, headers?, body?, fresh?}: une requête vers un hôte déclaré (url absolue ou chemin relatif à la cible). as = "a" | "b" | "c" | "anon" (le jeton du compte est ajouté par l'outil; tu ne le vois jamais). Une lecture strictement identique est évitée; mets fresh:true seulement quand une seconde observation est volontaire (stabilité/temps). GET/HEAD seulement${this.d.mode === "full" ? "; une écriture (POST, PUT, PATCH, DELETE) passe par la porte et allowActiveTesting, et l'utilisateur est sollicité à chaque fois" : ""}.`,
       `code.search {pattern, glob?, ignoreCase?}: regex sur les fichiers texte du projet (40 résultats max).`,
       `code.read {path, from?, to?}: lire un fichier du projet (300 lignes max), chemin relatif.`,
       `bundle.fetch {path?, grep?}: sans path, la liste des fichiers JS servis par le site et les routes qu'ils citent; avec path, le contenu (ou les lignes qui contiennent grep).`,
@@ -360,16 +369,26 @@ export class Explorer {
     const tool = name as ExploreTool;
     const parsed = TOOL_ARGS[tool].safeParse(args ?? {});
     if (!parsed.success) return refuse(`arguments invalides: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ").slice(0, 300)}`);
+    const readKey = readCacheKey(tool, parsed.data);
+    const previous = readKey ? this.readCache.get(readKey) : undefined;
+    if (previous) {
+      this.duplicateReads++;
+      this.d.emit("explore.repeat", { tool, summary: previous });
+      return { text: `DÉJÀ LU: ${previous}. Le résultat figure dans l'historique; change d'hypothèse ou utilise fresh:true si une nouvelle observation est nécessaire.`, summary: `duplicate read: ${previous}` };
+    }
     try {
+      let result: { text: string; summary: string };
       switch (tool) {
-        case "http.request": return await this.httpRequest(parsed.data as z.infer<typeof requestShape>, refuse);
-        case "code.search": return this.codeSearch(parsed.data as z.infer<(typeof TOOL_ARGS)["code.search"]>, refuse);
-        case "code.read": return this.codeRead(parsed.data as z.infer<(typeof TOOL_ARGS)["code.read"]>, refuse);
-        case "bundle.fetch": return await this.bundleFetch(parsed.data as z.infer<(typeof TOOL_ARGS)["bundle.fetch"]>, refuse);
-        case "toolbox.run": return await this.toolboxRun(parsed.data as z.infer<(typeof TOOL_ARGS)["toolbox.run"]>, refuse);
-        case "note.lead": return this.noteLead(parsed.data as z.infer<(typeof TOOL_ARGS)["note.lead"]>);
-        case "claim.submit": return await this.claim(parsed.data as z.infer<(typeof TOOL_ARGS)["claim.submit"]>, refuse);
+        case "http.request": result = await this.httpRequest(parsed.data as z.infer<typeof requestShape>, refuse); break;
+        case "code.search": result = this.codeSearch(parsed.data as z.infer<(typeof TOOL_ARGS)["code.search"]>, refuse); break;
+        case "code.read": result = this.codeRead(parsed.data as z.infer<(typeof TOOL_ARGS)["code.read"]>, refuse); break;
+        case "bundle.fetch": result = await this.bundleFetch(parsed.data as z.infer<(typeof TOOL_ARGS)["bundle.fetch"]>, refuse); break;
+        case "toolbox.run": result = await this.toolboxRun(parsed.data as z.infer<(typeof TOOL_ARGS)["toolbox.run"]>, refuse); break;
+        case "note.lead": result = this.noteLead(parsed.data as z.infer<(typeof TOOL_ARGS)["note.lead"]>); break;
+        case "claim.submit": result = await this.claim(parsed.data as z.infer<(typeof TOOL_ARGS)["claim.submit"]>, refuse); break;
       }
+      if (readKey && !/^(?:refused|error|aborted)/.test(result.summary)) this.readCache.set(readKey, result.summary);
+      return result;
     } catch (err) {
       if (this.ac.signal.aborted) return { text: "interrompu", summary: "aborted" };
       return { text: `ERREUR: ${one((err as Error).message, 300)}`, summary: `error: ${one((err as Error).message, 120)}` };
@@ -416,6 +435,10 @@ export class Explorer {
       this.log.push({ method, url, as, refused: "gate" });
       return refuse(`la porte a refusé ${method} ${pathOf(url)} (rien n'a été envoyé)`);
     }
+    // A write can change any response on the origin. Drop cached HTTP reads
+    // before sending it so GET -> write -> GET observes the post-write state,
+    // including when the mutation applies but its response socket drops.
+    if (!read) for (const key of this.readCache.keys()) if (key.startsWith("http.request:")) this.readCache.delete(key);
     const token = actorToken(this.d.config.options, as);
     let res: SafeResponse;
     try {
@@ -655,6 +678,19 @@ export class Explorer {
     this.found.push({ f, v: verdict });
     return { text: `${proven ? "PROUVÉ" : "NON PROUVÉ (gardé comme piste)"}: ${one(verdict.reason, 400)}`, summary: `${a.class} -> ${verdict.state}` };
   }
+}
+
+/** Exact read calls are idempotent by default. Writes and deliberate fresh reads never cache. */
+function readCacheKey(tool: ExploreTool, data: unknown): string | null {
+  if (tool === "http.request") {
+    const r = data as z.infer<typeof requestShape>;
+    const method = (r.method ?? "GET").toUpperCase();
+    if (r.fresh || (method !== "GET" && method !== "HEAD")) return null;
+    const { fresh: _fresh, ...rest } = r;
+    return `${tool}:${JSON.stringify(canonical({ ...rest, method }))}`;
+  }
+  return tool === "code.search" || tool === "code.read" || tool === "bundle.fetch"
+    ? `${tool}:${JSON.stringify(canonical(data))}` : null;
 }
 
 /** The stage that stopped an unproven claim, for the funnel: before any request, or the validator's own verdict. */

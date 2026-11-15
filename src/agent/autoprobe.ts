@@ -14,11 +14,48 @@ import type { Claim, ClaimVerdict, ValidatorEnv } from "./validators.js";
 import { validateClaim, actorToken } from "./validators.js";
 import { safeFetch } from "../core/net.js";
 import { ownerFieldValues, tokenIdentity } from "./markers.js";
+import type { SourceRouteHint } from "./source-routes.js";
 
 // Login routes by their usual names (the same in any API), not by a target's path.
 const LOGIN_PATH = /(^|\/)(login|signin|sign-in|log-in|authenticate)(\/|$)/i;
 
 export interface Endpoint { url: string; params?: string[]; graphql?: boolean; /** The route with ":id" where the object id goes. */ template?: string }
+
+// GET endpoints whose names conventionally trigger a state change. Keep this in
+// sync with the gate's deterministic denylist: source reconnaissance must never
+// turn a route literal into a logout/reset/delete request.
+const RISKY_SOURCE_PATH = /\/(?:[^/?]*[-_])?(logout|log-out|signout|sign-out|delete|destroy|remove|reset|unsubscribe|revoke|deactivate|cancel|purge|drop)(?:[-_][^/?]*)?(\/|$|\?)/i;
+const SOURCE_PARAM = /:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/** Convert source hints into the narrow, read-only object-route subset autoprobe
+ * can safely drive. A hint is reconnaissance only: its requests and proof still
+ * go through Scope and the existing deterministic validators. */
+export function sourceRoutesToEndpoints(hints: SourceRouteHint[], base: string): Endpoint[] {
+  let origin: URL;
+  try { origin = new URL(base); } catch { return []; }
+  if (origin.protocol !== "http:" && origin.protocol !== "https:") return [];
+  const out: Endpoint[] = [];
+  const seen = new Set<string>();
+  for (const hint of hints) {
+    if (hint.method.toUpperCase() !== "GET" || !hint.path.startsWith("/") || hint.path.startsWith("//") || hint.path.includes("*")) continue;
+    const rawPath = hint.path.split("?", 1)[0]!;
+    if (RISKY_SOURCE_PATH.test(rawPath)) continue;
+    const params = [...rawPath.matchAll(SOURCE_PARAM)];
+    if (params.length !== 1) continue;
+    const match = params[0]!;
+    const template = rawPath.slice(0, match.index) + ":id" + rawPath.slice(match.index! + match[0].length);
+    // Reject unresolved framework syntax or interpolation. Only the one declared
+    // object id may vary in a source-derived autoprobe route.
+    if (/[{}\[\]$<>]/.test(template) || template.includes(":id:")) continue;
+    let url: string;
+    try { url = new URL(template.replace(":id", "1"), origin).toString(); } catch { continue; }
+    const key = `GET ${new URL(url).origin}${template}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ url, template });
+  }
+  return out;
+}
 
 /** Build the systematic claim set for the discovered endpoints. Pure. `accounts`
  * are the configured test-account ids (a/b/c) that have a token. `origin` is the

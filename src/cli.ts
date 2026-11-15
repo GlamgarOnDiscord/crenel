@@ -22,7 +22,8 @@ import { triageLeads } from "./agent/triage.js";
 import { reviewBundle } from "./agent/bundle-review.js";
 import { checkModelEndpoint, claudeCli, DEFAULT_MODEL, detectClaude, parseEffort, selectLlm } from "./agent/llm.js";
 import { crawlLiveBundle, extractEndpoints, extractQueryParams } from "./checks/live-bundle.js";
-import { runAutoProbe, type Endpoint } from "./agent/autoprobe.js";
+import { runAutoProbe, sourceRoutesToEndpoints, type Endpoint } from "./agent/autoprobe.js";
+import { discoverSourceRoutes } from "./agent/source-routes.js";
 import { Scope } from "./core/scope.js";
 import { toJunit } from "./report/junit.js";
 import { SEVERITIES } from "./report/render.js";
@@ -534,8 +535,15 @@ async function main(): Promise<number> {
       const ps = [...new Set([...new URL(u).searchParams.keys(), ...(qp[p.split("?")[0]!] ?? [])])];
       return { url: u.split("?")[0]! + (ps.length ? `?${new URL(u).searchParams.toString()}` : ""), params: ps, graphql: /graphql|\/gql(\/|$)/i.test(p), template: /:id|\{[^}]+\}/.test(p) ? new URL(p.split("?")[0]!.replace(/\{[^}]+\}/g, ":id"), base + "/").pathname : undefined };
     });
+    const configDir = dirname(resolve(configPath));
+    const projectDir = isAbsolute(config.projectDir) ? config.projectDir : resolve(configDir, config.projectDir);
+    const known = new Set(endpoints.map((e) => `${e.url}\n${e.template ?? ""}`));
+    for (const endpoint of sourceRoutesToEndpoints(discoverSourceRoutes(projectDir), base)) {
+      const key = `${endpoint.url}\n${endpoint.template ?? ""}`;
+      if (!known.has(key)) { known.add(key); endpoints.push(endpoint); }
+    }
     log(`autoprobe: ${endpoints.length} endpoint(s) discovered; probing...`);
-    const env = { scope, projectDir: config.projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };
+    const env = { scope, projectDir, options: config.options, stagingUrl: config.scope.stagingUrl, checks: REGISTRY };
     const r = await runAutoProbe(env, { endpoints, origin: base }, { maxClaims: typeof flags.max === "string" ? Number(flags.max) : 200 });
     const findings = r.proven.map((v) => ({ check: "autoprobe", title: v.reason.slice(0, 160), state: "proven", severity: v.ceiling ?? "high", location: "/", proof: { evidence: v.reason }, validator: v.validator }));
     if (flags.json) process.stdout.write(JSON.stringify({ findings, tried: r.tried, proven: findings.length }, null, 2) + "\n");
