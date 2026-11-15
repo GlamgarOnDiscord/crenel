@@ -1,6 +1,6 @@
 # Checks
 
-Crenel runs 65 checks. Each is deterministic and read-only by default (the
+Crenel runs 66 checks. Each is deterministic and read-only by default (the
 [active mode](#active-mode) checks write, opt-in, on staging only), and marks every
 finding `proven` (a replayable match or request) or `unproven` (a lead to
 review). Only a **proven high or critical** gates CI. Checks read the directory
@@ -33,6 +33,7 @@ empty list runs every read-only check.
 | cors-reflection | The server echoes an arbitrary request Origin into Access-Control-Allow-Origin with Allow-Credentials: true (confirmed on two distinct origins) | yes (two reflected origins + credentials) | GETs with an Origin header on the declared host |
 | header-injection | A request parameter flows into a response header without CR/LF stripping (CRLF / response splitting) | yes (injected header appears with our nonce; benign control does not) | GETs on the declared host |
 | dependency-exposure | A dependency manifest (package.json) or lockfile (package-lock.json) served with a library at an EXACT version below a known advisory bound (a version range is not provable and is skipped) | yes (manifest/lockfile served + an exactly-pinned version below the bound) | GETs on the declared host |
+| vuln-libs | A front-end JavaScript library served at an EXACT version inside a documented vulnerable range (CVE/GHSA), read with the retire.js signature set: banner, minified code-shape signature, whole-file SHA-1, or the URL of an immutable versioned CDN. A version only a self-hosted file name states is a lead; a patched or unreadable version is nothing | yes (exact version read from the served script + inside the advisory range) | GETs of the page and its scripts on the declared host; off-scope CDN scripts are never fetched |
 | graphql-injection | A string argument on a schema-discovered GraphQL field is injectable (error-based or boolean SQL, OS command, or template) | yes (schema introspection + generic oracle with a benign control; boolean SQL requires all three responses error-free) | **injection payloads**: allowActiveTesting + `options.graphql-injection.enabled` |
 | graphql-ssrf | A schema-discovered GraphQL field (URL/host-like argument) fetches an attacker URL, proven out-of-band (the nonce rides the request path). Destructive-named fields are never fired; every probe is awaited | yes (OOB callback with a unique nonce) | **outbound-triggering**: a `stagingUrl` + allowActiveTesting + `options.graphql-ssrf.enabled` + a callbackHost the target can reach |
 | default-creds | A login accepts a well-known default/weak password for a declared account | yes (a dictionary password accepted while a random wrong password on the same account is rejected — the control rules out accept-all) | **login attempts**: a `stagingUrl` + declared `options.default-creds.endpoints` + allowActiveTesting + `options.default-creds.enabled` |
