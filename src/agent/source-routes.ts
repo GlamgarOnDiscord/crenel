@@ -11,9 +11,10 @@ export interface SourceRouteHint { method: string; path: string; file: string; l
 
 const SOURCE = /\.(?:[cm]?[jt]sx?|py|go|rb|java|kt|kts|php|cs)$/i;
 const METHODS = "get|post|put|patch|delete|options|head";
-const PATTERNS: { re: RegExp; method: (m: RegExpExecArray) => string; path: (m: RegExpExecArray) => string; uniquePath?: boolean }[] = [
-  // Express, Fastify, Koa routers, Hono and similar JS/TS APIs.
-  { re: new RegExp(`\\b(?:app|router|server|api|fastify)\\s*\\.\\s*(${METHODS})\\s*\\(\\s*[\"'\\x60]([^\"'\\x60]+)`, "i"), method: (m) => m[1]!, path: (m) => m[2]! },
+const PATTERNS: { re: RegExp; method: (m: RegExpExecArray) => string; path: (m: RegExpExecArray) => string; obj?: (m: RegExpExecArray) => string; uniquePath?: boolean }[] = [
+  // Express, Fastify, Koa routers, Hono and similar JS/TS APIs. The leading
+  // identifier is captured so a router mounted under a prefix can be resolved.
+  { re: new RegExp(`\\b(app|router|server|api|fastify)\\s*\\.\\s*(${METHODS})\\s*\\(\\s*[\"'\\x60]([^\"'\\x60]+)`, "i"), obj: (m) => m[1]!, method: (m) => m[2]!, path: (m) => m[3]! },
   // Flask/FastAPI decorators and equivalent decorator-based routers.
   { re: new RegExp(`@(?:app|router|api|blueprint)\\s*\\.\\s*(${METHODS})\\s*\\(\\s*[\"']([^\"']+)`, "i"), method: (m) => m[1]!, path: (m) => m[2]! },
   { re: /@(?:app|blueprint)\s*\.\s*route\s*\(\s*["']([^"']+)["'][^)]*methods\s*=\s*\[\s*["'](GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)/i, method: (m) => m[2]!, path: (m) => m[1]! },
@@ -34,6 +35,27 @@ const PATTERNS: { re: RegExp; method: (m: RegExpExecArray) => string; path: (m: 
 
 const sanePath = (s: string): boolean => s.startsWith("/") && s.length <= 500 && !/[\r\n]/.test(s);
 const NOISE_FILE = /(?:^|\/)(?:test|tests|__tests__|fixtures?|mocks?)(?:\/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/i;
+
+// `app.use("/api", router)` mounts a router under a prefix, so a route the
+// router declares as "/users/:id" actually serves "/api/users/:id". This is a
+// static, in-file resolution: a mechanism of the framework, not a target. Each
+// router maps to the prefixes it is mounted under (bounded, middleware-only
+// `use()` calls without a path literal are ignored).
+const MOUNT = /\b\w+\s*\.\s*use\s*\(\s*["'`](\/[^"'`]*)["'`]\s*,\s*([A-Za-z_$][\w$]*)/;
+function mountPrefixes(lines: string[]): Map<string, string[]> {
+  const mounts = new Map<string, string[]>();
+  for (const line of lines) {
+    const m = MOUNT.exec(line);
+    if (!m || isCommentedAt(line, m.index)) continue;
+    const prefix = m[1]!.replace(/\/+$/, "");
+    if (!prefix) continue;
+    const list = mounts.get(m[2]!) ?? [];
+    if (!list.includes(prefix) && list.length < 4) list.push(prefix);
+    mounts.set(m[2]!, list);
+  }
+  return mounts;
+}
+const joinMount = (prefix: string, path: string): string => (prefix + "/" + path.replace(/^\/+/, "")).replace(/\/{2,}/g, "/");
 
 function routePath(parts: string): string {
   const segments = parts.split("/").filter((part) => part && !/^\(.+\)$/.test(part) && part !== "index").map((part) => {
@@ -81,18 +103,29 @@ export function discoverSourceRoutes(projectDir: string, max = 120): SourceRoute
       out.push(route);
       if (out.length >= max) return out;
     }
-    for (const [i, raw] of body.split("\n").entries()) {
-      const line = raw.slice(0, 2000);
+    const lines = body.split("\n").map((raw) => raw.slice(0, 2000));
+    const mounts = mountPrefixes(lines);
+    for (const [i, line] of lines.entries()) {
       for (const p of PATTERNS) {
         const m = p.re.exec(line);
         if (!m || isCommentedAt(line, m.index)) continue;
         const path = p.path(m), method = p.method(m).toUpperCase();
         if (!sanePath(path)) continue;
         const key = `${method} ${path}`;
-        if (seen.has(key) || (p.uniquePath && [...seen].some((v) => v.endsWith(` ${path}`)))) continue;
-        seen.add(key);
-        out.push({ method, path, file: rel, line: i + 1 });
-        if (out.length >= max) return out;
+        if (!seen.has(key) && !(p.uniquePath && [...seen].some((v) => v.endsWith(` ${path}`)))) {
+          seen.add(key);
+          out.push({ method, path, file: rel, line: i + 1 });
+          if (out.length >= max) return out;
+        }
+        // A prefix-mounted router also serves its routes under that prefix.
+        for (const prefix of (p.obj ? mounts.get(p.obj(m)) : undefined) ?? []) {
+          if (path === prefix || path.startsWith(prefix + "/")) continue;
+          const mounted = joinMount(prefix, path), mkey = `${method} ${mounted}`;
+          if (!sanePath(mounted) || seen.has(mkey)) continue;
+          seen.add(mkey);
+          out.push({ method, path: mounted, file: rel, line: i + 1 });
+          if (out.length >= max) return out;
+        }
       }
     }
   }

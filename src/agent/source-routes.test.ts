@@ -60,6 +60,38 @@ test("source route reconnaissance derives Next.js app and pages API routes from 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("source route reconnaissance resolves prefixed router mounts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-source-mount-"));
+  try {
+    writeFileSync(join(dir, "server.ts"), [
+      'const router = express.Router();',
+      'router.get("/users/:id", h);',
+      'api.post("/orders", h);',
+      'app.get("/health", h);',
+      'app.use("/api/v2", router);',
+      'app.use("/api/v2", api);',
+      'app.use(cors());',
+      '// app.use("/ignored", router);',
+    ].join("\n"));
+    assert.deepEqual(discoverSourceRoutes(dir).map(({ method, path }) => `${method} ${path}`).sort(), [
+      "GET /users/:id", "GET /api/v2/users/:id",
+      "POST /orders", "POST /api/v2/orders",
+      "GET /health",
+    ].sort());
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("source route reconnaissance does not double a route already under its mount prefix", () => {
+  const dir = mkdtempSync(join(tmpdir(), "crenel-source-mount-abs-"));
+  try {
+    writeFileSync(join(dir, "server.ts"), [
+      'router.get("/api/users/:id", h);',
+      'app.use("/api", router);',
+    ].join("\n"));
+    assert.deepEqual(discoverSourceRoutes(dir).map(({ method, path }) => `${method} ${path}`), ["GET /api/users/:id"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("source route reconnaissance is bounded", () => {
   const dir = mkdtempSync(join(tmpdir(), "crenel-source-routes-cap-"));
   try {
