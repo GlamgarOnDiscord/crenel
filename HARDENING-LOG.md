@@ -17,7 +17,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 **Restant pour Tom (décision requise) :**
 - W1, W2 : isolation WSL (interop Windows, `/mnt/<lecteur>` en écriture) ; seul levier : `/etc/wsl.conf` de la distribution, à proposer dans `crenel tools install --wsl` avec confirmation.
 
-**Restant, faible, sans urgence :** T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales sur entrées courtes ou locales, dont `vercel-preview.ts:13`).
+**Restant, faible, sans urgence :** T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales restantes sur entrées courtes ou locales ; `vercel-preview.ts` corrigé).
 
 ## Synthèse priorisée
 
@@ -44,7 +44,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 | I2 | Faible | `.crenel/` lui-même peut être un lien (tout l'état de Crenel, pas seulement les secrets) | `src/agent/state.ts` (`StateStore`) | corrigé (refus d'un `.crenel/` lien, comme I1) |
 | I3 | Faible | `deliver` lit tout le corps de la réponse avant de le couper à 2 Ko | `src/integrations/deliver.ts:104` | corrigé (PR #58) |
 | R1 | Moyenne | ReDoS sur des corps de la cible (2 Mo) : meta refresh, `<a href>`, `<script>`, `<link>`, imports JS, table de chunks, version Next, `.env`, `.git/config`, chemins de pile | `src/core/html.ts` + 6 fichiers | corrigé (PR #56) |
-| R2 | Faible | Regex polynomiales sur entrées courtes ou locales (motif du modèle, extrait, Dockerfile, fichiers du projet, en-tête `Proxy-Authorization`) | voir détail | accepté (taille bornée) |
+| R2 | Faible | Regex polynomiales sur entrées courtes ou locales (motif du modèle, extrait, Dockerfile, fichiers du projet, en-tête `Proxy-Authorization`) | voir détail | `vercel-preview.ts` corrigé (linéaire + recall élargi) ; les autres acceptées (taille bornée) |
 
 ## Pour Tom : décision H2 (DNS rebinding)
 
@@ -152,3 +152,4 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 - 2026-11-11 : reprise. D1 (PR #54), I1 (PR #55), R1 (PR #56) corrigés avec tests de non-régression ; `pnpm audit` propre ; W1 à W3, I2, I3, R2 notés. Suite complète 712/713, 0 échec.
 - 2026-11-11 : L8 (PR #57) et I3 (PR #58) corrigés et mergés. Fin de la passe ; restant listé en tête.
 - 2026-11-16 : T3 corrigé (branche `security/t3-bare-host-target`) — `freeArgsProblem` refuse un hôte nu positionnel hors périmètre (défense en profondeur, le proxy le refusait déjà) ; seuls les positionnels sont vérifiés, jamais une valeur de flag en forme de domaine (zéro faux positif). Test dédié `src/toolbox/free-args.test.ts` (4/4). Restant : W1/W2 (arbitrage Tom), T4 (binaire nuclei), R2 (borné).
+- 2026-11-16 : R2 (volet `vercel-preview.ts`) corrigé — `VERCEL_HOST` passé d'un motif ambigu (`[a-z0-9-]+` chevauchant les groupes, backtracking polynomial : 4700 ms sur 40k tirets) à un motif linéaire `[a-z0-9]+(?:-+[a-z0-9]+)*\.vercel\.app` (0 ms). Bonus recall : matche aussi un hôte simple `projet.vercel.app` que l'ancien ratait. Test dédié `src/checks/vercel-preview.test.ts` (3/3). Les autres regex R2 restent bornées/acceptées.
