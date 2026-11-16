@@ -67,6 +67,11 @@ export function freeArgsProblem(tool: ToolName, args: unknown, scope: Scope): st
         if (f !== "tags" && !/^(http\/|\/opt\/nuclei-templates\/http\/)[\w./-]*$/.test(v)) return "nuclei templates only from the bundled http/ directory";
       }
     }
+    // A positional argument (not a flag, and not the value of a preceding flag)
+    // is a target: a scheme-less host there (e.g. `evil.example`) must be on a
+    // declared host, the same rule the scheme-URL branch enforces. T3: the proxy
+    // already refuses an undeclared host, this closes it at the argument too.
+    const positional = !a.startsWith("-") && (i === 0 || !String(args[i - 1]).startsWith("-"));
     const value = a.includes("=") && a.startsWith("-") ? a.slice(a.indexOf("=") + 1) : a;
     for (const piece of value.split(",")) {
       const p = piece.trim();
@@ -80,6 +85,15 @@ export function freeArgsProblem(tool: ToolName, args: unknown, scope: Scope): st
       if (/^(file|data|gopher|ftp|dict|ldap|jar):/i.test(p)) return `${p.slice(0, 20)} is not http(s)`;
       if (p.startsWith("~") || p.startsWith("@") || p.includes("..") || p.includes("\\") || /^[A-Za-z]:/.test(p)) return `${p.slice(0, 80)} looks like a path outside the tool's temp dir`;
       if (p.startsWith("/") && !p.startsWith(FREE_TMP) && !READ_ONLY_PREFIXES.some((r) => p.startsWith(r))) return `${p.slice(0, 80)} is a path outside the tool's temp dir (${FREE_TMP})`;
+      // A bare host[:port][/path] used as a target (domain with a dot, or an
+      // IPv4): require it be declared. Only positionals, so a flag value that
+      // happens to look like a domain (e.g. a match pattern) is never refused.
+      if (positional && p && !p.startsWith("/")) {
+        const hostport = p.split("/")[0]!;
+        const isHost = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?::\d{1,5})?$/i.test(hostport)
+          || /^\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?$/.test(hostport);
+        if (isHost && !scope.isHostAllowed(`http://${hostport}`)) return `${hostport.slice(0, 80)} is not in allowedHosts`;
+      }
     }
   }
   return null;
