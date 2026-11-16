@@ -17,7 +17,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 **Restant pour Tom (décision requise) :**
 - W1, W2 : isolation WSL (interop Windows, `/mnt/<lecteur>` en écriture) ; seul levier : `/etc/wsl.conf` de la distribution, à proposer dans `crenel tools install --wsl` avec confirmation.
 
-**Restant, faible, sans urgence :** T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales restantes sur entrées courtes ou locales ; `vercel-preview.ts` corrigé).
+**Restant, faible, sans urgence :** R2 (regex polynomiales restantes sur entrées courtes ou locales ; `vercel-preview.ts` corrigé). T4 vérifié le 16/11 : nuclei v3.11.1 respecte `-etags` même quand le template est choisi par `-id` ou par un chemin `-t` explicite (0 template chargé), donc les `DENIED_TAGS` imposés par Crenel tiennent quel que soit le mode de sélection.
 
 ## Synthèse priorisée
 
@@ -35,7 +35,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 | T1 | Élevée | Toolbox : un argument du modèle fait ignorer les options de sécurité de Crenel | `src/toolbox/free-args.ts:90-101` | corrigé (`7ee6910`, PR #50) |
 | T2 | Moyenne | Toolbox : alias d'écriture et de protocole absents des listes de refus | `src/toolbox/free-args.ts:33-43` | corrigé (`7ee6910`, PR #50) |
 | T3 | Faible | Toolbox : une cible sans schéma (`-u evil.example`) n'est pas vérifiée par `freeArgsProblem` | `src/toolbox/free-args.ts:70` | corrigé (un positionnel en forme d'hôte doit être déclaré ; valeurs de flag non touchées, zéro faux positif) |
-| T4 | À vérifier | nuclei : un template choisi par `-id` / `-t` respecte-t-il `-etags` ? | `src/toolbox/free-args.ts:61-65` | ouvert (comportement du binaire à confirmer) |
+| T4 | À vérifier | nuclei : un template choisi par `-id` / `-t` respecte-t-il `-etags` ? | `src/toolbox/free-args.ts:61-65` | vérifié le 16/11 (nuclei v3.11.1 : `-etags` filtre le template même sélectionné par `-id` ou par chemin `-t` explicite — 0 template chargé ; contrôles : dossier sans `-etags` → 1 chargé, avec `-etags` du tag → 0) |
 | D1 | Faible | Docker sans réseau : une annulation laisse tourner le conteneur | `src/toolbox/docker.ts:150` | corrigé (PR #54) |
 | W1 | Moyenne | WSL : l'interop Windows reste active (un outil compromis lance `cmd.exe`, `wsl.exe -u root`) | `src/toolbox/wsl.ts` | **arbitrage Tom** (avec le modèle réseau WSL) |
 | W2 | Moyenne | WSL : `/mnt/<lecteur>` monté en écriture pour l'outil | `src/toolbox/wsl.ts` | **arbitrage Tom** (déjà documenté) |
@@ -153,3 +153,4 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 - 2026-11-11 : L8 (PR #57) et I3 (PR #58) corrigés et mergés. Fin de la passe ; restant listé en tête.
 - 2026-11-16 : T3 corrigé (branche `security/t3-bare-host-target`) — `freeArgsProblem` refuse un hôte nu positionnel hors périmètre (défense en profondeur, le proxy le refusait déjà) ; seuls les positionnels sont vérifiés, jamais une valeur de flag en forme de domaine (zéro faux positif). Test dédié `src/toolbox/free-args.test.ts` (4/4). Restant : W1/W2 (arbitrage Tom), T4 (binaire nuclei), R2 (borné).
 - 2026-11-16 : R2 (volet `vercel-preview.ts`) corrigé — `VERCEL_HOST` passé d'un motif ambigu (`[a-z0-9-]+` chevauchant les groupes, backtracking polynomial : 4700 ms sur 40k tirets) à un motif linéaire `[a-z0-9]+(?:-+[a-z0-9]+)*\.vercel\.app` (0 ms). Bonus recall : matche aussi un hôte simple `projet.vercel.app` que l'ancien ratait. Test dédié `src/checks/vercel-preview.test.ts` (3/3). Les autres regex R2 restent bornées/acceptées.
+- 2026-11-16 : T4 vérifié (branche `security/t4-nuclei-etags-verified`) — question ouverte depuis le 11/11 : un template choisi par `-id` ou un chemin `-t` explicite contourne-t-il le `-etags` que Crenel impose ? Test déterministe avec le vrai binaire nuclei v3.11.1 : (A) `-id <tmpl>` + `-etags <tag-du-tmpl>` → 0 template chargé ; (B) `-t <fichier>` + `-etags <tag>` → 0 chargé ; contrôles (C) dossier sans `-etags` → 1 chargé, (D) dossier + `-etags <tag>` → 0 chargé. Conclusion : `-etags` filtre avant exécution quel que soit le mode de sélection, donc les `DENIED_TAGS` de `freeArgv` tiennent. Aucun changement de code nécessaire ; mise à jour de statut seule. Restant : W1/W2 (arbitrage Tom), R2 (borné).
