@@ -17,7 +17,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 **Restant pour Tom (décision requise) :**
 - W1, W2 : isolation WSL (interop Windows, `/mnt/<lecteur>` en écriture) ; seul levier : `/etc/wsl.conf` de la distribution, à proposer dans `crenel tools install --wsl` avec confirmation.
 
-**Restant, faible, sans urgence :** T3 (cible sans schéma dans `freeArgsProblem`, déjà refusée par le proxy), T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales sur entrées courtes ou locales, dont `vercel-preview.ts:13`).
+**Restant, faible, sans urgence :** T4 (à vérifier avec le vrai binaire nuclei), R2 (regex polynomiales sur entrées courtes ou locales, dont `vercel-preview.ts:13`).
 
 ## Synthèse priorisée
 
@@ -34,7 +34,7 @@ Passe terminée le 2026-11-11 : tous les points corrigeables sans décision sont
 | I9 | Info | `cmd /c start` sous Windows : échappement partiel de l'URL | `src/cli.ts:586` | accepté (URL interne) |
 | T1 | Élevée | Toolbox : un argument du modèle fait ignorer les options de sécurité de Crenel | `src/toolbox/free-args.ts:90-101` | corrigé (`7ee6910`, PR #50) |
 | T2 | Moyenne | Toolbox : alias d'écriture et de protocole absents des listes de refus | `src/toolbox/free-args.ts:33-43` | corrigé (`7ee6910`, PR #50) |
-| T3 | Faible | Toolbox : une cible sans schéma (`-u evil.example`) n'est pas vérifiée par `freeArgsProblem` | `src/toolbox/free-args.ts:70` | ouvert (le proxy la refuse ; défense en profondeur seulement) |
+| T3 | Faible | Toolbox : une cible sans schéma (`-u evil.example`) n'est pas vérifiée par `freeArgsProblem` | `src/toolbox/free-args.ts:70` | corrigé (un positionnel en forme d'hôte doit être déclaré ; valeurs de flag non touchées, zéro faux positif) |
 | T4 | À vérifier | nuclei : un template choisi par `-id` / `-t` respecte-t-il `-etags` ? | `src/toolbox/free-args.ts:61-65` | ouvert (comportement du binaire à confirmer) |
 | D1 | Faible | Docker sans réseau : une annulation laisse tourner le conteneur | `src/toolbox/docker.ts:150` | corrigé (PR #54) |
 | W1 | Moyenne | WSL : l'interop Windows reste active (un outil compromis lance `cmd.exe`, `wsl.exe -u root`) | `src/toolbox/wsl.ts` | **arbitrage Tom** (avec le modèle réseau WSL) |
@@ -151,3 +151,4 @@ Avis relayé par l'utilisateur : (a), la plus alignée avec le principe zéro d�
 - 2026-11-11 : famille toolbox, `free-args.ts` audité : T1 et T2 corrigés (PR #50, branche `security/toolbox-free-args`), T3 et T4 notés. Suite complète 628/629, 0 échec.
 - 2026-11-11 : reprise. D1 (PR #54), I1 (PR #55), R1 (PR #56) corrigés avec tests de non-régression ; `pnpm audit` propre ; W1 à W3, I2, I3, R2 notés. Suite complète 712/713, 0 échec.
 - 2026-11-11 : L8 (PR #57) et I3 (PR #58) corrigés et mergés. Fin de la passe ; restant listé en tête.
+- 2026-11-16 : T3 corrigé (branche `security/t3-bare-host-target`) — `freeArgsProblem` refuse un hôte nu positionnel hors périmètre (défense en profondeur, le proxy le refusait déjà) ; seuls les positionnels sont vérifiés, jamais une valeur de flag en forme de domaine (zéro faux positif). Test dédié `src/toolbox/free-args.test.ts` (4/4). Restant : W1/W2 (arbitrage Tom), T4 (binaire nuclei), R2 (borné).
