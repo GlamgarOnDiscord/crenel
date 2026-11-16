@@ -10,7 +10,11 @@ import type { Check, CheckContext, Finding } from "../core/types.js";
 import { safeFetch } from "../core/net.js";
 import { walkFiles, extOf } from "../core/walk.js";
 
-const VERCEL_HOST = /\b[a-z0-9-]+(?:-[a-z0-9]+)*-[a-z0-9-]+\.vercel\.app\b/gi;
+// Alphanumeric labels joined by hyphens, ending in .vercel.app. Each class is
+// hyphen-free and the hyphen is only an explicit separator, so there is no
+// ambiguous overlap and no polynomial backtracking (R2). It also matches a
+// bare `project.vercel.app`, which the earlier three-part pattern missed.
+export const VERCEL_HOST = /\b[a-z0-9]+(?:-+[a-z0-9]+)*\.vercel\.app\b/gi;
 const LOGIN_WALL = /vercel\.com\/(?:login|sso-api)|_vercel_sso_nonce|Authentication Required|vercel-authentication/i;
 
 export const vercelPreview: Check = {
